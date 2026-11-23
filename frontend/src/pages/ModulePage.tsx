@@ -4,13 +4,9 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { NavItem } from "@/components/layout/nav";
 
 const PLANS: Record<string, { summary: string; items: string[] }> = {
-  "/portfolio": { summary: "Positions, exposure and returns derived from the ledger.", items: [
-    "Open and closed positions", "Allocation and correlation exposure", "Portfolio snapshots and returns"] },
   "/risk": { summary: "Independent risk controller with final authority over every order.", items: [
     "Per-trade risk (dev default 0.5% of equity)", "Daily loss (2%) and max drawdown (10%) circuit breakers",
     "Max 5 open positions, 50% gross exposure, zero leverage on spot", "Manual kill switch and automatic abnormal-activity halt"] },
-  "/history": { summary: "Full decision provenance for every order.", items: [
-    "Orders, fills, fees and slippage", "Linked AI proposal, evidence and risk decision", "Exportable audit reports"] },
   "/analytics": { summary: "Objective performance evaluation.", items: [
     "Equity curve and drawdown", "Sharpe, Sortino, profit factor, turnover", "Model calibration and drift response"] },
 };

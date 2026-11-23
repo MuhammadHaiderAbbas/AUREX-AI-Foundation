@@ -81,6 +81,9 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await expect(page.getByTestId("metrics-table")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("oos-headline")).toContainText("Sharpe");
 
+  // Paper execution in the browser
+  await tradeFlow(page);
+
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
   await expect(page.getByText("Apple Inc.").first()).toBeVisible();
@@ -89,3 +92,52 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   expect(errors).toEqual([]);
 });
+
+// Shared with the static demo spec (kept in sync manually: Playwright specs don't share imports here).
+async function tradeFlow(page: import("@playwright/test").Page) {
+  await page.goto("markets?symbol=BTC-USD");
+  await page.getByRole("button", { name: "Buy", exact: true }).click();
+  const dialog = page.locator("dialog");
+  await expect(dialog.getByText("Tradable")).toBeVisible();
+  await dialog.getByLabel("Quantity").fill("0.05");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("Filled 0.05 BTC-USD");
+  // A resting limit far below the market
+  await dialog.getByRole("button", { name: "New order" }).click();
+  await dialog.getByLabel("Order type").selectOption("LIMIT");
+  await dialog.getByLabel("Quantity").fill("0.01");
+  await dialog.getByLabel("Limit price").fill("1000.00");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("LIMIT order working");
+  // Oversized order is rejected with a reason (no leverage)
+  await dialog.getByRole("button", { name: "New order" }).click();
+  await dialog.getByLabel("Quantity").fill("100");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("insufficient cash");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+
+  await page.getByRole("link", { name: "Portfolio", exact: true }).click();
+  await expect(page.getByRole("cell", { name: /^BTC-USD/ })).toBeVisible();
+  await expect(page.getByText("1 of 5 positions")).toBeVisible();
+
+  await page.getByRole("link", { name: "Trade History", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel order BTC-USD" }).click();
+  await expect(page.getByRole("button", { name: "Cancel order BTC-USD" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Rejected", exact: true }).click();
+  await page.getByRole("cell", { name: "REJECTED" }).first().click();
+  await expect(page.getByTestId("order-timeline")).toContainText("insufficient cash");
+
+  await page.getByRole("link", { name: "Portfolio", exact: true }).click();
+  await page.getByRole("button", { name: "Close BTC-USD" }).click();
+  await expect(dialog.getByLabel("Quantity")).toHaveValue("0.05");
+  await dialog.getByRole("button", { name: "Place paper sell order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("Filled 0.05 BTC-USD");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByText("No open positions")).toBeVisible();
+  await expect(page.getByText("Closed positions")).toBeVisible();
+
+  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
+  await expect(page.getByText("Trade · sell")).toBeVisible();
+  await expect(page.getByText(/^Sell 0.05 BTC-USD @/)).toBeVisible();
+}

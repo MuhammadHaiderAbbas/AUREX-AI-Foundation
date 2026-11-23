@@ -7,6 +7,7 @@ from app.models.ledger import LedgerAccount, LedgerEntry, LedgerTransaction
 from app.models.market import Asset, Instrument, MarketCandle, Watchlist, WatchlistItem
 from app.models.ml import MLModel, ModelEvaluation, ModelVersion
 from app.models.research import ResearchChunk, ResearchDocument, ResearchReport
+from app.models.trading import Execution, Order, OrderEvent, OrderStatus, PortfolioSnapshot, Position
 
 __all__ = [
     "AIAgent",
@@ -23,6 +24,12 @@ __all__ = [
     "WatchlistItem",
     "AccountMode",
     "Backtest",
+    "Execution",
+    "Order",
+    "OrderEvent",
+    "OrderStatus",
+    "PortfolioSnapshot",
+    "Position",
     "StrategyDef",
     "AccountStatus",
     "AuditLog",

@@ -27,6 +27,8 @@ ignore = ["B008", "S101", "B904", "UP046"]
 "app/agents/specialists.py" = ["E501"]
 "app/ml/*" = ["E501"]
 "app/backtest/*" = ["E501"]
+"app/trading/*" = ["E501"]
+"app/api/v1/trading.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-third-party = ["alembic"]

@@ -192,3 +192,67 @@ test("backtesting: optimise in-sample, evaluate out-of-sample", async ({ page })
   await expect(page.getByTestId("backtest-chart").locator("canvas").first()).toBeVisible();
   await expect(page.getByText(/sma crossover · ETH-USD/).first()).toBeVisible();
 });
+
+test("paper execution: market buy, limit order, cancel, close position, history", async ({ page }) => {
+  const email = `e2e-trade-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Paper Trader");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Paper Trader" })).toBeVisible();
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.getByLabel("Account name").fill("Trading paper");
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("link", { name: "Trading paper" })).toBeVisible();
+  await tradeFlow(page);
+});
+
+// Shared with the static demo spec (kept in sync manually: Playwright specs don't share imports here).
+async function tradeFlow(page: import("@playwright/test").Page) {
+  await page.goto("markets?symbol=BTC-USD");
+  await page.getByRole("button", { name: "Buy", exact: true }).click();
+  const dialog = page.locator("dialog");
+  await expect(dialog.getByText("Tradable")).toBeVisible();
+  await dialog.getByLabel("Quantity").fill("0.05");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("Filled 0.05 BTC-USD");
+  // A resting limit far below the market
+  await dialog.getByRole("button", { name: "New order" }).click();
+  await dialog.getByLabel("Order type").selectOption("LIMIT");
+  await dialog.getByLabel("Quantity").fill("0.01");
+  await dialog.getByLabel("Limit price").fill("1000.00");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("LIMIT order working");
+  // Oversized order is rejected with a reason (no leverage)
+  await dialog.getByRole("button", { name: "New order" }).click();
+  await dialog.getByLabel("Quantity").fill("100");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("insufficient cash");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+
+  await page.getByRole("link", { name: "Portfolio", exact: true }).click();
+  await expect(page.getByRole("cell", { name: /^BTC-USD/ })).toBeVisible();
+  await expect(page.getByText("1 of 5 positions")).toBeVisible();
+
+  await page.getByRole("link", { name: "Trade History", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel order BTC-USD" }).click();
+  await expect(page.getByRole("button", { name: "Cancel order BTC-USD" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Rejected", exact: true }).click();
+  await page.getByRole("cell", { name: "REJECTED" }).first().click();
+  await expect(page.getByTestId("order-timeline")).toContainText("insufficient cash");
+
+  await page.getByRole("link", { name: "Portfolio", exact: true }).click();
+  await page.getByRole("button", { name: "Close BTC-USD" }).click();
+  await expect(dialog.getByLabel("Quantity")).toHaveValue("0.05");
+  await dialog.getByRole("button", { name: "Place paper sell order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("Filled 0.05 BTC-USD");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByText("No open positions")).toBeVisible();
+  await expect(page.getByText("Closed positions")).toBeVisible();
+
+  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
+  await expect(page.getByText("Trade · sell")).toBeVisible();
+  await expect(page.getByText(/^Sell 0.05 BTC-USD @/)).toBeVisible();
+}

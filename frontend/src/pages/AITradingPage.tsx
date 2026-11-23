@@ -17,11 +17,11 @@ import { cn, relativeTime } from "@/lib/utils";
 function ExecutionControls() {
   return (
     <Card>
-      <CardHeader title="Autonomous execution" description="Paper order execution arrives in Phase 8; the independent risk gate in Phase 9" />
+      <CardHeader title="Autonomous execution" description="Manual paper orders are live (Markets, Portfolio). Agent proposals become executable only through the independent risk gate in Phase 9" />
       <CardBody className="flex flex-wrap items-center gap-2">
-        <Badge tone="neutral"><Power className="size-3" />Execution disabled</Badge>
-        <Button size="sm" variant="secondary" disabled title="Available in Phase 8"><Play />Start</Button>
-        <Button size="sm" variant="secondary" disabled title="Available in Phase 8"><Pause />Pause</Button>
+        <Badge tone="neutral"><Power className="size-3" />Autonomous execution disabled</Badge>
+        <Button size="sm" variant="secondary" disabled title="Available in Phase 9 (risk gate)"><Play />Start</Button>
+        <Button size="sm" variant="secondary" disabled title="Available in Phase 9 (risk gate)"><Pause />Pause</Button>
         <Button size="sm" variant="danger" disabled title="Available in Phase 9">Emergency stop</Button>
       </CardBody>
     </Card>

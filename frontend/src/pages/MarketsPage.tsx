@@ -1,4 +1,6 @@
 import { Radio, Search, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { OrderTicket } from "@/features/trading/OrderTicket";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PriceChart } from "@/charts/PriceChart";
@@ -63,6 +65,7 @@ export function MarketsPage() {
   const [search, setSearch] = useState("");
   const [timeframe, setTimeframe] = useState("1h");
   const [indicators, setIndicators] = useState<string[]>(["sma20", "rsi14"]);
+  const [ticket, setTicket] = useState<"BUY" | "SELL" | null>(null);
 
   const all = useMemo(() => Object.values(overview.data?.groups ?? {}).flat(), [overview.data]);
   const watched = new Set(watchlist.data?.items.map((i) => i.instrument.symbol));
@@ -157,9 +160,13 @@ export function MarketsPage() {
                 <div><dt className="text-subtle">Ask</dt><dd className="num">{formatPrice(sq?.ask, selected.instrument.price_decimals)}</dd></div>
                 <div><dt className="text-subtle">As of</dt><dd className="num">{sq ? formatDateTime(sq.as_of) : "—"}</dd></div>
               </dl>
-              {sq && !sq.tradable && (
-                <Badge tone="warning" className="ml-auto" title="The risk engine will refuse orders on closed markets, stale prices or reference-only rates.">Not tradable now</Badge>
-              )}
+              <div className="ml-auto flex items-center gap-2">
+                {sq && !sq.tradable && (
+                  <Badge tone="warning" title="Orders on closed markets or stale prices are rejected; limit and stop orders wait for the market.">Not tradable now</Badge>
+                )}
+                <Button size="sm" onClick={() => setTicket("BUY")}>Buy</Button>
+                <Button size="sm" variant="danger" onClick={() => setTicket("SELL")}>Sell</Button>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-3 px-5 py-2.5">
               <div className="flex rounded-md bg-surface-2 p-0.5" role="group" aria-label="Timeframe">
@@ -195,6 +202,7 @@ export function MarketsPage() {
           </Card>
         )}
       </div>
+      {selected && ticket && <OrderTicket open onClose={() => setTicket(null)} symbol={selected.instrument.symbol} side={ticket} />}
     </div>
   );
 }

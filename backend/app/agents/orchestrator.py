@@ -23,7 +23,7 @@ from app.agents.base import (
 )
 from app.agents.consensus import decide
 from app.core.errors import BusinessRuleViolation, NotFound
-from app.market.service import MarketService, ProviderUnavailable
+from app.market.service import MarketService, ProviderUnavailable, fx_rate
 from app.models import (
     AccountStatus,
     AIAgent,
@@ -61,26 +61,8 @@ class Orchestrator:
         return AccountSnap(str(acct.id), acct.base_currency, summary["equity"], summary["cash"])
 
     async def _fx(self, src: str, dst: str) -> float | None:
-        if src == dst:
-            return 1.0
-
-        async def rate(a: str, b: str) -> float | None:
-            for sym, invert in ((f"{a}/{b}", False), (f"{b}/{a}", True)):
-                inst = await self.db.scalar(select(Instrument).where(Instrument.symbol == sym))
-                if inst:
-                    try:
-                        q = await self.market.quote(inst)
-                    except ProviderUnavailable:
-                        return None
-                    last = float(q.last)
-                    return 1 / last if invert else last
-            return None
-
-        direct = await rate(src, dst)
-        if direct is not None:
-            return direct
-        a, b = await rate(src, "USD"), await rate("USD", dst)
-        return a * b if a is not None and b is not None else None
+        r = await fx_rate(self.market, src, dst)
+        return None if r is None else float(r)
 
     async def _docs(self, inst: Instrument, now: datetime) -> tuple[list[DocSignal], list[DocSignal]]:
         def sig(d: ResearchDocument) -> DocSignal:

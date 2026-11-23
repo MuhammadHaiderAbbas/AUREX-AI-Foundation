@@ -14,6 +14,8 @@ import { OverviewPage } from "@/pages/OverviewPage";
 import { ResearchPage } from "@/pages/ResearchPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WalletPage } from "@/pages/WalletPage";
+import { PortfolioPage } from "@/pages/PortfolioPage";
+import { HistoryPage } from "@/pages/HistoryPage";
 
 function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const { status, user } = useAuth();
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="ai-trading" element={<AITradingPage />} />
         <Route path="strategies" element={<ModelLabPage />} />
         <Route path="backtests" element={<BacktestPage />} />
+        <Route path="portfolio" element={<PortfolioPage />} />
+        <Route path="history" element={<HistoryPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

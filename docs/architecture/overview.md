@@ -14,7 +14,7 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
           │ integrations/  broker adapters                  (Phase 12)        │
           │ research/   ingestion, hybrid RAG, grounded reports (Phase 4)     │
           │ agents/     orchestrator, 8 specialists, consensus (Phase 5)      │
-          │ trading/    OMS + paper execution                (Phase 8)        │
+          │ trading/    OMS + paper execution                     ✓           │
           │ risk/       independent risk gate, kill switch   (Phase 9)        │
           └────────────────────────────────────┬─────────────────────────────┘
                                                ▼
@@ -72,6 +72,11 @@ weight. See `models.md`.
 fees, gap-aware stops, session closures, in-backtest daily-loss and drawdown breakers, four
 strategies including an agent-consensus replay, and one-shot out-of-sample evaluation. See
 `backtesting.md`.
+
+**Phase 8** added paper execution: an order management system with market, limit and stop
+orders, fills on the live bid/ask with the backtester's cost model, average-cost positions,
+balanced ledger postings for every trade, fee and realised P&L, a background order matcher,
+and portfolio valuation with equity snapshots. See `paper-trading.md`.
 
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that

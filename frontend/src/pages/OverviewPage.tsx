@@ -10,6 +10,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
 import { useLiveQuotes, useWatchlist } from "@/features/markets/hooks";
+import { usePortfolio } from "@/features/trading/hooks";
 import { Change, QuoteState, SourceBadge } from "@/pages/MarketsPage";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatMoney, formatPrice, relativeTime, sumDecimals } from "@/lib/utils";
@@ -35,6 +36,8 @@ const ACTION_LABELS: Record<string, string> = {
   "ml.retire": "Model retired",
   "ml.drift_check": "Model drift check",
   "backtest.run": "Backtest run",
+  "order.submit": "Paper order submitted",
+  "order.cancel": "Paper order cancelled",
   "admin.bootstrap": "Administrator account created",
   "admin.user.update": "User updated by administrator",
 };
@@ -57,6 +60,9 @@ export function OverviewPage() {
   const list = accounts.data ?? [];
   const totals = totalsByCurrency(list);
   const primary = totals[0];
+  const portfolio = usePortfolio(list[0]?.id);
+  const pf = portfolio.data;
+  const pnl = pf ? Number(pf.unrealised_pnl) + Number(pf.realised_pnl) : 0;
 
   return (
     <div className="space-y-6">
@@ -76,10 +82,12 @@ export function OverviewPage() {
           sub={totals.length > 1 ? totals.slice(1).map((t) => formatMoney(t.equity, t.ccy)).join(" · ") : `${list.length} paper account${list.length === 1 ? "" : "s"}`} />
         <Stat label="Available cash" icon={<CircleDollarSign />}
           value={primary ? formatMoney(primary.cash, primary.ccy) : "—"} sub="Virtual capital" />
-        <Stat label="Daily P&L" icon={<TrendingUp />} value={primary ? formatMoney(0, primary.ccy) : "—"} tone="muted" sub="No trades executed" />
-        <Stat label="Open positions" icon={<Briefcase />} value="0" tone="muted" sub="Execution in Phase 8" />
+        <Stat label="Total P&L" icon={<TrendingUp />} value={pf ? `${pnl > 0 ? "+" : ""}${formatMoney(pnl, pf.currency)}` : "—"}
+          tone={pnl > 0 ? "positive" : pnl < 0 ? "negative" : "muted"} sub={pf ? `Realised + unrealised · ${pf.account_name}` : "No trades executed"} />
+        <Stat label="Open positions" icon={<Briefcase />} value={<Link to="/portfolio" className="hover:text-accent">{pf?.open_positions ?? 0}</Link>}
+          tone={pf?.open_positions ? undefined : "muted"} sub={pf ? `Exposure ${(pf.exposure * 100).toFixed(1)}%` : "Paper execution"} />
         <Stat label="Max drawdown" icon={<ShieldAlert />} value="0.00%" tone="muted" sub="Limit 10% (planned)" />
-        <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone="accent" /> Advisory</span>} sub="Proposals only; execution in Phase 8" />
+        <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone="accent" /> Advisory</span>} sub="Proposals advisory; risk gate in Phase 9" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
@@ -144,7 +152,6 @@ export function OverviewPage() {
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
-            ["Paper execution", "Phase 8", "Orders, fills, positions"],
             ["Analytics", "Phase 10", "Performance and audit reports"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">

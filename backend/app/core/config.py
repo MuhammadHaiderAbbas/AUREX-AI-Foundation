@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Hosts that admins may ingest from by URL/RSS. Empty = URL ingestion disabled.
     research_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
+    order_matcher_interval_seconds: float = 5.0
+
     @field_validator("cors_origins", "supported_currencies", "research_allowed_hosts",
                      mode="before")
     @classmethod
