@@ -63,6 +63,11 @@ reports with quote-checked citations from an offline engine or Claude. See
 consensus engine that defaults to NO TRADE, and inert, sized trade proposals awaiting the
 risk gate. See `agents.md`.
 
+**Phase 6** added quantitative models: leak-free features, logistic, random forest and
+LightGBM models, purged walk-forward validation after costs, nine promotion gates, a model
+registry with human promotion, PSI drift monitoring, and an ML agent with zero default
+weight. See `models.md`.
+
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that
 first needs them, so the schema never contains unused, untested tables.

@@ -4,6 +4,7 @@ from app.models.audit import AuditLog
 from app.models.identity import Role, RoleName, User, UserSession, UserSettings
 from app.models.ledger import LedgerAccount, LedgerEntry, LedgerTransaction
 from app.models.market import Asset, Instrument, MarketCandle, Watchlist, WatchlistItem
+from app.models.ml import MLModel, ModelEvaluation, ModelVersion
 from app.models.research import ResearchChunk, ResearchDocument, ResearchReport
 
 __all__ = [
@@ -14,6 +15,9 @@ __all__ = [
     "Asset",
     "Instrument",
     "MarketCandle",
+    "MLModel",
+    "ModelEvaluation",
+    "ModelVersion",
     "Watchlist",
     "WatchlistItem",
     "AccountMode",

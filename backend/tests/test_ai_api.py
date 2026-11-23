@@ -50,7 +50,7 @@ async def test_agent_registry(client):
     h = await auth_headers(client)
     agents = (await client.get(f"{API}/ai/agents", headers=h)).json()
     names = [a["name"] for a in agents]
-    assert set(names) == {"technical", "quant", "fundamental", "news", "sentiment", "regime", "portfolio", "risk"}
+    assert set(names) == {"technical", "quant", "fundamental", "news", "sentiment", "ml", "regime", "portfolio", "risk"}
     assert sum(a["weight"] for a in agents if a["kind"] == "directional") == 1.0
 
 
@@ -60,7 +60,7 @@ async def test_run_returns_explained_decision(client):
     assert r.status_code == 201, r.text
     run = r.json()
     assert [f["agent"] for f in run["findings"]] == [
-        "technical", "quant", "regime", "fundamental", "news", "sentiment", "portfolio", "risk"]
+        "technical", "quant", "regime", "fundamental", "news", "sentiment", "ml", "portfolio", "risk"]
     assert run["decision"] in ("BUY", "NO_TRADE")
     assert run["decision"] == "BUY" or run["reasons"]           # NO_TRADE is always explained
     assert run["context"]["account"]["id"] == acct["id"] and run["context"]["bars_1h"] > 100

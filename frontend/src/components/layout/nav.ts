@@ -17,7 +17,7 @@ export const NAV: NavItem[] = [
   { to: "/markets", label: "Markets", description: "Crypto, Forex, Stocks and ETFs", icon: CandlestickChart },
   { to: "/ai-trading", label: "AI Trading", description: "Agent department and trade proposals", icon: Bot },
   { to: "/research", label: "AI Research Lab", description: "Agents and research reports", icon: BrainCircuit },
-  { to: "/strategies", label: "Strategies", description: "Model and strategy management", icon: Workflow, phase: 7 },
+  { to: "/strategies", label: "Model Lab", description: "Models, walk-forward validation and registry", icon: Workflow },
   { to: "/portfolio", label: "Portfolio", description: "Positions and performance", icon: PieChart, phase: 8 },
   { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert, phase: 9 },
   { to: "/wallet", label: "Wallet", description: "Virtual account and ledger", icon: Wallet },

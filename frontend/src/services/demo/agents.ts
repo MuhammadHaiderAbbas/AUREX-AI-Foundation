@@ -227,8 +227,8 @@ export function riskCheck(c: Ctx, reg: Finding, nw: Finding, pf: Finding): Findi
   };
 }
 
-export const DEFAULT_WEIGHTS: Record<string, number> = { technical: 0.35, quant: 0.25, fundamental: 0.15, news: 0.15, sentiment: 0.1 };
-export const ORDER = ["technical", "quant", "regime", "fundamental", "news", "sentiment", "portfolio", "risk"];
+export const DEFAULT_WEIGHTS: Record<string, number> = { technical: 0.35, quant: 0.25, fundamental: 0.15, news: 0.15, sentiment: 0.1, ml: 0 };
+export const ORDER = ["technical", "quant", "regime", "fundamental", "news", "sentiment", "ml", "portfolio", "risk"];
 
 export function runAgents(c: Ctx, enabled: Set<string>) {
   const f: Record<string, Finding> = {};
@@ -240,6 +240,8 @@ export function runAgents(c: Ctx, enabled: Set<string>) {
   };
   call("technical", () => technical(c)); call("quant", () => quant(c)); call("regime", () => regime(c));
   call("fundamental", () => fundamental(c)); call("news", () => news(c)); call("sentiment", () => sentimentAgent(c));
+  // Models trained on synthetic data can never be promoted, so the demo never has a champion.
+  call("ml", () => abstain("ml", "No promoted champion model for this instrument"));
   call("portfolio", () => portfolio(c, f.technical!.data.atr as number | undefined));
   call("risk", () => riskCheck(c, f.regime!, f.news!, f.portfolio!));
   return f;

@@ -206,13 +206,15 @@ class MarketService:
             "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume,
             "source": source,
         } for c in candles]
-        stmt = insert(MarketCandle).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["instrument_id", "timeframe", "open_time"],
-            set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume",
-                                                 "source")} | {"ingested_at": func.now()},
-        )
-        await self.db.execute(stmt)
+        # Postgres caps bind parameters at 32,767 per statement (9 per row): upsert in batches.
+        for i in range(0, len(rows), 2000):
+            stmt = insert(MarketCandle).values(rows[i:i + 2000])
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["instrument_id", "timeframe", "open_time"],
+                set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume",
+                                                     "source")} | {"ingested_at": func.now()},
+            )
+            await self.db.execute(stmt)
         await self.db.commit()
         return len(rows)
 

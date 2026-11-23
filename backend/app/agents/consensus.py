@@ -20,7 +20,7 @@ from app.agents.base import AgentContext, Finding
 from app.agents.specialists import STOP_ATR, TARGET_ATR
 
 DIRECTIONAL_WEIGHTS = {"technical": 0.35, "quant": 0.25, "fundamental": 0.15, "news": 0.15,
-                       "sentiment": 0.10}
+                       "sentiment": 0.10, "ml": 0.0}
 MIN_COVERAGE, MIN_NET, MIN_AGREEMENT = 0.5, 0.20, 0.6
 STRATEGY_ID = "consensus_trend_v1"
 PROPOSAL_TTL = timedelta(hours=4)

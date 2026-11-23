@@ -151,3 +151,23 @@ test("agent desk: run analysis, explained decision, evidence", async ({ page }) 
   await page.getByRole("tab", { name: "Agents" }).click();
   await expect(page.getByText("Risk Agent")).toBeVisible();
 });
+
+test("model lab: train, gated promotion, drift check", async ({ page }) => {
+  test.skip(!process.env.AUREX_E2E_ADMIN_EMAIL, "training requires an admin");
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
+  await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: "Model Lab" }).click();
+  await page.getByLabel("Instrument").selectOption("BTC-USD");
+  await page.getByLabel("Algorithm").selectOption("logistic");
+  await page.getByLabel("History").selectOption("60");
+  await page.getByRole("button", { name: "Train & validate" }).click();
+  await expect(page.getByTestId("gates")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("gates")).toContainText("Trained on real market data");
+  await expect(page.getByText(/deterministic synthetic generator/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Promote" })).toBeDisabled();
+  await expect(page.getByTestId("equity-chart").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Drift check" }).click();
+  await expect(page.getByText(/max PSI/)).toBeVisible({ timeout: 60_000 });
+});

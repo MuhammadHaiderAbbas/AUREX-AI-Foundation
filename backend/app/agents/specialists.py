@@ -222,6 +222,26 @@ def fundamental(ctx: AgentContext) -> Finding:
     )
 
 
+def ml_model(ctx: AgentContext) -> Finding:
+    m = ctx.ml
+    if not m:
+        return Finding.abstain("ml", "No promoted champion model for this instrument")
+    if not m.get("eligible"):
+        return Finding.abstain("ml", f"Champion v{m['version']} is not eligible: {m.get('note', '')}")
+    p = m.get("probability")
+    if p is None:
+        return Finding.abstain("ml", "Not enough recent bars to compute model features")
+    score = st.clip((p - 0.5) * 4)
+    return Finding(
+        "ml", "ok", 1 if p > 0.55 else -1 if p < 0.45 else 0, round(score, 3), 0.6,
+        f"Champion {m['name']} v{m['version']}: P(up over {m['horizon']}h) = {p:.0%}. "
+        f"Validated out-of-sample AUC {m['auc']:.2f}, Brier {m['brier']:.3f}.",
+        [Evidence("P(up)", f"{p:.1%}", f"{m['horizon']}h horizon"),
+         Evidence("Model", f"{m['name']} v{m['version']}", f"trained on {m['data_source']} data"),
+         Evidence("Out-of-sample AUC", f"{m['auc']:.3f}"), Evidence("Out-of-sample Brier", f"{m['brier']:.4f}")],
+    )
+
+
 # --- portfolio & risk (gates) ------------------------------------------------------------
 def portfolio(ctx: AgentContext, atr_1h: float | None) -> Finding:
     acct, q = ctx.account, ctx.quote

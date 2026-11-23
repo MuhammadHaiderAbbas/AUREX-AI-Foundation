@@ -94,3 +94,18 @@ enforced by a database constraint. Bearish views never become short orders. The 
 risk agent cannot approve anything; the independent risk gate (Phase 9) has final authority.
 **Why.** This follows the blueprint's core rule: the AI never talks to an exchange, and the
 risk controller can reject anything, regardless of AI confidence.
+
+## ADR-013 Gated, human promotion of models
+**Decision.** Training only ever produces *candidates*. A candidate becomes champion only if
+all nine walk-forward gates pass and an administrator promotes it (audited). Drift on a
+champion removes its eligibility but never triggers automatic retraining or promotion.
+**Why.** This follows the blueprint rule that the AI must never automatically rewrite its own
+production trading rules. It keeps a human accountable for every model that can influence
+proposals.
+
+## ADR-014 Treat implausible results as failures
+**Decision.** Out-of-sample Sharpe above 4 or AUC above 0.75, and any training on synthetic
+data, fail validation.
+**Why.** Results like these on liquid markets are far likelier to come from look-ahead
+leakage or an artificial data source than from a real edge. Our own synthetic generator
+produces exactly such results, which is what motivated the gate.

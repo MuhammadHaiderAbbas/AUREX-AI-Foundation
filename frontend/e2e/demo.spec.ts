@@ -60,6 +60,18 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   for (const a of ["technical", "quant", "regime", "news", "portfolio", "risk"]) await expect(page.getByTestId(`agent-${a}`)).toBeVisible();
   await expect(page.getByTestId("agent-news")).not.toContainText("Error");
 
+  // Model Lab in the browser: logistic regression with walk-forward validation
+  await page.getByRole("link", { name: "Model Lab" }).click();
+  await page.getByLabel("Instrument").selectOption("EUR/USD");
+  await page.getByLabel("Algorithm").selectOption("logistic");
+  await page.getByLabel("History").selectOption("60");
+  await page.getByRole("button", { name: "Train & validate" }).click();
+  await expect(page.getByTestId("gates")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("gates")).toContainText("Plausible performance");
+  await expect(page.getByRole("button", { name: "Promote" })).toBeDisabled();
+  await page.getByRole("button", { name: "Drift check" }).click();
+  await expect(page.getByText(/max PSI/)).toBeVisible();
+
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
   await expect(page.getByText("Apple Inc.").first()).toBeVisible();
