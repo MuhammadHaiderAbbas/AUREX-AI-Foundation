@@ -7,5 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   use: { baseURL: process.env.AUREX_WEB_URL ?? "http://localhost:5173", trace: "off" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: { command: "npm run dev", url: "http://localhost:5173", reuseExistingServer: true, timeout: 60_000 },
+  webServer: process.env.AUREX_WEB_URL
+    ? undefined
+    : { command: "npm run dev", url: "http://localhost:5173", reuseExistingServer: true, timeout: 60_000 },
 });

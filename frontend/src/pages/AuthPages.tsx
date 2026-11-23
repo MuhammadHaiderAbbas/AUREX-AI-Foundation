@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input } from "@/components/ui/form";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { api, ApiError, isDemo, type TradingAccount } from "@/services/api";
 
 function AuthLayout({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
@@ -33,6 +34,12 @@ function AuthLayout({ title, subtitle, children }: { title: string; subtitle: st
           <Logo className="mb-8 lg:hidden" />
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
+          {isDemo && (
+            <div className="mt-5 rounded-md border border-info/40 bg-info/10 px-3 py-2.5 text-xs leading-relaxed text-info">
+              <strong>Public demo.</strong> This build runs entirely in your browser: accounts, balances and prices
+              are simulated and stored only on this device. The production system runs the FastAPI backend.
+            </div>
+          )}
           <div className="mt-6">{children}</div>
         </div>
       </section>
@@ -68,6 +75,7 @@ export function LoginPage() {
           <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Button type="submit" className="w-full" disabled={busy}>{busy && <Spinner className="text-accent-fg" />}Sign in</Button>
+        {isDemo && <DemoLaunch onError={setError} />}
         <p className="text-center text-xs text-muted">No account? <Link to="/register" className="text-accent hover:underline">Create one</Link></p>
       </form>
     </AuthLayout>
@@ -109,5 +117,33 @@ export function RegisterPage() {
         <p className="text-center text-xs text-muted">Already registered? <Link to="/login" className="text-accent hover:underline">Sign in</Link></p>
       </form>
     </AuthLayout>
+  );
+}
+
+const DEMO_EMAIL = "demo@aurex.example";
+const DEMO_PASSWORD = "Demo-Account-2026!";
+
+/** One-click entry for the static demo: creates the demo user and a funded paper account. */
+function DemoLaunch({ onError }: { onError: (e: unknown) => void }) {
+  const { register, login } = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  async function launch() {
+    setBusy(true);
+    try {
+      try { await register(DEMO_EMAIL, "Demo Trader", DEMO_PASSWORD); }
+      catch (e) { if (!(e instanceof ApiError && e.status === 409)) throw e; }
+      await login(DEMO_EMAIL, DEMO_PASSWORD);
+      const accounts = await api<TradingAccount[]>("/accounts");
+      if (accounts.length === 0) {
+        await api("/accounts", { method: "POST", json: { name: "Demo paper account", base_currency: "USD", starting_balance: "100000" } });
+      }
+      navigate("/", { replace: true });
+    } catch (e) { onError(e); } finally { setBusy(false); }
+  }
+  return (
+    <Button type="button" variant="secondary" className="w-full" onClick={launch} disabled={busy}>
+      {busy && <Spinner />}Launch demo
+    </Button>
   );
 }

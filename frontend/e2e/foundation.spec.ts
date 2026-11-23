@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const PASSWORD = "Correct-Horse-42";
 
+test.describe.configure({ mode: "serial" });
+test.skip(!!process.env.AUREX_E2E_DEMO, "requires the API backend");
+
 test("register, fund a paper account, move virtual cash, persist session", async ({ page }) => {
   const email = `e2e-${Date.now()}@example.com`;
   await page.goto("/register");
@@ -72,4 +75,24 @@ test("non-admin users do not see administration", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("markets stream live quotes and render charts", async ({ page }) => {
+  const email = `e2e-m-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Market User");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Market User" })).toBeVisible();
+  await expect(page.getByText("Watchlist").first()).toBeVisible();
+
+  await page.getByRole("link", { name: "Markets", exact: true }).click();
+  await expect(page.getByText("Streaming")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("price-chart").locator("canvas").first()).toBeVisible();
+  await page.getByRole("tab", { name: "ETFs" }).click();
+  await page.getByRole("button", { name: "Add QQQ to watchlist" }).click();
+  await expect(page.getByRole("button", { name: "Remove QQQ from watchlist" })).toBeVisible();
+  await page.getByRole("button", { name: /^QQQ Invesco/ }).click();
+  await expect(page.getByTestId("last-price")).not.toHaveText("—");
 });

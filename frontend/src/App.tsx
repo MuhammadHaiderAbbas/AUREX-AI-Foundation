@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/feedback";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { AdminPage } from "@/pages/AdminPage";
 import { LoginPage, RegisterPage } from "@/pages/AuthPages";
+import { MarketsPage } from "@/pages/MarketsPage";
 import { ModulePage } from "@/pages/ModulePage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/register" element={<RegisterPage />} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<OverviewPage />} />
+        <Route path="markets" element={<MarketsPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

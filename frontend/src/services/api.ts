@@ -6,6 +6,7 @@
  *   replayed token as theft, so two parallel refreshes would log the user out.
  */
 export const API_BASE = "/api/v1";
+export const isDemo = import.meta.env.VITE_DEMO_MODE === "true";
 
 export class ApiError extends Error {
   constructor(
@@ -16,6 +17,15 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Real network in normal builds; the in-browser demo server in the GitHub Pages build. */
+async function transport(url: string, init: RequestInit): Promise<Response> {
+  if (isDemo) {
+    const { demoFetch } = await import("./demo/server");
+    return demoFetch(url, init);
+  }
+  return fetch(url, init);
 }
 
 let accessToken: string | null = null;
@@ -40,7 +50,7 @@ async function parse(res: Response) {
 
 export function refreshSession(): Promise<TokenResponse | null> {
   if (!refreshInFlight) {
-    refreshInFlight = fetch(`${API_BASE}/auth/refresh`, { method: "POST", credentials: "same-origin" })
+    refreshInFlight = transport(`${API_BASE}/auth/refresh`, { method: "POST", credentials: "same-origin" })
       .then(async (res) => {
         if (!res.ok) return null;
         const data = (await res.json()) as TokenResponse;
@@ -62,7 +72,7 @@ export async function api<T>(
   if (init.json !== undefined) headers.set("Content-Type", "application/json");
   if (init.idempotencyKey) headers.set("Idempotency-Key", init.idempotencyKey);
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await transport(`${API_BASE}${path}`, {
     ...init,
     headers,
     credentials: "same-origin",
@@ -156,3 +166,63 @@ export interface SystemInfo {
   registration_open: boolean;
   supported_currencies: string[];
 }
+
+// ---- Market data (Phase 3) -------------------------------------------------
+export type AssetClass = "CRYPTO" | "FX" | "STOCK" | "ETF";
+
+export interface Instrument {
+  symbol: string;
+  slug: string;
+  display_name: string;
+  asset_class: AssetClass;
+  instrument_type: "SPOT" | "SPOT_FX" | "SHARE" | "ETF";
+  venue: string;
+  market: "CRYPTO_24_7" | "FX_24_5" | "US_EQUITY" | "UK_EQUITY";
+  base_currency: string;
+  quote_currency: string;
+  price_decimals: number;
+  tick_size: string;
+  lot_size: string;
+}
+
+export interface Quote {
+  symbol: string;
+  last: string;
+  bid: string;
+  ask: string;
+  prev_close: string | null;
+  change: string | null;
+  change_pct: string | null;
+  as_of: string;
+  source: string;
+  market_open: boolean;
+  stale: boolean;
+  tradable: boolean;
+  age_seconds: number;
+}
+
+export interface InstrumentWithQuote { instrument: Instrument; quote: Quote | null }
+
+export interface MarketStatus { market: string; label: string; is_open: boolean; next_change: string | null }
+
+export interface MarketOverview {
+  markets: MarketStatus[];
+  groups: Record<AssetClass, InstrumentWithQuote[]>;
+  data_mode: "synthetic" | "live";
+}
+
+export interface Candle { open_time: string; open: string; high: string; low: string; close: string; volume: string }
+type Line = (number | null)[];
+export interface CandlesResponse {
+  symbol: string;
+  timeframe: string;
+  source: string | null;
+  candles: Candle[];
+  indicators: Partial<{
+    sma20: Line; sma50: Line; ema20: Line; ema50: Line; rsi14: Line;
+    bb20: { upper: Line; middle: Line; lower: Line };
+    macd: { macd: Line; signal: Line; histogram: Line };
+  }>;
+}
+
+export interface Watchlist { id: string; name: string; items: InstrumentWithQuote[] }

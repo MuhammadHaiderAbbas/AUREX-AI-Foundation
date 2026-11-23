@@ -42,6 +42,16 @@ class Settings(BaseSettings):
         default_factory=lambda: ["USD", "GBP", "EUR"]
     )
 
+    # Market data (Phase 3). "synthetic" works offline and is the default; "live" routes
+    # crypto to Coinbase and FX to ECB reference rates (stocks/ETFs stay synthetic until
+    # a licensed equity feed is configured).
+    market_data_mode: Literal["synthetic", "live"] = "synthetic"
+    coinbase_base_url: str = "https://api.exchange.coinbase.com"
+    frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
+    quote_cache_seconds: float = 1.0
+    stream_interval_seconds: float = 2.0
+    max_stream_symbols: int = 50
+
     @field_validator("cors_origins", "supported_currencies", mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:

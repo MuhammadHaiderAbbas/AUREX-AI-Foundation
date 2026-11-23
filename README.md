@@ -5,9 +5,17 @@ Autonomous multi-market research and **paper-trading** platform covering crypto,
 > **Stage 1: virtual capital only.** No real money is moved, no broker is connected,
 > and live trading is disabled in both the code and the database.
 
-This repository holds **Phase 1: Foundation v1**. It is a modular-monolith backend
-(FastAPI), a React terminal UI, a double-entry virtual ledger, authentication with
-roles, a tamper-evident audit trail, a Docker stack and CI.
+**Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/ (click **Launch demo**).
+The demo is a static build that runs entirely in your browser with simulated data
+(see ADR-008). The real system runs the FastAPI backend below.
+
+Delivered so far:
+- **Phase 1, Foundation:** FastAPI modular monolith, React terminal UI, double-entry
+  virtual ledger, auth with roles, a tamper-evident audit trail, Docker and CI.
+- **Phase 3, Market data:** instrument registry for crypto, FX, stocks and ETFs; DST-aware
+  session calendars; a provider interface (synthetic, Coinbase, ECB); stored candles;
+  indicators; stale and tradable quote rules; watchlists; WebSocket streaming; candlestick
+  charts.
 
 ## Quick start (Docker)
 
@@ -36,9 +44,10 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres) | `make backend-test` | 39 tests: auth flows, token rotation/reuse, RBAC, tenant isolation, ledger maths, DB-level invariants, concurrency, idempotency, audit tamper detection, config guards |
+| Backend (pytest, real Postgres) | `make backend-test` | 68 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → create paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC in UI |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts |
+| Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
 
@@ -50,11 +59,14 @@ backend/          FastAPI app, Alembic migrations, tests
   app/core/       config, security, errors, middleware, rate limiting
   app/models/     SQLAlchemy models (identity, accounts, ledger, audit)
   app/services/   auth, accounts, ledger, audit
+  app/market/     calendars, providers, indicators, market service (Phase 3)
   app/{agents,trading,risk,research,integrations}/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
   src/features/   auth + accounts state
-  src/pages/      Overview, Wallet, Settings, Administration, phase placeholders
+  src/pages/      Overview, Markets, Wallet, Settings, Administration, phase placeholders
+  src/charts/     candlestick chart (TradingView Lightweight Charts)
+  src/services/demo/  in-browser API used only by the GitHub Pages demo build
   e2e/            Playwright specs
 docs/             architecture, ADRs, data model, API, security, compliance
 infrastructure/   monitoring and deployment (populated in Phase 11)
@@ -73,7 +85,21 @@ infrastructure/   monitoring and deployment (populated in Phase 11)
 - [x] Hash-chained audit logging with verification
 - [x] Automated backend, build and end-to-end tests
 
-**Next: Phase 2/3.** Design-system expansion and market-data infrastructure: asset
-registry, provider adapters, historical OHLCV and streaming.
+## Phase 3 deliverables
+
+- [x] Asset and instrument registry (cash instruments only: spot, spot FX, shares, ETFs)
+- [x] Market session calendars (24/7, 24/5, NYSE, LSE; DST and holidays)
+- [x] Provider interface: synthetic (default), Coinbase (crypto), ECB reference (FX)
+- [x] Candle storage with gap-fill and admin backfill; 1m–1d timeframes
+- [x] Indicators: SMA, EMA, RSI, Bollinger Bands, MACD
+- [x] Stale-data protection and `tradable` flag for the future risk gate
+- [x] Watchlists and WebSocket quote streaming
+- [x] Markets screen with candlestick charts; public GitHub Pages demo
+
+Market data runs in `synthetic` mode by default. Set `AUREX_MARKET_DATA_MODE=live` for
+Coinbase and ECB data (the server needs outbound access to those hosts).
+
+**Next: Phase 4, the financial research engine:** news and filings ingestion, extraction,
+RAG with pgvector, and cited research reports.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.
