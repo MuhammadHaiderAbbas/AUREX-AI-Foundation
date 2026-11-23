@@ -27,6 +27,10 @@ Delivered so far:
   models; purged walk-forward validation against baselines after costs; nine promotion gates
   (including plausibility and real-data checks); a model registry with human promotion; PSI
   drift monitoring; and an ML agent.
+- **Phase 7, Strategy and backtesting:** an event-driven simulator (latency fills, spread,
+  slippage, fees, gap-aware stops, market closures, daily-loss and drawdown breakers); SMA,
+  RSI, Donchian and agent-consensus strategies; in-sample optimisation with a single
+  out-of-sample evaluation against buy & hold.
 
 ## Quick start (Docker)
 
@@ -55,9 +59,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 116 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity) |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 126 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation) |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -74,6 +78,7 @@ backend/          FastAPI app, Alembic migrations, tests
   app/research/   extraction, chunking, embeddings, retrieval, reports, Claude engine (Phase 4)
   app/agents/     specialists, consensus, orchestrator (Phase 5)
   app/ml/         features, models, walk-forward validation, drift, registry (Phase 6)
+  app/backtest/   event-driven engine, strategies, IS/OOS evaluation (Phase 7)
   app/{trading,risk,integrations}/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
@@ -147,8 +152,16 @@ Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude
 - [x] Integrity-checked artifacts; ML agent with zero default vote weight
 - [x] Model Lab UI (train, gates, equity curves, calibration, importance, folds, drift); logistic regression in the static demo
 
-**Next: Phase 7, strategy and backtesting:** an event-driven simulator with spread,
-slippage, fees, latency and market closures; strategy definitions; and out-of-sample
-backtest reports.
+## Phase 7 deliverables
+
+- [x] Event-driven engine: next-open fills after latency, spread, volatility-scaled slippage, fees
+- [x] Gap-aware stops, pessimistic stop-vs-target ordering, session closures
+- [x] Blueprint risk limits inside the backtest: 0.5% risk per trade, 20% position cap, no leverage, 2% daily loss halt, 10% drawdown breaker
+- [x] Four strategies, including a replay of the Phase 5 agent consensus; causal signals (tested)
+- [x] In-sample grid optimisation, one-shot out-of-sample evaluation, fully invested buy & hold benchmark, overfitting warnings
+- [x] Backtest Lab UI (equity and drawdown with OOS marker, IS/OOS table, sensitivity grid, trades, risk events); works in the static demo
+
+**Next: Phase 8, paper execution:** an order management system, simulated fills on the live
+paper feed, positions, and ledger postings for trades, fees and realised P&L.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

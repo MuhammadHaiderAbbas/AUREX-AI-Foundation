@@ -34,6 +34,7 @@ const ACTION_LABELS: Record<string, string> = {
   "ml.promote": "Model promoted to champion",
   "ml.retire": "Model retired",
   "ml.drift_check": "Model drift check",
+  "backtest.run": "Backtest run",
   "admin.bootstrap": "Administrator account created",
   "admin.user.update": "User updated by administrator",
 };
@@ -142,7 +143,6 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Strategy lab", "Phase 7", "Event-driven backtests with costs"],
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
             ["Paper execution", "Phase 8", "Orders, fills, positions"],
             ["Analytics", "Phase 10", "Performance and audit reports"],

@@ -72,6 +72,15 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await page.getByRole("button", { name: "Drift check" }).click();
   await expect(page.getByText(/max PSI/)).toBeVisible();
 
+  // Backtesting in the browser
+  await page.getByRole("link", { name: "Backtesting" }).click();
+  await page.getByLabel("Strategy").selectOption("donchian_breakout");
+  await page.getByLabel("Instrument").selectOption("BTC-USD");
+  await page.getByLabel("Period").selectOption("90");
+  await page.getByRole("button", { name: "Run backtest" }).click();
+  await expect(page.getByTestId("metrics-table")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("oos-headline")).toContainText("Sharpe");
+
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
   await expect(page.getByText("Apple Inc.").first()).toBeVisible();

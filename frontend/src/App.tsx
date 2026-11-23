@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/feedback";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { AdminPage } from "@/pages/AdminPage";
 import { AITradingPage } from "@/pages/AITradingPage";
+import { BacktestPage } from "@/pages/BacktestPage";
 import { LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { ModelLabPage } from "@/pages/ModelLabPage";
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="research" element={<ResearchPage />} />
         <Route path="ai-trading" element={<AITradingPage />} />
         <Route path="strategies" element={<ModelLabPage />} />
+        <Route path="backtests" element={<BacktestPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

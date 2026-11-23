@@ -344,3 +344,25 @@ export interface MLVersionDetail extends MLVersionSummary {
   model: { name: string; algorithm: string; horizon: number; timeframe: string };
   evaluations: MLEvaluation[];
 }
+
+// ---- Backtesting (Phase 7) ---------------------------------------------------------
+export interface StrategyInfo { key: string; name: string; description: string; defaults: Record<string, number>; params: Record<string, { type: "int" | "float"; min: number; max: number }>; grid_size: number }
+export interface BtMetrics {
+  total_return: number; cagr: number; volatility: number; sharpe: number; sortino: number; max_drawdown: number; calmar: number;
+  trades: number; win_rate: number; profit_factor: number | null; avg_win: number; avg_loss: number; avg_bars_held: number;
+  exposure: number; turnover: number; fees: number; slippage_and_spread: number; halted: boolean; risk_events: number; bars: number;
+}
+export interface BtTrade { entry_time: string; exit_time: string | null; entry_price: number; exit_price: number | null; qty: number; pnl: number; return: number | null; fees: number; exit_reason: string; bars_held: number | null }
+export interface BacktestSummary { id: string; strategy_key: string; symbol: string; days: number; params: Record<string, number>; data_source: string; oos_sharpe: number; oos_return: number; created_at: string; latency_ms: number }
+export interface BacktestRun extends BacktestSummary {
+  timeframe: string; period_from: string; period_to: string;
+  config: { costs: Record<string, number>; risk: Record<string, number>; capital: number; optimise: boolean; asset_class: string };
+  result: {
+    params: Record<string, number>; optimised: boolean; split_time: string;
+    in_sample: { strategy: BtMetrics; buy_hold: BtMetrics }; out_of_sample: { strategy: BtMetrics; buy_hold: BtMetrics }; full: BtMetrics;
+    degradation: { sharpe: number; total_return: number };
+    grid: { params: Record<string, number>; sharpe: number; total_return: number; max_drawdown: number; trades: number }[];
+    warnings: string[]; curves: { strategy: [string, number][]; buy_hold: [string, number][] };
+    trades: BtTrade[]; events: { time: string; type: string; detail: string }[];
+  };
+}

@@ -1,5 +1,5 @@
 import {
-  BarChart3, Bot, BrainCircuit, CandlestickChart, History, LayoutDashboard,
+  BarChart3, Bot, FlaskConical, BrainCircuit, CandlestickChart, History, LayoutDashboard,
   Settings, ShieldAlert, ShieldCheck, Wallet, Workflow, type LucideIcon, PieChart,
 } from "lucide-react";
 
@@ -18,6 +18,7 @@ export const NAV: NavItem[] = [
   { to: "/ai-trading", label: "AI Trading", description: "Agent department and trade proposals", icon: Bot },
   { to: "/research", label: "AI Research Lab", description: "Agents and research reports", icon: BrainCircuit },
   { to: "/strategies", label: "Model Lab", description: "Models, walk-forward validation and registry", icon: Workflow },
+  { to: "/backtests", label: "Backtesting", description: "Event-driven strategy simulation and out-of-sample evaluation", icon: FlaskConical },
   { to: "/portfolio", label: "Portfolio", description: "Positions and performance", icon: PieChart, phase: 8 },
   { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert, phase: 9 },
   { to: "/wallet", label: "Wallet", description: "Virtual account and ledger", icon: Wallet },

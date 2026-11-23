@@ -68,6 +68,11 @@ LightGBM models, purged walk-forward validation after costs, nine promotion gate
 registry with human promotion, PSI drift monitoring, and an ML agent with zero default
 weight. See `models.md`.
 
+**Phase 7** added the event-driven backtester: latency-aware fills with spread, slippage and
+fees, gap-aware stops, session closures, in-backtest daily-loss and drawdown breakers, four
+strategies including an agent-consensus replay, and one-shot out-of-sample evaluation. See
+`backtesting.md`.
+
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that
 first needs them, so the schema never contains unused, untested tables.

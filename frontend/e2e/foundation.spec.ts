@@ -171,3 +171,24 @@ test("model lab: train, gated promotion, drift check", async ({ page }) => {
   await page.getByRole("button", { name: "Drift check" }).click();
   await expect(page.getByText(/max PSI/)).toBeVisible({ timeout: 60_000 });
 });
+
+test("backtesting: optimise in-sample, evaluate out-of-sample", async ({ page }) => {
+  const email = `e2e-bt-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Backtester");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Backtester" })).toBeVisible();
+  await page.getByRole("link", { name: "Backtesting" }).click();
+  await page.getByLabel("Strategy").selectOption("sma_crossover");
+  await page.getByLabel("Instrument").selectOption("ETH-USD");
+  await page.getByLabel("Period").selectOption("90");
+  await page.getByRole("button", { name: "Run backtest" }).click();
+  await expect(page.getByTestId("metrics-table")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("metrics-table")).toContainText("OOS strategy");
+  await expect(page.getByText("In-sample parameter sensitivity")).toBeVisible();
+  await expect(page.getByText(/Backtested on synthetic data/)).toBeVisible();
+  await expect(page.getByTestId("backtest-chart").locator("canvas").first()).toBeVisible();
+  await expect(page.getByText(/sma crossover · ETH-USD/).first()).toBeVisible();
+});
