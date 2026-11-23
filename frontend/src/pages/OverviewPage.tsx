@@ -1,0 +1,147 @@
+import { Activity, Bot, Briefcase, CircleDollarSign, Landmark, Plus, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { Badge, StatusDot } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { EmptyState, ErrorBanner, Spinner } from "@/components/ui/feedback";
+import { Stat } from "@/components/ui/stat";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
+import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { formatMoney, relativeTime, sumDecimals } from "@/lib/utils";
+import type { TradingAccount } from "@/services/api";
+
+const ACTION_LABELS: Record<string, string> = {
+  "auth.register": "Account registered",
+  "auth.login": "Signed in",
+  "auth.logout": "Signed out",
+  "auth.password_change": "Password changed",
+  "account.paper.create": "Paper account created",
+  "wallet.deposit": "Virtual deposit",
+  "wallet.withdraw": "Virtual withdrawal",
+  "user.settings.update": "Settings updated",
+  "admin.bootstrap": "Administrator account created",
+  "admin.user.update": "User updated by administrator",
+};
+
+function totalsByCurrency(accounts: TradingAccount[]) {
+  const map = new Map<string, { equity: string[]; cash: string[] }>();
+  for (const a of accounts) {
+    const e = map.get(a.base_currency) ?? { equity: [], cash: [] };
+    e.equity.push(a.equity); e.cash.push(a.cash_balance);
+    map.set(a.base_currency, e);
+  }
+  return [...map.entries()].map(([ccy, v]) => ({ ccy, equity: sumDecimals(v.equity), cash: sumDecimals(v.cash) }));
+}
+
+export function OverviewPage() {
+  const { user } = useAuth();
+  const accounts = useAccounts();
+  const activity = useMyActivity();
+  const [creating, setCreating] = useState(false);
+  const list = accounts.data ?? [];
+  const totals = totalsByCurrency(list);
+  const primary = totals[0];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-subtle">Welcome back</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{user?.full_name}</h2>
+        </div>
+        <Button onClick={() => setCreating(true)}><Plus />New paper account</Button>
+      </div>
+
+      <ErrorBanner error={accounts.error} />
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Total equity" icon={<Landmark />} className="col-span-2 md:col-span-1"
+          value={primary ? formatMoney(primary.equity, primary.ccy) : "—"}
+          sub={totals.length > 1 ? totals.slice(1).map((t) => formatMoney(t.equity, t.ccy)).join(" · ") : `${list.length} paper account${list.length === 1 ? "" : "s"}`} />
+        <Stat label="Available cash" icon={<CircleDollarSign />}
+          value={primary ? formatMoney(primary.cash, primary.ccy) : "—"} sub="Virtual capital" />
+        <Stat label="Daily P&L" icon={<TrendingUp />} value={primary ? formatMoney(0, primary.ccy) : "—"} tone="muted" sub="No trades executed" />
+        <Stat label="Open positions" icon={<Briefcase />} value="0" tone="muted" sub="Execution in Phase 8" />
+        <Stat label="Max drawdown" icon={<ShieldAlert />} value="0.00%" tone="muted" sub="Limit 10% (planned)" />
+        <Stat label="AI status" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot /> Offline</span>} sub="Agents arrive in Phase 5" />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+        <Card>
+          <CardHeader title="Paper accounts" description="Balances derived from the double-entry ledger"
+            action={<Link to="/wallet" className="text-xs text-accent hover:underline">Open wallet</Link>} />
+          {accounts.isLoading ? (
+            <div className="p-8"><Spinner className="mx-auto" /></div>
+          ) : list.length === 0 ? (
+            <EmptyState icon={<Wallet />} title="No paper accounts yet">
+              Create a paper account to receive a virtual starting balance.
+              <div className="mt-4"><Button size="sm" onClick={() => setCreating(true)}><Plus />Create paper account</Button></div>
+            </EmptyState>
+          ) : (
+            <Table>
+              <thead><tr><Th>Account</Th><Th>Mode</Th><Th className="text-right">Cash</Th><Th className="text-right">Equity</Th><Th>Status</Th></tr></thead>
+              <tbody>
+                {list.map((a) => (
+                  <Tr key={a.id}>
+                    <Td><Link to={`/wallet?account=${a.id}`} className="font-medium hover:text-accent">{a.name}</Link>
+                      <div className="text-[11px] text-subtle">{a.base_currency}</div></Td>
+                    <Td><Badge tone="accent">{a.mode}</Badge></Td>
+                    <Td className="num text-right">{formatMoney(a.cash_balance, a.base_currency)}</Td>
+                    <Td className="num text-right font-medium">{formatMoney(a.equity, a.base_currency)}</Td>
+                    <Td><Badge tone={a.status === "ACTIVE" ? "positive" : "neutral"}>{a.status}</Badge></Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader title="Activity timeline" description="Your audited actions" />
+          <CardBody className="p-0">
+            {activity.isLoading ? <div className="p-8"><Spinner className="mx-auto" /></div> :
+              (activity.data ?? []).length === 0 ? <EmptyState icon={<Activity />} title="No activity yet" /> : (
+                <ol className="divide-y divide-border/60">
+                  {activity.data!.map((ev) => (
+                    <li key={ev.id} className="flex items-start gap-3 px-5 py-3">
+                      <span className="mt-1.5"><StatusDot tone={ev.outcome === "success" ? "positive" : "negative"} /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm">{ACTION_LABELS[ev.action] ?? ev.action}
+                          {typeof ev.details.amount === "string" && (
+                            <span className="num text-muted"> · {formatMoney(ev.details.amount, String(ev.details.currency ?? "USD"))}</span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-subtle">{relativeTime(ev.occurred_at)}{ev.ip_address && ` · ${ev.ip_address}`}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+          </CardBody>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
+        <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            ["Market data", "Phase 3", "Asset registry, provider adapters, streaming"],
+            ["Research engine", "Phase 4", "News, filings, RAG, cited reports"],
+            ["AI agents", "Phase 5", "Orchestrator + specialist agents"],
+            ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
+          ].map(([t, p, d]) => (
+            <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
+              <div className="flex items-center justify-between"><span className="text-sm font-medium">{t}</span><Badge>{p}</Badge></div>
+              <p className="mt-1 text-xs text-muted">{d}</p>
+            </div>
+          ))}
+        </CardBody>
+      </Card>
+
+      <CreateAccountDialog open={creating} onClose={() => setCreating(false)} />
+    </div>
+  );
+}

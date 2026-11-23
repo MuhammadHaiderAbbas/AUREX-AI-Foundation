@@ -1,0 +1,38 @@
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "@/components/layout/AppShell";
+import { NAV } from "@/components/layout/nav";
+import { Spinner } from "@/components/ui/feedback";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { AdminPage } from "@/pages/AdminPage";
+import { LoginPage, RegisterPage } from "@/pages/AuthPages";
+import { ModulePage } from "@/pages/ModulePage";
+import { OverviewPage } from "@/pages/OverviewPage";
+import { SettingsPage } from "@/pages/SettingsPage";
+import { WalletPage } from "@/pages/WalletPage";
+
+function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
+  const { status, user } = useAuth();
+  if (status === "loading") return <div className="flex h-full items-center justify-center"><Spinner className="size-6" /></div>;
+  if (status === "anonymous") return <Navigate to="/login" replace />;
+  if (admin && user?.role !== "admin") return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route element={<RequireAuth><AppShell /></RequireAuth>}>
+        <Route index element={<OverviewPage />} />
+        <Route path="wallet" element={<WalletPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />
+        {NAV.filter((n) => n.phase).map((n) => (
+          <Route key={n.to} path={n.to.slice(1)} element={<ModulePage item={n} />} />
+        ))}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}

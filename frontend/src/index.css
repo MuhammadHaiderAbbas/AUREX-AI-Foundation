@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* AUREX design tokens — institutional dark terminal */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-bg: #070b14;
+  --color-surface: #0c1322;
+  --color-surface-2: #111a2e;
+  --color-surface-3: #172238;
+  --color-border: #1d2942;
+  --color-border-strong: #2a3a5c;
+  --color-fg: #e6ebf5;
+  --color-muted: #8391ab;
+  --color-subtle: #5c6a85;
+
+  --color-accent: #e5b454;
+  --color-accent-fg: #1a1203;
+  --color-positive: #2fbf8f;
+  --color-negative: #ef5b6b;
+  --color-warning: #f0a43a;
+  --color-info: #5b8def;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection { background: color-mix(in oklab, var(--color-accent) 35%, transparent); }
+  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+}
