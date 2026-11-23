@@ -109,3 +109,19 @@ data, fail validation.
 **Why.** Results like these on liquid markets are far likelier to come from look-ahead
 leakage or an artificial data source than from a real edge. Our own synthetic generator
 produces exactly such results, which is what motivated the gate.
+
+## ADR-015 Pessimistic, event-driven fills
+**Decision.** Fills happen at the next bar's open after a configurable latency, never at the
+signal bar's close. Stops that are gapped through fill at the open. When stop and target are
+both touched within a bar, the stop is assumed to have filled first.
+**Why.** Close-to-close backtests that fill on the signal bar silently use information
+they couldn't have had, and optimistic intrabar assumptions inflate results. Pessimistic
+conventions err toward underestimating performance, which is the safe direction for a
+system that will eventually trade real money.
+
+## ADR-016 One-shot out-of-sample evaluation
+**Decision.** Parameters are chosen on the in-sample 60% only. The out-of-sample 40% is
+evaluated exactly once per backtest, and decay between the two is reported and flagged.
+**Why.** Re-optimising until out-of-sample looks good turns it into in-sample data.
+Showing the degradation, the parameter surface and the buy & hold benchmark side by side
+makes overfitting visible.

@@ -43,6 +43,9 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | GET | `/ml/algorithms` · `/ml/models` · `/ml/versions/{id}` · `/ml/champion?symbol=` | bearer | Model zoo, registry, version detail |
 | POST | `/ml/train` | admin | Train a candidate with purged walk-forward validation (rate-limited) |
 | POST | `/ml/versions/{id}/promote` · `/retire` · `/drift-check` | admin | Gated promotion, retirement, drift monitoring (audited) |
+| GET | `/backtests/strategies` | bearer | Strategy catalogue with parameter rules and grid size |
+| POST | `/backtests` | bearer | Run `{strategy, symbol, days, params?, optimise, capital, costs}` (rate-limited) |
+| GET | `/backtests` · `/backtests/{id}` | bearer | The caller's backtests and full results |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

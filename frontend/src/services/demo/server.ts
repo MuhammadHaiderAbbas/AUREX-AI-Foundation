@@ -12,6 +12,7 @@ import * as mkt from "./market";
 import * as rs from "./research";
 import * as ag from "./agents";
 import * as ml from "./ml";
+import * as bt from "./backtest";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -42,6 +43,7 @@ interface State {
   aiAgents: Record<string, { enabled: boolean; weight: number }>;
   mlModels: { id: string; name: string; symbol: string; timeframe: string; horizon: number; algorithm: string; created_at: string }[];
   mlVersions: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+  backtests: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   mlEvals: { id: string; version_id: string; kind: string; status: string; metrics: Record<string, unknown>; created_at: string }[];
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -55,11 +57,11 @@ function load(): State {
       memory = JSON.parse(raw) as State;
       memory.docs ??= []; memory.chunks ??= []; memory.reports ??= []; // states saved by older demo builds
       memory.aiRuns ??= []; memory.aiAgents ??= {};
-      memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= [];
+      memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= []; memory.backtests ??= [];
       return memory;
     }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [] });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [], backtests: [] });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -720,6 +722,45 @@ const routes: [string, RegExp, Handler][] = [
     return json(201, ev);
   }],
   ["GET", /^\/ml\/champion$/, (c) => { authUser(c); throw new HttpError(404, "not_found", `No champion model for ${c.query.get("symbol")}`); }],
+  ["GET", /^\/backtests\/strategies$/, (c) => { authUser(c); return json(200, bt.STRATEGIES.map(({ grid, ...s }) => ({ ...s, grid_size: grid.length }))); }],
+  ["POST", /^\/backtests$/, async (c) => {
+    const { user } = authUser(c);
+    const key = String(c.body.strategy ?? "");
+    const params = c.body.params as Record<string, number> | undefined;
+    try { bt.validateParams(key, params); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
+    const inst = findInst(String(c.body.symbol ?? ""));
+    const days = Number(c.body.days ?? 180);
+    if (days < 30 || days > 365) throw bad("days must be between 30 and 365", "days");
+    const raw = mkt.candles(inst, "1h", days * 24);
+    const bars = { t: raw.map((x) => x.open_time), o: raw.map((x) => +x.open), h: raw.map((x) => +x.high), l: raw.map((x) => +x.low), c: raw.map((x) => +x.close) };
+    if (bars.c.length < 300) throw new HttpError(422, "business_rule_violation", "Not enough history for a backtest (need at least 300 hourly bars)");
+    const costs = { ...bt.DEFAULT_COSTS[inst.asset_class]!, ...Object.fromEntries(Object.entries((c.body.costs as Record<string, number>) ?? {}).filter(([, v]) => v != null)) };
+    const capital = Number(c.body.capital ?? 100_000), optimise = c.body.optimise !== false;
+    const t0 = performance.now();
+    let result;
+    try { result = bt.evaluate(bars, key, params, inst.asset_class, costs, capital, optimise, Number(inst.lot_size)); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
+    result.warnings.unshift("Backtested on synthetic data: the generator is built from smooth cycles, so results describe the simulator, not a real market.");
+    const run = { id: uuid(), user_id: user.id, strategy_key: key, symbol: inst.symbol, timeframe: "1h", days, params: result.params, data_source: "synthetic",
+      config: { costs, risk: bt.RISK, capital, optimise, asset_class: inst.asset_class }, period_from: bars.t[0], period_to: bars.t.at(-1),
+      oos_sharpe: result.out_of_sample.strategy.sharpe, oos_return: result.out_of_sample.strategy.total_return, result, created_at: now(), latency_ms: Math.round(performance.now() - t0) };
+    c.s.backtests.push(run);
+    if (c.s.backtests.length > 20) c.s.backtests.splice(0, c.s.backtests.length - 20);   // keep localStorage small
+    await audit(c.s, user.id, "backtest.run", { type: "backtest", id: run.id, details: { strategy: key, symbol: inst.symbol, oos_sharpe: run.oos_sharpe, optimised: optimise } });
+    const { user_id: _u, ...out } = run;
+    return json(201, out);
+  }],
+  ["GET", /^\/backtests$/, (c) => {
+    const { user } = authUser(c);
+    const mine = c.s.backtests.filter((r) => r.user_id === user.id).reverse().map(({ result: _r, config: _c, user_id: _u, ...rest }) => rest);
+    return json(200, { items: mine, total: mine.length, limit: 30, offset: 0 });
+  }],
+  ["GET", /^\/backtests\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c);
+    const r = c.s.backtests.find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!r) throw new HttpError(404, "not_found", "Backtest not found");
+    const { user_id: _u, ...out } = r;
+    return json(200, out);
+  }],
   ["GET", /^\/research\/reports\/([\w-]+)$/, (c) => {
     const { user } = authUser(c);
     const r = c.s.reports.find((x) => x.id === c.params[0] && x.user_id === user.id);
