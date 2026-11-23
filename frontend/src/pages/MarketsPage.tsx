@@ -185,7 +185,7 @@ export function MarketsPage() {
             <div className="px-2 pb-3">
               {candles.data && candles.data.candles.length > 0 ? (
                 <PriceChart data={candles.data} decimals={selected.instrument.price_decimals} />
-              ) : candles.isLoading ? <div className="flex h-[460px] items-center justify-center"><Spinner /></div> : (
+              ) : candles.isLoading ? <div className="flex h-[420px] items-center justify-center"><Spinner /></div> : (
                 <EmptyState title="No candles for this timeframe" />
               )}
               <p className="px-3 pt-2 text-[10px] text-subtle">

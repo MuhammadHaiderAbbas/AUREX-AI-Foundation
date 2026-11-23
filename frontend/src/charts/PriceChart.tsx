@@ -12,8 +12,12 @@ function token(name: string) {
 
 const OVERLAYS: Record<string, string> = { sma20: "#5b8def", sma50: "#b07cf0", ema20: "#e5b454", ema50: "#f07ca8" };
 
-export function PriceChart({ data, decimals, height = 460 }: { data: CandlesResponse; decimals: number; height?: number }) {
+const SUB_PANE = 120;
+
+export function PriceChart({ data, decimals, height: mainHeight = 420 }: { data: CandlesResponse; decimals: number; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  const subPanes = (data.indicators.rsi14 ? 1 : 0) + (data.indicators.macd ? 1 : 0);
+  const height = mainHeight + subPanes * SUB_PANE;
   const chartRef = useRef<IChartApi | null>(null);
 
   useEffect(() => {
@@ -87,12 +91,11 @@ export function PriceChart({ data, decimals, height = 460 }: { data: CandlesResp
       line(m.signal, token("--color-warning"), pane);
       pane++;
     }
-    // Size sub-panes only once they all exist, otherwise the layout redistributes them.
-    const panes = chart.panes();
-    for (let i = 1; i < panes.length; i++) panes[i]!.setHeight(100);
+    // Proportional sizing: stretch factors are relative, so use pixel targets as weights.
+    chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? mainHeight : SUB_PANE));
     chart.timeScale().fitContent();
     return () => { chart.remove(); chartRef.current = null; };
-  }, [data, decimals, height]);
+  }, [data, decimals, height, mainHeight]);
 
   return <div ref={ref} className="w-full" style={{ height }} data-testid="price-chart" />;
 }
