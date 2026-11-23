@@ -69,6 +69,8 @@ class AgentContext:
     # units of account currency per 1 unit of quote currency (None = unavailable)
     fx_to_account: float | None
     open_positions: int = 0
+    # champion-model output computed while building the snapshot (None = no champion)
+    ml: dict[str, Any] | None = None
 
 
 @dataclass

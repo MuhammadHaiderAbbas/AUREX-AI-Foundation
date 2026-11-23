@@ -40,6 +40,9 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | POST | `/ai/run` | bearer | Run the agent department on `{symbol, account_id?}` (rate-limited) |
 | GET | `/ai/runs` · `/ai/runs/{id}` | bearer | The caller's runs, with findings, reasons and proposal |
 | GET | `/ai/proposals` · POST `/ai/proposals/{id}/dismiss` | bearer | Trade proposals (`effective_status` includes EXPIRED) |
+| GET | `/ml/algorithms` · `/ml/models` · `/ml/versions/{id}` · `/ml/champion?symbol=` | bearer | Model zoo, registry, version detail |
+| POST | `/ml/train` | admin | Train a candidate with purged walk-forward validation (rate-limited) |
+| POST | `/ml/versions/{id}/promote` · `/retire` · `/drift-check` | admin | Gated promotion, retirement, drift monitoring (audited) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

@@ -1,5 +1,14 @@
-# ML workspace (Phase 6)
+# ML workspace
 
-Planned layout: `datasets/`, `features/`, `models/`, `training/`, `evaluation/`, `drift/`.
-Models are tracked in MLflow and promoted only after out-of-sample validation against
-baselines, after costs. Nothing here may change production trading rules automatically.
+The production pipeline lives in `backend/app/ml` so the API and agents can import it:
+
+| Module | Purpose |
+|---|---|
+| `features.py` | Leak-free hourly features and forward-return labels |
+| `models.py` | Model zoo: logistic regression, random forest, LightGBM |
+| `validation.py` | Purged walk-forward validation, cost-aware strategy metrics, promotion gates |
+| `drift.py` | PSI feature drift and calibration-decay assessment |
+| `service.py` | Model registry: train, promote (gated, by a human), retire, drift check, inference |
+
+This directory is reserved for offline research notebooks and datasets (not shipped).
+See `docs/architecture/models.md`.

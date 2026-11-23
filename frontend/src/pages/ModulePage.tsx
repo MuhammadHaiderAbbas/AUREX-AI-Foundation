@@ -4,9 +4,6 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { NavItem } from "@/components/layout/nav";
 
 const PLANS: Record<string, { summary: string; items: string[] }> = {
-  "/strategies": { summary: "Strategy research with realistic, cost-aware backtesting.", items: [
-    "Event-driven simulator (spread, slippage, fees, delays, closures)", "Walk-forward & out-of-sample validation",
-    "Model registry with champion/challenger promotion", "Concept-drift monitoring"] },
   "/portfolio": { summary: "Positions, exposure and returns derived from the ledger.", items: [
     "Open and closed positions", "Allocation and correlation exposure", "Portfolio snapshots and returns"] },
   "/risk": { summary: "Independent risk controller with final authority over every order.", items: [

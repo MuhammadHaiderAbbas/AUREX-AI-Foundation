@@ -16,12 +16,14 @@ from alembic.config import Config  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 from app.api.v1 import ai as ai_api  # noqa: E402
+from app.api.v1 import ml as ml_api  # noqa: E402
 from app.api.v1 import research as research_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.market import service as market_service  # noqa: E402
+from app.ml import service as ml_service  # noqa: E402
 from app.models import RoleName  # noqa: E402
 from app.research import fetch as research_fetch  # noqa: E402
 from app.research import llm as research_llm  # noqa: E402
@@ -48,7 +50,7 @@ async def clean_state():
             "TRUNCATE ledger_entries, ledger_transactions, ledger_accounts, trading_accounts, "
             "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
             "watchlists, research_reports, research_chunks, research_documents, trade_proposals, ai_findings, "
-            "ai_runs, users RESTART IDENTITY CASCADE"
+            "ai_runs, model_evaluations, model_versions, ml_models, users RESTART IDENTITY CASCADE"
         ))
         await db.commit()
     login_limiter.reset()
@@ -57,6 +59,8 @@ async def clean_state():
     market_service._providers.clear()
     research_api.ask_limiter.reset()
     ai_api.run_limiter.reset()
+    ml_api.train_limiter.reset()
+    ml_service.clear_cache()
     research_llm.set_client(None)
     research_fetch.set_http_client(None)
     yield

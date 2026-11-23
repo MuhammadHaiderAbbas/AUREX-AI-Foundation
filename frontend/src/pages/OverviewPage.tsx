@@ -30,6 +30,10 @@ const ACTION_LABELS: Record<string, string> = {
   "ai.run": "Agent analysis run",
   "ai.proposal.dismiss": "Trade proposal dismissed",
   "ai.agent.update": "Agent configuration changed",
+  "ml.train": "Model trained and validated",
+  "ml.promote": "Model promoted to champion",
+  "ml.retire": "Model retired",
+  "ml.drift_check": "Model drift check",
   "admin.bootstrap": "Administrator account created",
   "admin.user.update": "User updated by administrator",
 };
@@ -138,10 +142,10 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Quant models", "Phase 6", "Features, training, drift detection"],
             ["Strategy lab", "Phase 7", "Event-driven backtests with costs"],
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
             ["Paper execution", "Phase 8", "Orders, fills, positions"],
+            ["Analytics", "Phase 10", "Performance and audit reports"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
               <div className="flex items-center justify-between"><span className="text-sm font-medium">{t}</span><Badge>{p}</Badge></div>

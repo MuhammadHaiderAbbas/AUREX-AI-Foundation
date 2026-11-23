@@ -10,7 +10,7 @@ import { useDismissProposal } from "./hooks";
 
 export const AGENT_LABEL: Record<string, string> = {
   technical: "Technical", quant: "Quant", regime: "Regime", fundamental: "Fundamental",
-  news: "News", sentiment: "Sentiment", portfolio: "Portfolio", risk: "Risk (pre-check)",
+  news: "News", sentiment: "Sentiment", ml: "ML model", portfolio: "Portfolio", risk: "Risk (pre-check)",
 };
 const GATES = new Set(["regime", "portfolio", "risk"]);
 
@@ -133,7 +133,7 @@ export function ProposalCard({ p }: { p: TradeProposal }) {
 
 export function RunView({ run }: { run: AgentRun }) {
   const buy = run.decision === "BUY";
-  const order = ["technical", "quant", "fundamental", "news", "sentiment", "regime", "portfolio", "risk"];
+  const order = ["technical", "quant", "fundamental", "news", "sentiment", "ml", "regime", "portfolio", "risk"];
   const findings = [...run.findings].sort((a, b) => order.indexOf(a.agent) - order.indexOf(b.agent));
   return (
     <div className="space-y-4" aria-label="Agent run">

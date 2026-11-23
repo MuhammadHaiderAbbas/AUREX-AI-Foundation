@@ -30,6 +30,7 @@ from app.models import (
     AIFinding,
     AIRun,
     Instrument,
+    MLModel,
     ResearchDocument,
     TradeProposal,
     TradingAccount,
@@ -37,7 +38,7 @@ from app.models import (
 )
 from app.services.ledger_service import LedgerService
 
-ORDER = ["technical", "quant", "regime", "fundamental", "news", "sentiment", "portfolio", "risk"]
+ORDER = ["technical", "quant", "regime", "fundamental", "news", "sentiment", "ml", "portfolio", "risk"]
 
 
 class Orchestrator:
@@ -124,7 +125,31 @@ class Orchestrator:
         return AgentContext(
             InstrumentSnap(inst.symbol, inst.asset_class, inst.market, inst.quote_currency,
                            inst.price_decimals, inst.lot_size),
-            now, b1h, b1d, quote, docs, macro, account, fx, open_positions=0)
+            now, b1h, b1d, quote, docs, macro, account, fx, open_positions=0,
+            ml=await self._ml(inst.symbol, b1h))
+
+    async def _ml(self, symbol: str, bars: list[Bar]) -> dict[str, Any] | None:
+        from app.ml.service import ArtifactIntegrityError, MLService
+
+        svc = MLService(self.db)
+        champ = await svc.champion(symbol)
+        if champ is None:
+            return None
+        oos = champ.metrics.get("oos", {})
+        out: dict[str, Any] = {
+            "version": champ.version, "name": (await self.db.get(MLModel, champ.model_id)).name,
+            "eligible": champ.eligible,
+            "note": champ.eligibility_note, "horizon": champ.metrics.get("horizon"),
+            "auc": oos.get("auc", 0.0), "brier": oos.get("brier", 0.0), "data_source": champ.data_source,
+            "probability": None,
+        }
+        if champ.eligible and bars:
+            try:
+                out["probability"] = await svc.predict_latest(
+                    champ, [b.t for b in bars], [b.h for b in bars], [b.l for b in bars], [b.c for b in bars])
+            except ArtifactIntegrityError:
+                out["eligible"], out["note"] = False, "model artifact failed its integrity check"
+        return out
 
     # -- run ------------------------------------------------------------------------------
     @staticmethod
@@ -149,6 +174,7 @@ class Orchestrator:
         call("fundamental", sp.fundamental, ctx)
         call("news", sp.news, ctx)
         call("sentiment", sp.sentiment, ctx)
+        call("ml", sp.ml_model, ctx)
         call("portfolio", sp.portfolio, ctx, findings["technical"].data.get("atr_1h"))
         call("risk", sp.risk_precheck, ctx, findings["regime"], findings["news"],
              findings["portfolio"])
@@ -213,6 +239,8 @@ class Orchestrator:
                 "id": ctx.account.id, "currency": ctx.account.currency,
                 "equity": str(ctx.account.equity), "cash": str(ctx.account.cash)},
             "fx_to_account": ctx.fx_to_account,
+            "ml_champion": None if ctx.ml is None
+            else {k: ctx.ml[k] for k in ("name", "version", "eligible")},
             "open_positions": ctx.open_positions,
         }
 

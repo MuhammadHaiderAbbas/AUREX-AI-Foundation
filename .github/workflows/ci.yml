@@ -70,3 +70,19 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test --trace off
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -t aurex-backend ./backend
+          docker build -t aurex-web ./frontend
+      - name: Smoke-test backend image (ML stack incl. LightGBM/OpenMP)
+        run: |
+          docker run --entrypoint python aurex-backend -c "
+          import numpy as np, app.main
+          from app.ml.models import make_model
+          X = np.random.rand(200, 14); m = make_model('lightgbm'); m.fit(X, (X[:, 0] > 0.5).astype(int))
+          print('backend image ok', m.predict_proba(X[:2]).shape)"

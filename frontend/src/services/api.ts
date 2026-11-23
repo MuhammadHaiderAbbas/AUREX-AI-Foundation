@@ -310,3 +310,37 @@ export interface AgentRun extends RunSummary {
   account_id: string | null; reasons: string[]; weights: Record<string, number>; context: Record<string, unknown>;
   started_at: string; finished_at: string; findings: AgentFinding[]; proposal: TradeProposal | null;
 }
+
+// ---- Quantitative models (Phase 6) --------------------------------------------------
+export interface MLAlgorithm { key: string; label: string; description: string; params: Record<string, unknown> }
+export interface MLGate { name: string; passed: boolean; value: string; threshold: string }
+export interface MLVersionSummary {
+  id: string; model_id: string; symbol: string; version: number; status: "candidate" | "champion" | "retired";
+  eligible: boolean; eligibility_note: string; data_source: string; trained_at: string; promoted_at: string | null;
+  retired_at: string | null; n_samples: number;
+  summary: { auc: number; brier: number; brier_climatology: number; net_return: number; sharpe: number; buy_hold_return: number; trades: number };
+}
+export interface MLModelSpec { id: string; name: string; symbol: string; timeframe: string; horizon: number; algorithm: string; created_at: string; versions: MLVersionSummary[] }
+export interface MLEvaluation { id: string; kind: "walk_forward" | "drift_check"; status: string; metrics: Record<string, any>; created_at: string } // eslint-disable-line @typescript-eslint/no-explicit-any
+export interface MLStrategyStats { net_return: number; sharpe: number; max_drawdown: number; trades: number; exposure: number; hit_rate: number; periods: number }
+export interface MLOos {
+  samples: number; accuracy: number; brier: number; brier_climatology: number; log_loss: number; auc: number; ece: number;
+  base_rate: number; cost_per_side: number; threshold: number;
+  strategy_net_return: number; strategy_sharpe: number; strategy_max_drawdown: number; strategy_trades: number;
+  strategy_exposure: number; strategy_hit_rate: number; strategy_periods: number;
+}
+export interface MLVersionDetail extends MLVersionSummary {
+  gates: MLGate[];
+  metrics: {
+    horizon: number;
+    oos: MLOos;
+    baselines: { buy_hold: MLStrategyStats; momentum: MLStrategyStats; climatology: { brier: number } };
+    folds: { fold: number; train_size: number; test_size: number; test_from: string; test_to: string; brier: number; brier_climatology: number; net_return: number; buy_hold_return: number; beats_buy_hold: boolean }[];
+    calibration: { bin: number; predicted: number; observed: number; count: number }[];
+    curves: { times: string[]; model: number[]; buy_hold: number[]; momentum: number[] };
+  };
+  params: Record<string, unknown>; features: string[]; feature_importance: Record<string, number>;
+  train_from: string; train_to: string; artifact_sha256: string;
+  model: { name: string; algorithm: string; horizon: number; timeframe: string };
+  evaluations: MLEvaluation[];
+}

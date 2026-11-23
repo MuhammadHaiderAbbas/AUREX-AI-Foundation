@@ -11,6 +11,7 @@ import { INSTRUMENTS } from "./instruments";
 import * as mkt from "./market";
 import * as rs from "./research";
 import * as ag from "./agents";
+import * as ml from "./ml";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -39,6 +40,9 @@ interface State {
   chunks: rs.DChunk[];
   aiRuns: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   aiAgents: Record<string, { enabled: boolean; weight: number }>;
+  mlModels: { id: string; name: string; symbol: string; timeframe: string; horizon: number; algorithm: string; created_at: string }[];
+  mlVersions: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+  mlEvals: { id: string; version_id: string; kind: string; status: string; metrics: Record<string, unknown>; created_at: string }[];
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
 
@@ -51,10 +55,11 @@ function load(): State {
       memory = JSON.parse(raw) as State;
       memory.docs ??= []; memory.chunks ??= []; memory.reports ??= []; // states saved by older demo builds
       memory.aiRuns ??= []; memory.aiAgents ??= {};
+      memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= [];
       return memory;
     }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {} });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [] });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -267,6 +272,7 @@ const AGENT_META: [string, string, "directional" | "gate", string][] = [
   ["sentiment", "Sentiment Agent", "directional", "30-day research tone for the instrument."],
   ["regime", "Regime Agent", "gate", "Volatility regime, trend efficiency and distribution-drift (KS) gate."],
   ["portfolio", "Portfolio Agent", "gate", "Position sizing at 0.5% risk of equity, no leverage, exposure caps."],
+  ["ml", "ML Model Agent", "directional", "Probability from the promoted champion model for the instrument; abstains when no eligible champion exists. Zero vote weight until an administrator assigns it."],
   ["risk", "Risk Agent", "gate", "Advisory pre-check: market state, staleness, spread, events, limits. The independent risk gate has final authority."],
 ];
 const agentList = (s: State) => AGENT_META.map(([name, display_name, kind, role]) => ({
@@ -283,6 +289,22 @@ function fxRate(src: string, dst: string): number | null {
 }
 const withEffective = (p: Record<string, unknown> | null) => p && ({ ...p, effective_status: p.status === "PENDING_RISK_REVIEW" && Date.parse(p.expires_at as string) <= Date.now() ? "EXPIRED" : p.status });
 const runSummary = (r: Record<string, unknown>) => ({ id: r.id, symbol: r.symbol, decision: r.decision, bias: r.bias, net_score: r.net_score, agreement: r.agreement, coverage: r.coverage, confidence: r.confidence, created_at: r.created_at, latency_ms: r.latency_ms });
+
+// ---- model lab -----------------------------------------------------------------------------
+const ML_ALGOS = [{ key: "logistic", label: "Logistic regression", description: "Regularised linear baseline (L2, C = 0.5). Runs in your browser.", params: { C: 0.5 } }];
+function mlSummary(v: Record<string, any>) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const o = v.metrics.oos, b = v.metrics.baselines;
+  return { auc: o.auc, brier: o.brier, brier_climatology: o.brier_climatology, net_return: o.strategy_net_return, sharpe: o.strategy_sharpe, buy_hold_return: b.buy_hold.net_return, trades: o.strategy_trades };
+}
+const SUMMARY_KEYS = ["id", "model_id", "symbol", "version", "status", "eligible", "eligibility_note", "data_source", "trained_at", "promoted_at", "retired_at", "n_samples"];
+const mlSummaryRead = (v: Record<string, any>) => ({ ...Object.fromEntries(SUMMARY_KEYS.map((k) => [k, v[k]])), summary: mlSummary(v) }); // eslint-disable-line @typescript-eslint/no-explicit-any
+function mlDetail(s: State, v: Record<string, any>) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const m = s.mlModels.find((x) => x.id === v.model_id)!;
+  return { ...mlSummaryRead(v), gates: v.gates, metrics: v.metrics, params: { C: 0.5 }, features: ml.FEATURES, feature_importance: v.feature_importance,
+    train_from: v.train_from, train_to: v.train_to, artifact_sha256: v.artifact_sha256, model: { name: m.name, algorithm: m.algorithm, horizon: m.horizon, timeframe: m.timeframe },
+    evaluations: s.mlEvals.filter((e) => e.version_id === v.id).slice().reverse() };
+}
+const hourBars = (inst: mkt.DemoInstrument, n: number) => mkt.candles(inst, "1h", n).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
 
 const routes: [string, RegExp, Handler][] = [
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
@@ -627,6 +649,77 @@ const routes: [string, RegExp, Handler][] = [
     await audit(c.s, user.id, "ai.proposal.dismiss", { type: "trade_proposal", id: r.proposal.id });
     return json(200, withEffective(r.proposal));
   }],
+  ["GET", /^\/ml\/algorithms$/, (c) => { authUser(c); return json(200, ML_ALGOS); }],
+  ["GET", /^\/ml\/models$/, (c) => {
+    authUser(c);
+    return json(200, c.s.mlModels.map((m) => ({ ...m, versions: c.s.mlVersions.filter((v) => v.model_id === m.id).sort((a, b) => b.version - a.version).map(mlSummaryRead) })));
+  }],
+  ["POST", /^\/ml\/train$/, async (c) => {
+    const { user } = admin(c);
+    const algo = String(c.body.algorithm ?? "logistic");
+    if (algo !== "logistic") throw new HttpError(422, "business_rule_violation", "Random forest and LightGBM run on the AUREX backend; the browser demo supports logistic regression");
+    const inst = findInst(String(c.body.symbol ?? ""));
+    const horizon = Number(c.body.horizon ?? 4), days = Math.min(365, Math.max(60, Number(c.body.days ?? 180)));
+    const ds = ml.buildDataset(hourBars(inst, days * 24), horizon);
+    let wf;
+    try { wf = ml.walkForward(ds, inst.asset_class, "synthetic"); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
+    const final = ml.fitLogit(ds.X, ds.y);
+    const total = final.w.reduce((a, w) => a + Math.abs(w), 0) || 1;
+    const importance = Object.fromEntries(ml.FEATURES.map((f, j) => [f, +(Math.abs(final.w[j]!) / total).toFixed(4)]).sort((a, b) => (b[1] as number) - (a[1] as number)));
+    let spec = c.s.mlModels.find((m) => m.symbol === inst.symbol && m.horizon === horizon && m.algorithm === algo);
+    if (!spec) { spec = { id: uuid(), name: `${inst.symbol} · Logistic regression · ${horizon}h`, symbol: inst.symbol, timeframe: "1h", horizon, algorithm: algo, created_at: now() }; c.s.mlModels.push(spec); }
+    const version = Math.max(0, ...c.s.mlVersions.filter((v) => v.model_id === spec!.id).map((v) => v.version)) + 1;
+    const failed = wf.gates.filter((g) => !g.passed).map((g) => g.name);
+    const v = {
+      id: uuid(), model_id: spec.id, symbol: inst.symbol, version, status: "candidate", eligible: wf.eligible,
+      eligibility_note: wf.eligible ? "All validation gates passed" : `Failed: ${failed.join("; ")}`, data_source: "synthetic",
+      trained_at: now(), promoted_at: null, retired_at: null, n_samples: ds.y.length, gates: wf.gates,
+      metrics: { oos: wf.oos, baselines: wf.baselines, folds: wf.folds, calibration: wf.calibration, curves: wf.curves, horizon },
+      feature_importance: importance, train_from: ds.times[0], train_to: ds.times.at(-1), weights: final, reference: ml.reference(ds.X),
+      artifact_sha256: await sha256(JSON.stringify(final)),
+    };
+    c.s.mlVersions.push(v);
+    c.s.mlEvals.push({ id: uuid(), version_id: v.id, kind: "walk_forward", status: wf.eligible ? "eligible" : "ineligible", metrics: { oos: wf.oos, gates: wf.gates }, created_at: now() });
+    await audit(c.s, user.id, "ml.train", { type: "model_version", id: v.id, details: { symbol: v.symbol, algorithm: algo, version, eligible: v.eligible, data_source: "synthetic" } });
+    return json(201, mlDetail(c.s, v));
+  }],
+  ["GET", /^\/ml\/versions\/([\w-]+)$/, (c) => {
+    authUser(c);
+    const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
+    if (!v) throw new HttpError(404, "not_found", "Model version not found");
+    return json(200, mlDetail(c.s, v));
+  }],
+  ["POST", /^\/ml\/versions\/([\w-]+)\/promote$/, (c) => {
+    admin(c);
+    const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
+    if (!v) throw new HttpError(404, "not_found", "Model version not found");
+    if (v.status !== "candidate") throw new HttpError(422, "business_rule_violation", "Only candidate versions can be promoted");
+    throw new HttpError(422, "business_rule_violation", `Version is not eligible for promotion. ${v.eligibility_note}`, v.gates.filter((g: { passed: boolean }) => !g.passed));
+  }],
+  ["POST", /^\/ml\/versions\/([\w-]+)\/retire$/, async (c) => {
+    const { user } = admin(c);
+    const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
+    if (!v) throw new HttpError(404, "not_found", "Model version not found");
+    if (v.status === "retired") throw new HttpError(422, "business_rule_violation", "Version is already retired");
+    v.status = "retired"; v.retired_at = now();
+    await audit(c.s, user.id, "ml.retire", { type: "model_version", id: v.id });
+    return json(200, mlDetail(c.s, v));
+  }],
+  ["POST", /^\/ml\/versions\/([\w-]+)\/drift-check$/, async (c) => {
+    const { user } = admin(c);
+    const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
+    if (!v) throw new HttpError(404, "not_found", "Model version not found");
+    const ds = ml.buildDataset(hourBars(findInst(v.symbol), 30 * 24), v.metrics.horizon);
+    const p = ds.X.map((r) => ml.predict(v.weights, r));
+    const recent = p.reduce((s, x, i) => s + (x - ds.y[i]!) ** 2, 0) / p.length;
+    const result = { ...ml.drift(v.reference, ds.X, recent, v.metrics.oos.brier), window_days: 30, samples: ds.y.length };
+    const ev = { id: uuid(), version_id: v.id, kind: "drift_check", status: result.status, metrics: result, created_at: now() };
+    c.s.mlEvals.push(ev);
+    if (result.status === "drift" && v.eligible) { v.eligible = false; v.eligibility_note = `Drift detected: ${result.reasons.join("; ")}`; }
+    await audit(c.s, user.id, "ml.drift_check", { type: "model_version", id: v.id, details: { status: result.status, eligible_after: v.eligible } });
+    return json(201, ev);
+  }],
+  ["GET", /^\/ml\/champion$/, (c) => { authUser(c); throw new HttpError(404, "not_found", `No champion model for ${c.query.get("symbol")}`); }],
   ["GET", /^\/research\/reports\/([\w-]+)$/, (c) => {
     const { user } = authUser(c);
     const r = c.s.reports.find((x) => x.id === c.params[0] && x.user_id === user.id);

@@ -7,6 +7,7 @@ import { AdminPage } from "@/pages/AdminPage";
 import { AITradingPage } from "@/pages/AITradingPage";
 import { LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { MarketsPage } from "@/pages/MarketsPage";
+import { ModelLabPage } from "@/pages/ModelLabPage";
 import { ModulePage } from "@/pages/ModulePage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { ResearchPage } from "@/pages/ResearchPage";
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="markets" element={<MarketsPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="ai-trading" element={<AITradingPage />} />
+        <Route path="strategies" element={<ModelLabPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

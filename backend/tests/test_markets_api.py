@@ -220,3 +220,11 @@ async def test_websocket_stream(client):
     finally:
         os.environ.pop("AUREX_STREAM_INTERVAL_SECONDS", None)
         get_settings.cache_clear()
+
+
+async def test_large_backfill_is_batched(client):
+    """Regression: 180 days of 24/7 hourly candles exceeded Postgres' bind-parameter limit."""
+    ah = await admin_headers(client)
+    r = await client.post(f"{API}/markets/backfill", headers=ah, json={"symbol": "ETH-USD", "timeframe": "1h", "days": 365})
+    assert r.status_code == 200, r.text
+    assert r.json()["candles_upserted"] > 8000
