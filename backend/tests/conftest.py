@@ -15,12 +15,15 @@ from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from app.api.v1 import research as research_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.market import service as market_service  # noqa: E402
 from app.models import RoleName  # noqa: E402
+from app.research import fetch as research_fetch  # noqa: E402
+from app.research import llm as research_llm  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
 PASSWORD = "Correct-Horse-42"
@@ -43,13 +46,16 @@ async def clean_state():
         await db.execute(text(
             "TRUNCATE ledger_entries, ledger_transactions, ledger_accounts, trading_accounts, "
             "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
-            "watchlists, users RESTART IDENTITY CASCADE"
+            "watchlists, research_reports, research_chunks, research_documents, users RESTART IDENTITY CASCADE"
         ))
         await db.commit()
     login_limiter.reset()
     get_settings.cache_clear()
     market_service.clear_caches()
     market_service._providers.clear()
+    research_api.ask_limiter.reset()
+    research_llm.set_client(None)
+    research_fetch.set_http_client(None)
     yield
 
 

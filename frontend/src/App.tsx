@@ -8,6 +8,7 @@ import { LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { ModulePage } from "@/pages/ModulePage";
 import { OverviewPage } from "@/pages/OverviewPage";
+import { ResearchPage } from "@/pages/ResearchPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WalletPage } from "@/pages/WalletPage";
 
@@ -27,6 +28,7 @@ export default function App() {
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<OverviewPage />} />
         <Route path="markets" element={<MarketsPage />} />
+        <Route path="research" element={<ResearchPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

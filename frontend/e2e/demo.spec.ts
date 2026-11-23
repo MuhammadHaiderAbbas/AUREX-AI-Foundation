@@ -36,6 +36,22 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await page.getByRole("button", { name: "Verify chain" }).click();
   await expect(page.getByText(/Chain intact — \d+ records verified/)).toBeVisible();
 
+  // Research Lab: the demo user starts with the fictional sample corpus
+  await page.getByRole("link", { name: "AI Research Lab" }).click();
+  await page.getByRole("button", { name: /outlook for Northwind/ }).click();
+  await expect(page.getByText("Verified facts")).toBeVisible();
+  await expect(page.getByText("Contradictory evidence")).toBeVisible();
+  await expect(page.getByText("Cites the fictional sample corpus; not real market information.")).toBeVisible();
+  await page.getByRole("tab", { name: "Corpus" }).click();
+  await page.getByRole("button", { name: "Add document" }).click();
+  await page.getByLabel("Title").fill("Desk memo on GBP/USD");
+  await page.getByLabel("Text", { exact: true }).fill("Sterling weakened after softer inflation data, and traders now expect GBP/USD volatility to stay elevated.");
+  await page.getByLabel("Source").fill("Demo desk");
+  await page.locator("dialog").getByRole("button", { name: "Index document" }).click();
+  await expect(page.getByText(/Indexed “Desk memo on GBP\/USD”/)).toBeVisible();
+  await page.locator("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("cell", { name: /^Desk memo on GBP\/USD Demo desk/ })).toBeVisible();
+
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
   await expect(page.getByText("Apple Inc.").first()).toBeVisible();

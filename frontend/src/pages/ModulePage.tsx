@@ -7,9 +7,6 @@ const PLANS: Record<string, { summary: string; items: string[] }> = {
   "/ai-trading": { summary: "Autonomous paper execution under an independent risk gate.", items: [
     "Start / pause / stop autonomous execution", "Strategy selection per account",
     "Order lifecycle with idempotent submission", "Global emergency shutdown with explicit restart authorisation"] },
-  "/research": { summary: "Evidence-based research with citations and uncertainty.", items: [
-    "News, filings and economic-calendar ingestion", "Extraction, chunking, pgvector retrieval",
-    "Specialist agents with structured outputs", "Research chat that separates verified facts from interpretation"] },
   "/strategies": { summary: "Strategy research with realistic, cost-aware backtesting.", items: [
     "Event-driven simulator (spread, slippage, fees, delays, closures)", "Walk-forward & out-of-sample validation",
     "Model registry with champion/challenger promotion", "Concept-drift monitoring"] },

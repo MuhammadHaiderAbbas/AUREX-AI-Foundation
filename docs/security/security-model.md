@@ -18,6 +18,12 @@
 - Containers run as non-root; DB/Redis ports bound to 127.0.0.1 in Compose.
 - Request IDs are sanitised before being logged or audited.
 
+- Research ingestion: an https-only host allow-list, no redirects, 10 MB cap, and
+  `defusedxml` for feeds (XXE / entity expansion). Fetched HTML has scripts and styles removed.
+- LLM safety: source text is passed as untrusted data, output is schema-constrained, every
+  claim is quote-checked, nothing a model produces reaches execution, and questions are
+  rate-limited per user.
+
 ## Planned
 | Control | Phase |
 |---|---|

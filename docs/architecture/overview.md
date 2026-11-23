@@ -12,7 +12,7 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
           │ services/   auth · accounts · ledger · audit   (Phase 1)          │
           │ market/     registry, calendars, providers, stream (Phase 3)      │
           │ integrations/  broker adapters                  (Phase 12)        │
-          │ research/   ingestion, RAG, reports              (Phase 4)        │
+          │ research/   ingestion, hybrid RAG, grounded reports (Phase 4)     │
           │ agents/     orchestrator + specialist agents     (Phase 5)        │
           │ trading/    OMS + paper execution                (Phase 8)        │
           │ risk/       independent risk gate, kill switch   (Phase 9)        │
@@ -53,6 +53,11 @@ trail with tamper verification, admin user management, API docs, Docker stack, C
 **Phase 3** added market data: the instrument registry, session calendars, the provider
 interface (synthetic / Coinbase / ECB), candle storage with gap-fill, indicators, quote
 staleness and tradability, watchlists and the WebSocket stream. See `market-data.md`.
+
+**Phase 4** added the research engine: ingestion (text, HTML, PDF, URL, RSS),
+classification and tagging, chunking, pgvector + full-text hybrid retrieval, and grounded
+reports with quote-checked citations from an offline engine or Claude. See
+`research-engine.md`.
 
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that

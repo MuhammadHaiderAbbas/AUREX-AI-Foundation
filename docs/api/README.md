@@ -28,6 +28,14 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | GET/POST/DELETE | `/markets/watchlist[/items/{slug}]` | bearer | Default watchlist |
 | POST | `/markets/backfill` | admin | Backfill candles (audited) |
 | WS | `/markets/stream` | in-band token | Live quotes (see `docs/architecture/market-data.md`) |
+| GET | `/research/status` | bearer | Engine, embedding model, corpus size |
+| GET | `/research/documents[?q,doc_type,symbol]` · `/research/documents/{id}` | bearer | Corpus listing and detail (with chunks) |
+| POST | `/research/documents` · `/documents/upload` · `/documents/fetch` | admin | Ingest text or HTML, a file (PDF/HTML/text), or an allow-listed URL or RSS feed |
+| DELETE | `/research/documents/{id}` | admin | Remove a document and its chunks |
+| POST | `/research/samples` | admin | Load the fictional sample corpus |
+| GET | `/research/search?q=&symbols=&k=` | bearer | Hybrid retrieval |
+| POST | `/research/ask` | bearer | Grounded report (rate-limited per user) |
+| GET | `/research/reports` · `/research/reports/{id}` | bearer | The caller's own reports |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

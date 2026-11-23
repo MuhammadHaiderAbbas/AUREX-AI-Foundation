@@ -20,7 +20,7 @@ export function Dialog({ open, onClose, title, children }: {
     >
       <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
         <h2 className="text-sm font-semibold">{title}</h2>
-        <button onClick={onClose} className="text-muted hover:text-fg" aria-label="Close"><X className="size-4" /></button>
+        <button onClick={onClose} className="text-muted hover:text-fg" aria-label="Close dialog"><X className="size-4" /></button>
       </div>
       <div className="p-5">{children}</div>
     </dialog>
