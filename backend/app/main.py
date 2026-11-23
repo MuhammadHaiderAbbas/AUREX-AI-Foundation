@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,9 +14,38 @@ from app.core.middleware import RequestContextMiddleware
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
+log = logging.getLogger("aurex.matcher")
+
+
+async def _matcher_loop(interval: float) -> None:
+    from app.database.session import SessionLocal
+    from app.trading.service import TradingService
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            async with SessionLocal() as db:
+                stats = await TradingService(db).process_open()
+                await db.commit()
+            if stats["filled"] or stats["expired"]:
+                log.info("order matcher: %s", stats)
+        except Exception:  # noqa: BLE001 - the loop must survive transient failures
+            log.exception("order matcher pass failed")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    interval = get_settings().order_matcher_interval_seconds
+    task = asyncio.create_task(_matcher_loop(interval)) if interval > 0 else None
+    yield
+    if task:
+        task.cancel()
+
+
 def create_app() -> FastAPI:
     s = get_settings()
     app = FastAPI(
+        lifespan=lifespan,
         title=f"{s.app_name} API",
         version=__version__,
         description=(

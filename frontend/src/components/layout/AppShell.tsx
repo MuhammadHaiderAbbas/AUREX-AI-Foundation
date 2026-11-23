@@ -94,8 +94,8 @@ export function AppShell() {
           <Badge tone="accent" title="Virtual capital only. No real money is traded.">
             <StatusDot tone="accent" /> Paper mode
           </Badge>
-          <Badge tone="neutral" className="hidden md:inline-flex" title="Agents produce proposals only; autonomous execution arrives in Phase 8">
-            <StatusDot /> Execution off
+          <Badge tone="neutral" className="hidden md:inline-flex" title="Manual paper orders are enabled. Agents produce proposals only; autonomous execution arrives with the Phase 9 risk gate">
+            <StatusDot /> Autopilot off
           </Badge>
           <div className="hidden text-right sm:block">
             <div className="text-xs font-medium">{user?.full_name}</div>

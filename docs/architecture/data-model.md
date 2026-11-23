@@ -31,9 +31,9 @@
 | Initial virtual funding | CASH | OPENING_EQUITY |
 | Virtual deposit | CASH | CAPITAL_CONTRIBUTIONS |
 | Virtual withdrawal | CAPITAL_WITHDRAWALS | CASH |
-| *Buy (Phase 8)* | INVESTMENTS | CASH |
-| *Fee (Phase 8)* | FEES | CASH |
-| *Sell (Phase 8)* | CASH | INVESTMENTS (+ REALISED_PNL difference) |
+| Buy | INVESTMENTS | CASH |
+| Fee | FEES | CASH |
+| Sell | CASH | INVESTMENTS (+ REALISED_PNL difference) |
 
 Equity = Σ assets − Σ liabilities. The API also reports `ledger_balanced`
 (Σ debits = Σ credits across the account) as a continuous integrity check.

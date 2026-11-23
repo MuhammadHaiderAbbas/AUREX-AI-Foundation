@@ -125,3 +125,25 @@ evaluated exactly once per backtest, and decay between the two is reported and f
 **Why.** Re-optimising until out-of-sample looks good turns it into in-sample data.
 Showing the degradation, the parameter surface and the buy & hold benchmark side by side
 makes overfitting visible.
+
+## ADR-017 Fill paper orders on the live bid/ask with backtest costs
+**Decision.** Paper fills use the live quote's ask (buys) or bid (sells), plus the Phase 7
+per-asset-class slippage and commission. Positions are marked at the bid.
+**Why.** Mid-price fills make paper trading look better than reality. Using the same cost
+model as the backtester keeps backtest, paper and (eventually) live results comparable, and
+keeps the gap between them measurable.
+
+## ADR-018 Persist business rejections
+**Decision.** An order that is well formed but breaks a rule (no cash, no position, closed
+market, position limit, missing FX) is stored as REJECTED with its reason and audited.
+Malformed requests are rejected with 422 and not stored.
+**Why.** The blueprint requires full provenance for every trading decision. Refused orders
+are part of that record and are what the Phase 9 risk engine will add its own rejections to.
+
+## ADR-019 One transaction and an account lock per fill
+**Decision.** The execution, ledger transaction, position, order status and snapshot are
+written in a single transaction while the trading account row is locked. The matcher uses
+`FOR UPDATE SKIP LOCKED`.
+**Why.** A fill that is half-written (cash moved but no position) is the worst possible
+accounting bug. Locking the account serialises everything that spends its cash, and
+SKIP LOCKED makes running the matcher in several processes safe.

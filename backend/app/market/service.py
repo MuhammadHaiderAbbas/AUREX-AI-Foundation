@@ -219,6 +219,29 @@ class MarketService:
         return len(rows)
 
 
+async def fx_rate(svc: "MarketService", src: str, dst: str) -> Decimal | None:
+    """Units of `dst` per unit of `src`, from live FX quotes (direct, inverse or via USD)."""
+    if src == dst:
+        return Decimal(1)
+
+    async def rate(a: str, b: str) -> Decimal | None:
+        for sym, invert in ((f"{a}/{b}", False), (f"{b}/{a}", True)):
+            inst = await svc.db.scalar(select(Instrument).where(Instrument.symbol == sym))
+            if inst:
+                try:
+                    last = (await svc.quote(inst)).last
+                except ProviderUnavailable:
+                    return None
+                return (Decimal(1) / last) if invert else last
+        return None
+
+    direct = await rate(src, dst)
+    if direct is not None:
+        return direct
+    a, b = await rate(src, "USD"), await rate("USD", dst)
+    return a * b if a is not None and b is not None else None
+
+
 def market_statuses(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(UTC)
     labels = {"CRYPTO_24_7": "Crypto (24/7)", "FX_24_5": "Forex (24/5)",

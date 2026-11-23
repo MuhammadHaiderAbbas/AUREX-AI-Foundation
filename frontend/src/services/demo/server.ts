@@ -33,6 +33,8 @@ interface DEntry { ledger_code: string; direction: "DEBIT" | "CREDIT"; amount: s
 interface DTxn { id: string; account_id: string; type: string; description: string; created_at: string; created_by: string; idem: string | null; entries: DEntry[] }
 interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE"; created_at: string }
 interface DAudit { id: number; occurred_at: string; actor_user_id: string | null; action: string; resource_type: string | null; resource_id: string | null; outcome: string; ip_address: string | null; request_id: string | null; details: Record<string, unknown>; prev_hash: string; hash: string }
+interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[] }
+interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
   settings: Record<string, { timezone: string; base_currency: string; theme: string; updated_at: string }>;
@@ -45,6 +47,7 @@ interface State {
   mlVersions: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   backtests: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   mlEvals: { id: string; version_id: string; kind: string; status: string; metrics: Record<string, unknown>; created_at: string }[];
+  orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
 
@@ -58,10 +61,11 @@ function load(): State {
       memory.docs ??= []; memory.chunks ??= []; memory.reports ??= []; // states saved by older demo builds
       memory.aiRuns ??= []; memory.aiAgents ??= {};
       memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= []; memory.backtests ??= [];
+      memory.orders ??= []; memory.executions ??= []; memory.positions ??= []; memory.snapshots ??= [];
       return memory;
     }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [], backtests: [] });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [], backtests: [], orders: [], executions: [], positions: [], snapshots: [] });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -308,7 +312,247 @@ function mlDetail(s: State, v: Record<string, any>) { // eslint-disable-line @ty
 }
 const hourBars = (inst: mkt.DemoInstrument, n: number) => mkt.candles(inst, "1h", n).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
 
+
+// ---- paper execution (mirror of backend app/trading) -------------------------------------
+const FEE_BPS: Record<string, number> = { CRYPTO: 10, FX: 0, STOCK: 1, ETF: 1 };
+const SLIP_BPS: Record<string, number> = { CRYPTO: 2, FX: 0.5, STOCK: 2, ETF: 1 };
+const MAX_POSITIONS = 5;
+const u8 = (n: number) => toUnits(n.toFixed(8));
+const DEC_RE = /^\d+(\.\d{1,10})?$/;
+const instOf = (sym: string) => INSTRUMENTS.find((i) => i.symbol === sym)!;
+const openPos = (s: State, acct: string, sym: string) => s.positions.find((p) => p.account_id === acct && p.symbol === sym && p.status === "OPEN");
+const orderRead = (o: DOrder) => { const { events: _e, user_id: _u, ...rest } = o; return rest; };
+const orderDetail = (s: State, o: DOrder) => ({ ...orderRead(o), events: o.events, executions: s.executions.filter((x) => x.order_id === o.id) });
+function ev(o: DOrder, type: string, detail: Record<string, unknown> = {}) { o.events.push({ type, detail, created_at: now() }); o.updated_at = now(); }
+function reject(o: DOrder, reason: string) { o.status = "REJECTED"; o.reject_reason = reason; ev(o, "REJECTED", { reason }); }
+
+function matchFill(o: DOrder, bid: number, ask: number, slip: number): { price: number; reference: number } | null {
+  const lim = o.limit_price ? +o.limit_price : null, stop = o.stop_price ? +o.stop_price : null;
+  if (o.side === "BUY") {
+    const worst = ask * (1 + slip);
+    if (o.type === "MARKET") return { price: worst, reference: ask };
+    if (o.type === "LIMIT" && lim != null && ask <= lim) return { price: Math.min(lim, worst), reference: ask };
+    if (o.type === "STOP" && stop != null && ask >= stop) return { price: worst, reference: ask };
+    return null;
+  }
+  const worst = bid * (1 - slip);
+  if (o.type === "MARKET") return { price: worst, reference: bid };
+  if (o.type === "LIMIT" && lim != null && bid >= lim) return { price: Math.max(lim, worst), reference: bid };
+  if (o.type === "STOP" && stop != null && bid <= stop) return { price: worst, reference: bid };
+  return null;
+}
+
+function reservedUnits(s: State, a: DAccount, exclude?: string) {
+  return s.orders.filter((o) => o.account_id === a.id && o.side === "BUY" && o.status === "OPEN" && o.id !== exclude).reduce((acc, o) => {
+    const i = instOf(o.symbol);
+    const px = +(o.limit_price ?? o.stop_price ?? 0);
+    return acc + u8(+o.quantity * px * (fxRate(i.quote_currency, a.base_currency) ?? 1) * (1 + (FEE_BPS[i.asset_class]! + SLIP_BPS[i.asset_class]!) / 1e4));
+  }, 0n);
+}
+
+function businessCheck(s: State, a: DAccount, o: DOrder): string | null {
+  const i = instOf(o.symbol);
+  const pos = openPos(s, a.id, o.symbol);
+  if (o.side === "SELL") {
+    const pending = s.orders.filter((x) => x.account_id === a.id && x.symbol === o.symbol && x.side === "SELL" && x.status === "OPEN" && x.id !== o.id).reduce((acc, x) => acc + +x.quantity, 0);
+    const held = pos ? +pos.quantity : 0;
+    if (+o.quantity > held - pending + 1e-12) return `insufficient position: holding ${held}, ${pending} already in open sell orders (short selling is disabled)`;
+    return null;
+  }
+  if (!pos && s.positions.filter((p) => p.account_id === a.id && p.status === "OPEN").length >= MAX_POSITIONS) return `maximum of ${MAX_POSITIONS} open positions reached`;
+  const fx = fxRate(i.quote_currency, a.base_currency);
+  if (fx == null) return `no FX rate from ${i.quote_currency} to ${a.base_currency}`;
+  const ask = +mkt.quote(i).ask, slip = SLIP_BPS[i.asset_class]! / 1e4;
+  const px = o.type === "LIMIT" ? +o.limit_price! : o.type === "STOP" ? Math.max(+o.stop_price!, ask) * (1 + slip) : ask * (1 + slip);
+  const est = u8(+o.quantity * px * fx * (1 + FEE_BPS[i.asset_class]! / 1e4));
+  const avail = toUnits(balances(s, a).cash) - reservedUnits(s, a, o.id);
+  if (est > avail) return `insufficient cash: needs ≈${(Number(est) / 1e8).toFixed(2)} ${a.base_currency}, available ${(Number(avail) / 1e8).toFixed(2)} (no leverage)`;
+  return null;
+}
+
+function portfolio(s: State, a: DAccount) {
+  const b = balances(s, a);
+  const line = (c: string) => toUnits(b.lines.find((l) => l.code === c)!.balance);
+  const rows = s.positions.filter((p) => p.account_id === a.id && p.status === "OPEN").map((p) => {
+    const i = instOf(p.symbol); const q = mkt.quote(i); const fx = fxRate(i.quote_currency, a.base_currency) ?? 0;
+    const mv = u8(+p.quantity * +q.bid * fx);
+    const cost = toUnits(p.cost_basis);
+    return { id: p.id, symbol: p.symbol, asset_class: i.asset_class, quantity: p.quantity, avg_price: p.avg_price, last: q.last, bid: q.bid,
+      quote_currency: i.quote_currency, fx_rate: fx.toFixed(8), cost_basis: p.cost_basis, market_value: fromUnits(mv), unrealised_pnl: fromUnits(mv - cost),
+      unrealised_pct: cost ? Number(mv - cost) / Number(cost) : 0, realised_pnl: p.realised_pnl, fees: p.fees, opened_at: p.opened_at,
+      price_as_of: q.as_of, stale: q.stale, price_decimals: i.price_decimals, _mv: mv };
+  });
+  const mv = rows.reduce((acc, r) => acc + r._mv, 0n);
+  const cash = line("CASH"), equity = cash + mv;
+  const alloc: Record<string, number> = {};
+  for (const r of rows) alloc[r.asset_class] = (alloc[r.asset_class] ?? 0) + (equity ? Number(r._mv) / Number(equity) : 0);
+  return { account_id: a.id, account_name: a.name, currency: a.base_currency, cash: fromUnits(cash), available_cash: fromUnits(cash - reservedUnits(s, a)),
+    investments_at_cost: fromUnits(line("INVESTMENTS")), market_value: fromUnits(mv), equity: fromUnits(equity), unrealised_pnl: fromUnits(mv - line("INVESTMENTS")),
+    realised_pnl: fromUnits(line("REALISED_PNL")), fees: fromUnits(line("FEES")), exposure: equity ? Number(mv) / Number(equity) : 0,
+    open_positions: rows.length, allocation: alloc, positions: rows.map(({ _mv, ...r }) => r) };
+}
+function snapshot(s: State, a: DAccount, reason: string) {
+  const p = portfolio(s, a);
+  s.snapshots.push({ account_id: a.id, taken_at: now(), cash: p.cash, market_value: p.market_value, equity: p.equity, reason });
+  if (s.snapshots.length > 1500) s.snapshots.splice(0, s.snapshots.length - 1500);
+}
+
+function fill(s: State, a: DAccount, o: DOrder, f: { price: number; reference: number }, bid: number, ask: number) {
+  const i = instOf(o.symbol);
+  const fx = fxRate(i.quote_currency, a.base_currency);
+  if (fx == null) return reject(o, "FX rate unavailable at fill time");
+  const qty = +o.quantity, px = f.price;
+  const notional = u8(qty * px * fx), fee = (notional * BigInt(Math.round(FEE_BPS[i.asset_class]! * 100))) / 1_000_000n;
+  const mid = (bid + ask) / 2;
+  let pos = openPos(s, a.id, o.symbol);
+  let realised: bigint | null = null;
+  let txn: DTxn;
+  const label = `${o.side === "BUY" ? "Buy" : "Sell"} ${qty} ${o.symbol} @ ${+px.toFixed(8)}`;
+  const feeLegs: [string, "DEBIT" | "CREDIT", string][] = fee > 0n ? [["FEES", "DEBIT", fromUnits(fee)], ["CASH", "CREDIT", fromUnits(fee)]] : [];
+  if (o.side === "BUY") {
+    if (notional + fee > toUnits(balances(s, a).cash)) return reject(o, "insufficient cash at fill time");
+    txn = post(s, a, "TRADE_BUY", [["INVESTMENTS", "DEBIT", fromUnits(notional)], ["CASH", "CREDIT", fromUnits(notional)], ...feeLegs], o.user_id, label);
+    if (!pos) {
+      pos = { id: uuid(), account_id: a.id, symbol: o.symbol, quantity: o.quantity, avg_price: px.toFixed(10), cost_basis: fromUnits(notional), realised_pnl: "0", fees: fromUnits(fee), status: "OPEN", opened_at: now(), closed_at: null };
+      s.positions.push(pos);
+    } else {
+      const total = +pos.quantity + qty;
+      pos.avg_price = ((+pos.avg_price * +pos.quantity + px * qty) / total).toFixed(10);
+      pos.quantity = String(+total.toFixed(10)); pos.cost_basis = fromUnits(toUnits(pos.cost_basis) + notional); pos.fees = fromUnits(toUnits(pos.fees) + fee);
+    }
+  } else {
+    if (!pos || qty > +pos.quantity + 1e-12) return reject(o, "position changed: insufficient quantity at fill time");
+    const all = Math.abs(qty - +pos.quantity) < 1e-12;
+    const cost = all ? toUnits(pos.cost_basis) : u8(Number(toUnits(pos.cost_basis)) / 1e8 * qty / +pos.quantity);
+    realised = notional - cost;
+    const pnlLeg: [string, "DEBIT" | "CREDIT", string][] = realised > 0n ? [["REALISED_PNL", "CREDIT", fromUnits(realised)]] : realised < 0n ? [["REALISED_PNL", "DEBIT", fromUnits(-realised)]] : [];
+    txn = post(s, a, "TRADE_SELL", [["CASH", "DEBIT", fromUnits(notional)], ["INVESTMENTS", "CREDIT", fromUnits(cost)], ...pnlLeg, ...feeLegs], o.user_id, label);
+    pos.quantity = all ? "0" : String(+(+pos.quantity - qty).toFixed(10));
+    pos.cost_basis = fromUnits(toUnits(pos.cost_basis) - cost);
+    pos.realised_pnl = fromUnits(toUnits(pos.realised_pnl) + realised);
+    pos.fees = fromUnits(toUnits(pos.fees) + fee);
+    if (all) { pos.status = "CLOSED"; pos.closed_at = now(); }
+  }
+  s.executions.push({ id: uuid(), order_id: o.id, account_id: a.id, symbol: o.symbol, side: o.side, quantity: o.quantity, price: px.toFixed(10), reference_price: f.reference.toFixed(10),
+    mid_price: mid.toFixed(10), fx_rate: fx.toFixed(8), fee: fromUnits(fee), spread_cost: (Math.abs(f.reference - mid) * qty * fx).toFixed(8),
+    slippage_cost: (Math.abs(px - f.reference) * qty * fx).toFixed(8), realised_pnl: realised == null ? null : fromUnits(realised), ledger_transaction_id: txn.id, executed_at: now() });
+  o.status = "FILLED"; o.filled_qty = o.quantity; o.avg_fill_price = px.toFixed(10);
+  ev(o, "FILLED", { price: px.toFixed(8), quantity: o.quantity, fee: fromUnits(fee), reference: f.reference.toFixed(8) });
+  snapshot(s, a, "fill");
+}
+
+/** The matcher. The backend runs it every few seconds; the demo runs it on every trading request. */
+function processOpen(s: State) {
+  const stats = { checked: 0, filled: 0, expired: 0, rejected: 0 };
+  for (const o of s.orders.filter((x) => x.status === "OPEN")) {
+    stats.checked++;
+    if (o.expires_at && Date.parse(o.expires_at) <= Date.now()) { o.status = "EXPIRED"; ev(o, "EXPIRED"); stats.expired++; continue; }
+    const i = instOf(o.symbol); const q = mkt.quote(i);
+    if (!q.tradable) continue;
+    const f = matchFill(o, +q.bid, +q.ask, SLIP_BPS[i.asset_class]! / 1e4);
+    if (!f) continue;
+    fill(s, s.accounts.find((a) => a.id === o.account_id)!, o, f, +q.bid, +q.ask);
+    stats[o.status === "FILLED" ? "filled" : "rejected"]++;
+  }
+  return stats;
+}
+function accountIds(c: Ctx, user: DUser) {
+  const id = c.query.get("account_id");
+  if (id) return [ownedAccount(c, id).a.id];
+  return c.s.accounts.filter((a) => a.owner_id === user.id).map((a) => a.id);
+}
+const page = <T,>(c: Ctx, all: T[]) => { const limit = Number(c.query.get("limit") ?? 50), offset = Number(c.query.get("offset") ?? 0); return { items: all.slice(offset, offset + limit), total: all.length, limit, offset }; };
+
+const tradingRoutes: [string, RegExp, Handler][] = [
+  ["POST", /^\/trading\/orders$/, async (c) => {
+    const { user } = authUser(c);
+    const b = c.body as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const { a } = ownedAccount(c, String(b.account_id ?? ""));
+    const coid = b.client_order_id == null ? null : String(b.client_order_id);
+    if (coid != null && !/^[A-Za-z0-9_-]{8,64}$/.test(coid)) throw bad("client_order_id must be 8-64 characters of A-Z, 0-9, _ or -", "client_order_id");
+    if (coid) { const ex = c.s.orders.find((o) => o.account_id === a.id && o.client_order_id === coid); if (ex) { processOpen(c.s); return json(200, orderDetail(c.s, ex), { "Idempotent-Replay": "true" }); } }
+    const inst = findInst(String(b.symbol ?? ""));
+    const side = b.side, type = b.type ?? "MARKET", tif = b.time_in_force ?? "GTC";
+    if (side !== "BUY" && side !== "SELL") throw bad("side must be BUY or SELL", "side");
+    if (!["MARKET", "LIMIT", "STOP"].includes(type)) throw bad("type must be MARKET, LIMIT or STOP", "type");
+    if (tif !== "GTC" && tif !== "DAY") throw bad("time_in_force must be GTC or DAY", "time_in_force");
+    const qty = String(b.quantity ?? "");
+    if (!DEC_RE.test(qty) || +qty <= 0) throw bad("Quantity must be positive", "quantity");
+    const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+    const lot = +inst.lot_size;
+    if (Math.abs(Math.round(+qty / lot) * lot - +qty) > lot * 1e-6) throw rule(`Quantity must be a multiple of the lot size ${lot}`);
+    for (const k of ["limit_price", "stop_price"]) {
+      const v = b[k];
+      if (v == null) continue;
+      if (!DEC_RE.test(String(v)) || +v <= 0 || (String(v).split(".")[1]?.length ?? 0) > inst.price_decimals) throw rule(`${k} must be positive with at most ${inst.price_decimals} decimals`);
+    }
+    if (type === "LIMIT" && b.limit_price == null) throw rule("LIMIT orders need a limit_price");
+    if (type === "STOP" && b.stop_price == null) throw rule("STOP orders need a stop_price");
+    if (type === "MARKET" && (b.limit_price != null || b.stop_price != null)) throw rule("MARKET orders take no limit or stop price");
+    processOpen(c.s);
+    const t = new Date();
+    const expires = type === "MARKET" ? null : tif === "DAY" ? new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1)).toISOString() : new Date(t.getTime() + 30 * 864e5).toISOString();
+    const o: DOrder = { id: uuid(), account_id: a.id, user_id: user.id, symbol: inst.symbol, side, type, quantity: qty, limit_price: b.limit_price ?? null, stop_price: b.stop_price ?? null,
+      time_in_force: tif, status: "OPEN", filled_qty: "0", avg_fill_price: null, client_order_id: coid, source: "manual", reject_reason: null, expires_at: expires, created_at: now(), updated_at: now(), events: [] };
+    c.s.orders.push(o);
+    ev(o, "CREATED", { side, type, quantity: qty, limit_price: o.limit_price, stop_price: o.stop_price, tif });
+    const why = businessCheck(c.s, a, o);
+    if (why) reject(o, why);
+    else if (type === "MARKET") {
+      const q = mkt.quote(inst);
+      if (!q.tradable) reject(o, q.market_open ? "quote is stale" : "market is closed");
+      else fill(c.s, a, o, matchFill(o, +q.bid, +q.ask, SLIP_BPS[inst.asset_class]! / 1e4)!, +q.bid, +q.ask);
+    } else ev(o, "ACCEPTED", { expires_at: expires });
+    if (c.s.orders.length > 400) c.s.orders.splice(0, c.s.orders.length - 400);
+    await audit(c.s, user.id, "order.submit", { type: "order", id: o.id, details: { symbol: o.symbol, side, type, quantity: qty, status: o.status, reason: o.reject_reason } });
+    return json(201, orderDetail(c.s, o));
+  }],
+  ["GET", /^\/trading\/orders$/, (c) => {
+    const { user } = authUser(c); const ids = accountIds(c, user); processOpen(c.s); save();
+    const st = c.query.get("status");
+    return json(200, page(c, c.s.orders.filter((o) => ids.includes(o.account_id) && (!st || o.status === st)).reverse().map(orderRead)));
+  }],
+  ["GET", /^\/trading\/orders\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c);
+    const o = c.s.orders.find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!o) throw new HttpError(404, "not_found", "Order not found");
+    return json(200, orderDetail(c.s, o));
+  }],
+  ["POST", /^\/trading\/orders\/([\w-]+)\/cancel$/, async (c) => {
+    const { user } = authUser(c);
+    const o = c.s.orders.find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!o) throw new HttpError(404, "not_found", "Order not found");
+    if (o.status !== "OPEN") throw new HttpError(422, "business_rule_violation", `Only open orders can be cancelled (status ${o.status})`);
+    o.status = "CANCELLED"; ev(o, "CANCELLED", { by: "user" });
+    await audit(c.s, user.id, "order.cancel", { type: "order", id: o.id });
+    return json(200, orderDetail(c.s, o));
+  }],
+  ["GET", /^\/trading\/executions$/, (c) => {
+    const { user } = authUser(c); const ids = accountIds(c, user);
+    return json(200, page(c, c.s.executions.filter((x) => ids.includes(x.account_id)).reverse()));
+  }],
+  ["GET", /^\/trading\/positions\/closed$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    return json(200, c.s.positions.filter((p) => p.account_id === a.id && p.status === "CLOSED").reverse().slice(0, 100)
+      .map(({ id, symbol, avg_price, realised_pnl, fees, opened_at, closed_at }) => ({ id, symbol, avg_price, realised_pnl, fees, opened_at, closed_at })));
+  }],
+  ["POST", /^\/trading\/process$/, (c) => { admin(c); return json(200, processOpen(c.s)); }],
+  ["GET", /^\/portfolio\/summary$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    processOpen(c.s);
+    const last = c.s.snapshots.filter((x) => x.account_id === a.id).at(-1);
+    if (!last || Date.now() - Date.parse(last.taken_at) > 3600e3) snapshot(c.s, a, "periodic");
+    save();
+    return json(200, portfolio(c.s, a));
+  }],
+  ["GET", /^\/portfolio\/history$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    return json(200, c.s.snapshots.filter((x) => x.account_id === a.id).map(({ account_id: _a, ...r }) => r));
+  }],
+];
+
 const routes: [string, RegExp, Handler][] = [
+  ...tradingRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
   ["GET", /^\/system\/info$/, () => json(200, { name: "AUREX AI", version: "0.2.0-demo", environment: "demo", trading_mode: "PAPER", live_trading_enabled: false, registration_open: true, supported_currencies: CURRENCIES })],
 

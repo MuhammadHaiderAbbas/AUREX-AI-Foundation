@@ -366,3 +366,40 @@ export interface BacktestRun extends BacktestSummary {
     trades: BtTrade[]; events: { time: string; type: string; detail: string }[];
   };
 }
+
+// ---- Paper execution (Phase 8) ---------------------------------------------
+export type OrderSide = "BUY" | "SELL";
+export type OrderType = "MARKET" | "LIMIT" | "STOP";
+export type OrderStatus = "OPEN" | "FILLED" | "CANCELLED" | "REJECTED" | "EXPIRED";
+export interface OrderInput {
+  account_id: string; symbol: string; side: OrderSide; type: OrderType; quantity: string;
+  limit_price?: string; stop_price?: string; time_in_force?: "GTC" | "DAY"; client_order_id?: string;
+}
+export interface Order {
+  id: string; account_id: string; symbol: string; side: OrderSide; type: OrderType; quantity: string;
+  limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: OrderStatus;
+  filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string;
+  reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string;
+}
+export interface Execution {
+  id: string; order_id: string; account_id: string; symbol: string; side: OrderSide; quantity: string; price: string;
+  reference_price: string; mid_price: string; fx_rate: string; fee: string; spread_cost: string; slippage_cost: string;
+  realised_pnl: string | null; ledger_transaction_id: string; executed_at: string;
+}
+export interface OrderDetail extends Order {
+  events: { type: string; detail: Record<string, unknown>; created_at: string }[];
+  executions: Execution[];
+}
+export interface Position {
+  id: string; symbol: string; asset_class: AssetClass; quantity: string; avg_price: string; last: string; bid: string;
+  quote_currency: string; fx_rate: string; cost_basis: string; market_value: string; unrealised_pnl: string;
+  unrealised_pct: number; realised_pnl: string; fees: string; opened_at: string; price_as_of: string | null;
+  stale: boolean; price_decimals: number;
+}
+export interface ClosedPosition { id: string; symbol: string; avg_price: string; realised_pnl: string; fees: string; opened_at: string; closed_at: string | null }
+export interface PortfolioSummary {
+  account_id: string; account_name: string; currency: string; cash: string; available_cash: string;
+  investments_at_cost: string; market_value: string; equity: string; unrealised_pnl: string; realised_pnl: string;
+  fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[];
+}
+export interface PortfolioSnapshot { taken_at: string; cash: string; market_value: string; equity: string; reason: string }

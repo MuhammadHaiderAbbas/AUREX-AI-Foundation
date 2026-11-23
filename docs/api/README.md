@@ -46,6 +46,12 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | GET | `/backtests/strategies` | bearer | Strategy catalogue with parameter rules and grid size |
 | POST | `/backtests` | bearer | Run `{strategy, symbol, days, params?, optimise, capital, costs}` (rate-limited) |
 | GET | `/backtests` · `/backtests/{id}` | bearer | The caller's backtests and full results |
+| POST | `/trading/orders` | bearer | Place a paper order `{account_id, symbol, side, type, quantity, limit_price?, stop_price?, time_in_force?, client_order_id?}`. `201`; replay of a `client_order_id` returns `200` with `Idempotent-Replay: true`. Rule breaks come back as a stored `REJECTED` order with `reject_reason` (rate-limited, audited) |
+| GET | `/trading/orders?account_id=&status=` · `/trading/orders/{id}` | bearer | Orders; the detail includes lifecycle events and executions |
+| POST | `/trading/orders/{id}/cancel` | bearer | Cancel an OPEN order (audited) |
+| GET | `/trading/executions?account_id=` · `/trading/positions/closed?account_id=` | bearer | Fills with costs and ledger links; closed positions |
+| POST | `/trading/process` | admin | Run one matcher pass (it also runs in the background) |
+| GET | `/portfolio/summary?account_id=` · `/portfolio/history?account_id=` | bearer | Marked-to-market portfolio; equity snapshots |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

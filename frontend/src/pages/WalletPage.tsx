@@ -17,6 +17,8 @@ const TXN_LABEL: Record<string, string> = {
   INITIAL_FUNDING: "Initial funding",
   VIRTUAL_DEPOSIT: "Virtual deposit",
   VIRTUAL_WITHDRAWAL: "Virtual withdrawal",
+  TRADE_BUY: "Trade · buy",
+  TRADE_SELL: "Trade · sell",
 };
 
 function CashMovementForm({ account }: { account: TradingAccount }) {
@@ -123,7 +125,7 @@ export function WalletPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat label="Equity" value={balances.data ? formatMoney(balances.data.equity, ccy) : "—"} sub="Assets − liabilities" />
         <Stat label="Cash" value={balances.data ? formatMoney(balances.data.cash, ccy) : "—"} sub="Available for simulated trading" />
-        <Stat label="Investments at cost" value={balances.data ? formatMoney(balances.data.investments, ccy) : "—"} tone="muted" sub="Populated by paper execution" />
+        <Stat label="Investments at cost" value={balances.data ? formatMoney(balances.data.investments, ccy) : "—"} tone="muted" sub="Open positions at cost" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
