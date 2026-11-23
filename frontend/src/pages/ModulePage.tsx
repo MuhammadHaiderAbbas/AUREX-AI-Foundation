@@ -4,10 +4,6 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { NavItem } from "@/components/layout/nav";
 
 const PLANS: Record<string, { summary: string; items: string[] }> = {
-  "/markets": { summary: "Multi-asset market data with a common adapter interface.", items: [
-    "Asset & instrument registry (crypto, FX, stocks, ETFs)", "Provider adapters + historical OHLCV",
-    "Live price streaming over WebSocket", "Candlestick charts, indicators, watchlists",
-    "Session calendars, corporate actions, stale-data protection"] },
   "/ai-trading": { summary: "Autonomous paper execution under an independent risk gate.", items: [
     "Start / pause / stop autonomous execution", "Strategy selection per account",
     "Order lifecycle with idempotent submission", "Global emergency shutdown with explicit restart authorisation"] },

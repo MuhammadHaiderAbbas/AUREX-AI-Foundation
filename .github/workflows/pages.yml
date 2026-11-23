@@ -1,0 +1,48 @@
+name: Deploy demo to GitHub Pages
+
+# Publishes the static demo build (in-browser simulated backend, synthetic market data).
+# Requires: Settings → Pages → Build and deployment → Source = "GitHub Actions".
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    env:
+      VITE_BASE: /${{ github.event.repository.name }}/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm run build:demo
+      - name: Smoke-test the built site
+        run: |
+          npx playwright install --with-deps chromium
+          node scripts/pages-preview.cjs dist "$VITE_BASE" 4173 &
+          AUREX_E2E_DEMO=1 AUREX_WEB_URL="http://localhost:4173$VITE_BASE" npx playwright test e2e/demo.spec.ts --trace off
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: frontend/dist }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

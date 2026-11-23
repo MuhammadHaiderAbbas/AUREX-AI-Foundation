@@ -4,13 +4,14 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { useSystemInfo } from "@/features/accounts/hooks";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { isDemo } from "@/services/api";
 import { cn } from "@/lib/utils";
 import { NAV } from "./nav";
 
 export function Logo({ className }: { className?: string }) {
   return (
     <div className={cn("flex items-center gap-2.5", className)}>
-      <img src="/favicon.svg" alt="" className="size-8" />
+      <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="size-8" />
       <div className="leading-tight">
         <div className="text-[15px] font-bold tracking-[0.18em]">AUREX<span className="text-accent"> AI</span></div>
         <div className="text-[10px] uppercase tracking-wider text-subtle">Trading Intelligence Terminal</div>
@@ -64,6 +65,7 @@ export function AppShell() {
         <Sidebar />
         <div className="border-t border-border px-5 py-3 text-[11px] text-subtle">
           v{info.data?.version ?? "—"} · {info.data?.environment ?? "—"}
+          {isDemo && <p className="mt-1 leading-snug">Demo data is stored only in this browser.</p>}
         </div>
       </aside>
 
@@ -88,6 +90,7 @@ export function AppShell() {
             <h1 className="truncate text-sm font-semibold">{current?.label ?? "AUREX AI"}</h1>
             <p className="hidden truncate text-xs text-muted sm:block">{current?.description}</p>
           </div>
+          {isDemo && <Badge tone="info" title="Static demo: runs entirely in your browser with simulated data">Demo</Badge>}
           <Badge tone="accent" title="Virtual capital only. No real money is traded.">
             <StatusDot tone="accent" /> Paper mode
           </Badge>

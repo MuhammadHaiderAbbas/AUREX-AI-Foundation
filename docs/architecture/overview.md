@@ -10,7 +10,8 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
           ┌────────────────────────────────────┼─────────────────────────────┐
           │ api/        routers, auth deps, error envelope                    │
           │ services/   auth · accounts · ledger · audit   (Phase 1)          │
-          │ integrations/  market-data & broker adapters    (Phase 3)         │
+          │ market/     registry, calendars, providers, stream (Phase 3)      │
+          │ integrations/  broker adapters                  (Phase 12)        │
           │ research/   ingestion, RAG, reports              (Phase 4)        │
           │ agents/     orchestrator + specialist agents     (Phase 5)        │
           │ trading/    OMS + paper execution                (Phase 8)        │
@@ -48,6 +49,10 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
 Implemented: identity & roles, sessions, user settings, paper trading accounts,
 double-entry virtual ledger, virtual deposits/withdrawals with idempotency, audit
 trail with tamper verification, admin user management, API docs, Docker stack, CI.
+
+**Phase 3** added market data: the instrument registry, session calendars, the provider
+interface (synthetic / Coinbase / ECB), candle storage with gap-fill, indicators, quote
+staleness and tradability, watchlists and the WebSocket stream. See `market-data.md`.
 
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that

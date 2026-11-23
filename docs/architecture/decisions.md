@@ -44,3 +44,20 @@ with object-lock) so wholesale chain rewrites are also detectable.
 **Decision.** Caddy serves the SPA and proxies `/api` on the same origin. **Why.**
 The refresh cookie never crosses origins, CORS is unnecessary in production, and a
 strict CSP (`default-src 'self'`) is possible.
+
+## ADR-007 Market-data provider abstraction and honest labelling
+**Decision.** All sources implement one `MarketDataProvider` interface. Synthetic data is
+the default and is always labelled `source="synthetic"`. Provider failures surface as
+`503` rather than a silent fallback. ECB reference rates are explicitly non-tradable.
+**Why.** Paper-trading results are only meaningful if the price source is known. A silent
+substitution would contaminate backtests and paper performance. Stocks and ETFs stay
+synthetic until a properly licensed feed is chosen (a licensing and cost decision).
+
+## ADR-008 Static public demo on GitHub Pages
+**Decision.** The Pages build (`VITE_DEMO_MODE=true`) swaps the HTTP transport for an
+in-browser implementation of the same REST contract (`frontend/src/services/demo`),
+persisted in `localStorage`, with the synthetic market model ported bit-for-bit.
+**Why.** Pages can host only static files. This keeps one UI codebase, needs no hosted
+backend or secrets, and holds no user data server-side. **Limits.** It is not a security
+boundary, and its business rules duplicate the backend's (kept aligned by the demo e2e
+test). The production deployment remains Docker + FastAPI.

@@ -47,3 +47,15 @@ export function relativeTime(iso: string) {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
 }
+
+export function formatPrice(value: string | number | null | undefined, decimals: number) {
+  if (value == null) return "—";
+  const n = typeof value === "string" ? Number(value) : value;
+  return n.toLocaleString("en-GB", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+export function formatPct(value: string | null | undefined) {
+  if (value == null) return "—";
+  const n = Number(value);
+  return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
+}

@@ -1,4 +1,4 @@
-import { Activity, Bot, Briefcase, CircleDollarSign, Landmark, Plus, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
+import { Activity, Bot, CandlestickChart, Briefcase, CircleDollarSign, Landmark, Plus, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -9,8 +9,10 @@ import { Stat } from "@/components/ui/stat";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
+import { useLiveQuotes, useWatchlist } from "@/features/markets/hooks";
+import { Change, QuoteState, SourceBadge } from "@/pages/MarketsPage";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { formatMoney, relativeTime, sumDecimals } from "@/lib/utils";
+import { formatMoney, formatPrice, relativeTime, sumDecimals } from "@/lib/utils";
 import type { TradingAccount } from "@/services/api";
 
 const ACTION_LABELS: Record<string, string> = {
@@ -124,13 +126,15 @@ export function OverviewPage() {
         </Card>
       </div>
 
+      <MarketSnapshot />
+
       <Card>
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Market data", "Phase 3", "Asset registry, provider adapters, streaming"],
             ["Research engine", "Phase 4", "News, filings, RAG, cited reports"],
             ["AI agents", "Phase 5", "Orchestrator + specialist agents"],
+            ["Quant models", "Phase 6", "Features, training, drift detection"],
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
@@ -143,5 +147,36 @@ export function OverviewPage() {
 
       <CreateAccountDialog open={creating} onClose={() => setCreating(false)} />
     </div>
+  );
+}
+
+function MarketSnapshot() {
+  const wl = useWatchlist();
+  const items = wl.data?.items ?? [];
+  const { quotes } = useLiveQuotes(items.map((i) => i.instrument.symbol));
+  return (
+    <Card>
+      <CardHeader title="Watchlist" description="Live quotes from the market-data service"
+        action={<Link to="/markets" className="text-xs text-accent hover:underline">Open markets</Link>} />
+      {wl.isLoading ? <div className="p-8"><Spinner className="mx-auto" /></div> : items.length === 0 ? (
+        <EmptyState icon={<CandlestickChart />} title="Your watchlist is empty" />
+      ) : (
+        <div className="grid divide-border/60 sm:grid-cols-2 sm:divide-x lg:grid-cols-4">
+          {items.slice(0, 8).map((i) => {
+            const q = quotes[i.instrument.symbol] ?? i.quote;
+            return (
+              <Link key={i.instrument.symbol} to={`/markets?symbol=${i.instrument.slug}`} className="border-b border-border/60 p-4 hover:bg-surface-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{i.instrument.symbol}</span>
+                  <QuoteState q={q} />
+                </div>
+                <div className="num mt-1 text-lg font-semibold">{formatPrice(q?.last, i.instrument.price_decimals)}</div>
+                <div className="flex items-center justify-between text-xs"><Change q={q} /><SourceBadge source={q?.source} /></div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </Card>
   );
 }

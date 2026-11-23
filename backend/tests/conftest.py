@@ -19,6 +19,7 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.market import service as market_service  # noqa: E402
 from app.models import RoleName  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
@@ -41,11 +42,14 @@ async def clean_state():
     async with SessionLocal() as db:
         await db.execute(text(
             "TRUNCATE ledger_entries, ledger_transactions, ledger_accounts, trading_accounts, "
-            "user_sessions, user_settings, audit_logs, users RESTART IDENTITY CASCADE"
+            "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
+            "watchlists, users RESTART IDENTITY CASCADE"
         ))
         await db.commit()
     login_limiter.reset()
     get_settings.cache_clear()
+    market_service.clear_caches()
+    market_service._providers.clear()
     yield
 
 
