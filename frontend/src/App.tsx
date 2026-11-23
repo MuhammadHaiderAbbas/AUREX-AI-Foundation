@@ -4,6 +4,7 @@ import { NAV } from "@/components/layout/nav";
 import { Spinner } from "@/components/ui/feedback";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { AdminPage } from "@/pages/AdminPage";
+import { AITradingPage } from "@/pages/AITradingPage";
 import { LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { ModulePage } from "@/pages/ModulePage";
@@ -29,6 +30,7 @@ export default function App() {
         <Route index element={<OverviewPage />} />
         <Route path="markets" element={<MarketsPage />} />
         <Route path="research" element={<ResearchPage />} />
+        <Route path="ai-trading" element={<AITradingPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

@@ -13,7 +13,7 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
           │ market/     registry, calendars, providers, stream (Phase 3)      │
           │ integrations/  broker adapters                  (Phase 12)        │
           │ research/   ingestion, hybrid RAG, grounded reports (Phase 4)     │
-          │ agents/     orchestrator + specialist agents     (Phase 5)        │
+          │ agents/     orchestrator, 8 specialists, consensus (Phase 5)      │
           │ trading/    OMS + paper execution                (Phase 8)        │
           │ risk/       independent risk gate, kill switch   (Phase 9)        │
           └────────────────────────────────────┬─────────────────────────────┘
@@ -58,6 +58,10 @@ staleness and tradability, watchlists and the WebSocket stream. See `market-data
 classification and tagging, chunking, pgvector + full-text hybrid retrieval, and grounded
 reports with quote-checked citations from an offline engine or Claude. See
 `research-engine.md`.
+
+**Phase 5** added the agent department: eight specialists (five voting, three gates), a
+consensus engine that defaults to NO TRADE, and inert, sized trade proposals awaiting the
+risk gate. See `agents.md`.
 
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that

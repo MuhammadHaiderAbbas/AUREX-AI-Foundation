@@ -122,3 +122,32 @@ test("research lab: corpus, grounded report with citations", async ({ page }) =>
   await page.getByRole("button", { name: "Research", exact: true }).click();
   await expect(page.getByText("Insufficient evidence", { exact: true })).toBeVisible();
 });
+
+test("agent desk: run analysis, explained decision, evidence", async ({ page }) => {
+  const email = `e2e-ai-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Agent User");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("link", { name: "Main paper account" })).toBeVisible();
+
+  await page.getByRole("link", { name: "AI Trading" }).click();
+  await page.getByLabel("Instrument").selectOption("ETH-USD");
+  await page.getByRole("button", { name: "Run analysis" }).click();
+  const decision = page.getByTestId("decision");
+  await expect(decision).toHaveText(/BUY|NO TRADE/);
+  if ((await decision.textContent())?.includes("NO TRADE")) await expect(page.getByText("Why no trade")).toBeVisible();
+  else await expect(page.getByTestId("proposal")).toBeVisible();
+  for (const a of ["technical", "quant", "regime", "fundamental", "news", "sentiment", "portfolio", "risk"]) {
+    await expect(page.getByTestId(`agent-${a}`)).toBeVisible();
+  }
+  await expect(page.getByTestId("agent-fundamental")).toContainText("Abstained");
+  await page.getByTestId("agent-technical").getByRole("button", { name: /Evidence/ }).click();
+  await expect(page.getByText("RSI(14)")).toBeVisible();
+  await expect(page.getByText(/ETH-USD · (BUY|No trade)/)).toBeVisible();
+  await page.getByRole("tab", { name: "Agents" }).click();
+  await expect(page.getByText("Risk Agent")).toBeVisible();
+});

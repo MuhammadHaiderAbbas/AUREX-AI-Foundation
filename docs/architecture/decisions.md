@@ -79,3 +79,18 @@ unigrams and bigrams), stored in pgvector and fused with Postgres full text.
 browser demo, and is an honest lexical baseline. Every chunk records its `embedding_model`,
 so a semantic model (hosted or local) can be added and the corpus re-indexed, with retrieval
 quality measured against this baseline before switching (Phase 6 evaluation tooling).
+
+## ADR-011 Deterministic, explainable agents first
+**Decision.** The first agents are transparent statistical and rule-based functions of an
+immutable snapshot. LLMs are not in the decision path. Claude is used in research (Phase 4),
+where its claims are verified.
+**Why.** Every decision must be reproducible from stored inputs and explainable row by row.
+A deterministic baseline is also what any future ML or LLM agent must beat after costs and
+out of sample (Phase 6–7) before it earns vote weight.
+
+## ADR-012 Proposals are inert by construction
+**Decision.** Trade proposals have no execution path in Phase 5. `risk_check_required` is
+enforced by a database constraint. Bearish views never become short orders. The advisory
+risk agent cannot approve anything; the independent risk gate (Phase 9) has final authority.
+**Why.** This follows the blueprint's core rule: the AI never talks to an exchange, and the
+risk controller can reject anything, regardless of AI confidence.

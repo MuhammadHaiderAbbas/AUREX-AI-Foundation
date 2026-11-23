@@ -52,6 +52,14 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await page.locator("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("cell", { name: /^Desk memo on GBP\/USD Demo desk/ })).toBeVisible();
 
+  // Agent department in the browser: run, explained decision, all eight agents
+  await page.getByRole("link", { name: "AI Trading" }).click();
+  await page.getByLabel("Instrument").selectOption("EUR/USD");
+  await page.getByRole("button", { name: "Run analysis" }).click();
+  await expect(page.getByTestId("decision")).toHaveText(/BUY|NO TRADE/);
+  for (const a of ["technical", "quant", "regime", "news", "portfolio", "risk"]) await expect(page.getByTestId(`agent-${a}`)).toBeVisible();
+  await expect(page.getByTestId("agent-news")).not.toContainText("Error");
+
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
   await expect(page.getByText("Apple Inc.").first()).toBeVisible();

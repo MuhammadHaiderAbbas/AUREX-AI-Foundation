@@ -36,6 +36,10 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | GET | `/research/search?q=&symbols=&k=` | bearer | Hybrid retrieval |
 | POST | `/research/ask` | bearer | Grounded report (rate-limited per user) |
 | GET | `/research/reports` · `/research/reports/{id}` | bearer | The caller's own reports |
+| GET | `/ai/agents` · PATCH `/ai/agents/{name}` | bearer · admin | Agent registry and configuration |
+| POST | `/ai/run` | bearer | Run the agent department on `{symbol, account_id?}` (rate-limited) |
+| GET | `/ai/runs` · `/ai/runs/{id}` | bearer | The caller's runs, with findings, reasons and proposal |
+| GET | `/ai/proposals` · POST `/ai/proposals/{id}/dismiss` | bearer | Trade proposals (`effective_status` includes EXPIRED) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

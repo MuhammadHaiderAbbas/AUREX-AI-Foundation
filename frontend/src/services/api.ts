@@ -286,3 +286,27 @@ export interface ResearchStatus {
   engine: "extractive" | "claude"; model: string | null; embedding_model: string;
   documents: number; chunks: number; url_ingestion_enabled: boolean;
 }
+
+// ---- AI agents (Phase 5) ----------------------------------------------------------
+export interface AIAgent { name: string; display_name: string; role: string; kind: "directional" | "gate"; weight: number; enabled: boolean; version: string }
+export interface AgentEvidence { label: string; value: string; detail: string }
+export interface AgentFinding {
+  agent: string; status: "ok" | "abstain" | "error"; direction: -1 | 0 | 1; score: number;
+  confidence: number; summary: string; evidence: AgentEvidence[]; duration_ms: number;
+}
+export interface TradeProposal {
+  id: string; run_id: string; account_id: string; symbol: string; direction: "BUY" | "SELL";
+  strategy_id: string; entry_type: string; entry_price: string; stop_loss: string; take_profit: string;
+  quantity: string; notional: string; risk_amount: string; account_currency: string; confidence: number;
+  reward_risk: number; invalidation_conditions: string[]; risk_check_required: boolean;
+  status: "PENDING_RISK_REVIEW" | "DISMISSED"; effective_status: "PENDING_RISK_REVIEW" | "DISMISSED" | "EXPIRED";
+  expires_at: string; created_at: string; dismissed_at: string | null;
+}
+export interface RunSummary {
+  id: string; symbol: string; decision: "BUY" | "NO_TRADE"; bias: "bullish" | "bearish" | "neutral";
+  net_score: number; agreement: number; coverage: number; confidence: number; created_at: string; latency_ms: number;
+}
+export interface AgentRun extends RunSummary {
+  account_id: string | null; reasons: string[]; weights: Record<string, number>; context: Record<string, unknown>;
+  started_at: string; finished_at: string; findings: AgentFinding[]; proposal: TradeProposal | null;
+}
