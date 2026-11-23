@@ -16,6 +16,10 @@ Delivered so far:
   session calendars; a provider interface (synthetic, Coinbase, ECB); stored candles;
   indicators; stale and tradable quote rules; watchlists; WebSocket streaming; candlestick
   charts.
+- **Phase 4, Research engine:** document ingestion (text, HTML, PDF, URL, RSS);
+  classification and instrument tagging; pgvector + full-text hybrid retrieval; grounded
+  research reports with quote-checked citations, labelled interpretation, contradictions,
+  staleness and heuristic confidence; offline engine plus an optional Claude engine.
 
 ## Quick start (Docker)
 
@@ -44,9 +48,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres) | `make backend-test` | 68 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 86 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -60,6 +64,7 @@ backend/          FastAPI app, Alembic migrations, tests
   app/models/     SQLAlchemy models (identity, accounts, ledger, audit)
   app/services/   auth, accounts, ledger, audit
   app/market/     calendars, providers, indicators, market service (Phase 3)
+  app/research/   extraction, chunking, embeddings, retrieval, reports, Claude engine (Phase 4)
   app/{agents,trading,risk,research,integrations}/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
@@ -99,7 +104,20 @@ infrastructure/   monitoring and deployment (populated in Phase 11)
 Market data runs in `synthetic` mode by default. Set `AUREX_MARKET_DATA_MODE=live` for
 Coinbase and ECB data (the server needs outbound access to those hosts).
 
-**Next: Phase 4, the financial research engine:** news and filings ingestion, extraction,
-RAG with pgvector, and cited research reports.
+## Phase 4 deliverables
+
+- [x] Ingestion of pasted text and HTML, uploads (PDF, HTML, text), and allow-listed URLs and RSS/Atom feeds
+- [x] Extraction with page and paragraph references; deduplication by content hash
+- [x] Document classification, instrument tagging and lexical tone
+- [x] Chunking and embeddings in pgvector (HNSW) plus Postgres full text, fused with RRF
+- [x] Grounded reports: quote-checked facts, labelled interpretation, contradictions, staleness, heuristic confidence
+- [x] Offline extractive engine (default) and a Claude engine (`claude-opus-5-5`) with automatic fallback
+- [x] Research Lab UI (ask, report view with citations, corpus management, search); works in the static demo
+
+Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude.
+
+**Next: Phase 5, the AI agent department:** an orchestrator plus specialist agents
+(technical, fundamental, news, sentiment, quant, regime, portfolio, risk) that produce
+structured, evidence-backed trade *proposals* for the independent risk gate.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

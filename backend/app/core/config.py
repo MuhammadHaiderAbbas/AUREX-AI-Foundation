@@ -52,7 +52,19 @@ class Settings(BaseSettings):
     stream_interval_seconds: float = 2.0
     max_stream_symbols: int = 50
 
-    @field_validator("cors_origins", "supported_currencies", mode="before")
+    # Research engine (Phase 4). "extractive" is offline and deterministic; "claude" uses the
+    # Anthropic API (credentials from ANTHROPIC_API_KEY / an `ant auth login` profile).
+    research_engine: Literal["extractive", "claude"] = "extractive"
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    llm_timeout_seconds: float = 120.0
+    research_top_k: int = 8
+    research_asks_per_hour: int = 30
+    # Hosts that admins may ingest from by URL/RSS. Empty = URL ingestion disabled.
+    research_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("cors_origins", "supported_currencies", "research_allowed_hosts",
+                     mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:
         if isinstance(v, str):

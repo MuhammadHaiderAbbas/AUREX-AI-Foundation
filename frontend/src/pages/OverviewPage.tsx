@@ -24,6 +24,9 @@ const ACTION_LABELS: Record<string, string> = {
   "wallet.deposit": "Virtual deposit",
   "wallet.withdraw": "Virtual withdrawal",
   "user.settings.update": "Settings updated",
+  "research.ask": "Research report generated",
+  "research.document.add": "Research document indexed",
+  "research.samples.load": "Sample research corpus loaded",
   "admin.bootstrap": "Administrator account created",
   "admin.user.update": "User updated by administrator",
 };
@@ -132,9 +135,9 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Research engine", "Phase 4", "News, filings, RAG, cited reports"],
             ["AI agents", "Phase 5", "Orchestrator + specialist agents"],
             ["Quant models", "Phase 6", "Features, training, drift detection"],
+            ["Strategy lab", "Phase 7", "Event-driven backtests with costs"],
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">

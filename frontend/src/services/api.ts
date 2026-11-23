@@ -226,3 +226,63 @@ export interface CandlesResponse {
 }
 
 export interface Watchlist { id: string; name: string; items: InstrumentWithQuote[] }
+
+// ---- Research (Phase 4) ------------------------------------------------------
+export type DocType = "earnings" | "filing" | "central_bank" | "economic_data" | "news" | "analysis" | "other";
+
+export interface ResearchDocument {
+  id: string;
+  title: string;
+  source_name: string;
+  source_url: string | null;
+  doc_type: DocType;
+  content_type: string;
+  published_at: string | null;
+  retrieved_at: string;
+  word_count: number;
+  page_count: number | null;
+  symbols: string[];
+  sentiment: number;
+  is_sample: boolean;
+}
+export interface ResearchChunk { id: string; ordinal: number; text: string; page: number | null; paragraph: number; sentiment: number }
+export interface ResearchDocumentDetail extends ResearchDocument { chunks: ResearchChunk[] }
+export interface IngestResult { created: number; duplicates: number; documents: ResearchDocument[] }
+
+export interface SearchHit {
+  chunk_id: string; document: ResearchDocument; text: string; page: number | null;
+  paragraph: number; score: number; stale: boolean;
+}
+
+export interface ReportClaim { statement: string; citations: number[]; quote: string; verified: boolean }
+export interface ReportSource {
+  n: number; document_id: string; chunk_id: string; title: string; source_name: string;
+  source_url: string | null; doc_type: DocType; published_at: string | null; retrieved_at: string;
+  page: number | null; paragraph: number; age_days: number | null; stale: boolean;
+  stale_after_days: number; is_sample: boolean; relevance: number; sentiment: number; excerpt: string;
+}
+export interface ReportBody {
+  question: string;
+  generated_at: string;
+  engine: string;
+  insufficient_evidence: boolean;
+  facts: ReportClaim[];
+  interpretation: { text: string; basis: "system" | "model"; label: string } | null;
+  contradictions: ReportClaim[];
+  open_questions: string[];
+  confidence: { score: number; label: "low" | "medium" | "high"; factors: Record<string, number>; method: string };
+  sources: ReportSource[];
+  validation: { claims_proposed: number; claims_verified: number; claims_rejected: number; rejected: { statement: string; reason: string }[] };
+  warnings: string[];
+  disclaimer: string;
+}
+export interface ReportSummary {
+  id: string; question: string; symbols: string[]; engine: string; confidence: number;
+  insufficient_evidence: boolean; created_at: string;
+}
+export interface ResearchReport extends ReportSummary { body: ReportBody; latency_ms: number }
+
+export interface ResearchStatus {
+  engine: "extractive" | "claude"; model: string | null; embedding_model: string;
+  documents: number; chunks: number; url_ingestion_enabled: boolean;
+}

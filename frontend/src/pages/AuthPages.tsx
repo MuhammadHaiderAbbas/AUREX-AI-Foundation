@@ -137,6 +137,7 @@ function DemoLaunch({ onError }: { onError: (e: unknown) => void }) {
       const accounts = await api<TradingAccount[]>("/accounts");
       if (accounts.length === 0) {
         await api("/accounts", { method: "POST", json: { name: "Demo paper account", base_currency: "USD", starting_balance: "100000" } });
+        await api("/research/samples", { method: "POST" });
       }
       navigate("/", { replace: true });
     } catch (e) { onError(e); } finally { setBusy(false); }

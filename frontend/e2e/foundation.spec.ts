@@ -96,3 +96,29 @@ test("markets stream live quotes and render charts", async ({ page }) => {
   await page.getByRole("button", { name: /^QQQ Invesco/ }).click();
   await expect(page.getByTestId("last-price")).not.toHaveText("—");
 });
+
+test("research lab: corpus, grounded report with citations", async ({ page }) => {
+  test.skip(!process.env.AUREX_E2E_ADMIN_EMAIL, "needs an admin to load the corpus");
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
+  await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: "AI Research Lab" }).click();
+  await page.getByRole("tab", { name: "Corpus" }).click();
+  await page.getByRole("button", { name: "Load sample corpus" }).click();
+  await expect(page.getByText(/\d+ indexed/)).toBeVisible();
+  await expect(page.getByText("Fictional sample").first()).toBeVisible();
+
+  await page.getByRole("tab", { name: "Research" }).click();
+  await page.getByLabel("Research question").fill("What did the central bank decide on the policy rate?");
+  await page.getByRole("button", { name: "Research", exact: true }).click();
+  await expect(page.getByText("Verified facts")).toBeVisible();
+  await expect(page.getByText("Interpretation (automated heuristic)")).toBeVisible();
+  await expect(page.getByRole("meter", { name: "Evidence confidence" })).toBeVisible();
+  await page.getByRole("button", { name: "Source 1" }).first().click();
+  await expect(page.getByText(/voted seven to two/).last()).toBeVisible();
+
+  await page.getByLabel("Research question").fill("volcanic eruptions in Iceland tourism");
+  await page.getByRole("button", { name: "Research", exact: true }).click();
+  await expect(page.getByText("Insufficient evidence", { exact: true })).toBeVisible();
+});

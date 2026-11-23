@@ -9,6 +9,7 @@
 import { fromUnits, toUnits } from "@/lib/utils";
 import { INSTRUMENTS } from "./instruments";
 import * as mkt from "./market";
+import * as rs from "./research";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -33,6 +34,9 @@ interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
   settings: Record<string, { timezone: string; base_currency: string; theme: string; updated_at: string }>;
   watchlists: Record<string, string[]>;
+  docs: rs.DDoc[];
+  chunks: rs.DChunk[];
+  reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
 
 let memory: State | null = null;
@@ -40,9 +44,13 @@ function load(): State {
   if (memory) return memory;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return (memory = JSON.parse(raw) as State);
+    if (raw) {
+      memory = JSON.parse(raw) as State;
+      memory.docs ??= []; memory.chunks ??= []; memory.reports ??= []; // states saved by older demo builds
+      return memory;
+    }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {} });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [] });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -149,7 +157,7 @@ function watchlist(s: State, userId: string) {
 }
 
 // ---- router ---------------------------------------------------------------------------
-type Ctx = { s: State; body: Record<string, unknown>; headers: Headers; params: string[]; query: URLSearchParams };
+type Ctx = { s: State; body: Record<string, unknown>; headers: Headers; params: string[]; query: URLSearchParams; form?: FormData };
 type Handler = (c: Ctx) => Promise<Response> | Response;
 
 function authUser(c: Ctx): { user: DUser; session: DSession } {
@@ -201,6 +209,50 @@ async function movement(c: Ctx, kind: "VIRTUAL_DEPOSIT" | "VIRTUAL_WITHDRAWAL") 
   await audit(c.s, user.id, kind === "VIRTUAL_DEPOSIT" ? "wallet.deposit" : "wallet.withdraw", { type: "trading_account", id: a.id, details: { amount, currency: a.base_currency, ledger_transaction_id: t.id } });
   return json(201, txnRead(t));
 }
+
+// ---- research ---------------------------------------------------------------------------
+const ALIASES: Record<string, string[]> = Object.fromEntries(INSTRUMENTS.map((i) => {
+  const names = new Set([i.symbol, slug(i.symbol)]);
+  if (i.asset_class === "CRYPTO") { names.add(i.base_currency); names.add(i.display_name.split(" /")[0]!); }
+  if (i.asset_class === "STOCK" || i.asset_class === "ETF") { names.add(i.display_name); names.add(i.symbol.split(".")[0]!); }
+  return [i.symbol, [...names].sort((a, b) => b.length - a.length)];
+}));
+const docRead = (d: rs.DDoc) => { const { content_hash: _h, ...rest } = d; return rest; };
+
+async function ingest(s: State, input: { title: string; text: string; source_name: string; source_url?: string | null; published_at?: string | null; doc_type?: string | null; content_type: string; is_sample?: boolean }): Promise<[rs.DDoc, boolean]> {
+  const text = rs.normalise(input.text);
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words < 5) throw new HttpError(422, "business_rule_violation", "Document has too little text to index");
+  if (input.doc_type && !rs.DOC_TYPES.includes(input.doc_type)) throw bad(`doc_type must be one of ${rs.DOC_TYPES.join(", ")}`, "doc_type");
+  const hash = await sha256(text);
+  const existing = s.docs.find((d) => d.content_hash === hash);
+  if (existing) return [existing, false];
+  const title = input.title.slice(0, 300).trim() || "(untitled)";
+  const doc: rs.DDoc = {
+    id: uuid(), title, source_name: input.source_name.slice(0, 120), source_url: input.source_url ?? null,
+    doc_type: input.doc_type || rs.classify(title, text), content_type: input.content_type,
+    published_at: input.published_at ?? null, retrieved_at: now(), content_hash: hash, word_count: words, page_count: null,
+    symbols: rs.tagInstruments(`${title}\n${text}`, ALIASES), sentiment: rs.sentiment(text), is_sample: !!input.is_sample,
+  };
+  s.docs.push(doc);
+  for (const c of rs.chunk(text)) {
+    s.chunks.push({ id: uuid(), document_id: doc.id, ordinal: c.ordinal, text: c.text, page: null, paragraph: c.paragraph, sentiment: rs.sentiment(c.text), embedding: rs.embed(`${title}\n${c.text}`) });
+  }
+  return [doc, true];
+}
+async function finishIngest(s: State, user: DUser, results: [rs.DDoc, boolean][], via: string) {
+  for (const [d, created] of results) if (created) await audit(s, user.id, "research.document.add", { type: "research_document", id: d.id, details: { title: d.title, via } });
+  return json(201, { created: results.filter((r) => r[1]).length, duplicates: results.filter((r) => !r[1]).length, documents: results.map(([d]) => docRead(d)) });
+}
+async function loadSamples(s: State) {
+  let created = 0;
+  for (const [title, type, age, text] of rs.SAMPLES) {
+    const [, isNew] = await ingest(s, { title, text, source_name: rs.SAMPLE_SOURCE, published_at: new Date(Date.now() - age * 86_400_000).toISOString(), doc_type: type, content_type: "text/plain", is_sample: true });
+    created += +isNew;
+  }
+  return created;
+}
+const reportSummary = (r: State["reports"][number]) => { const { body: _b, user_id: _u, latency_ms: _l, ...rest } = r; return rest; };
 
 const routes: [string, RegExp, Handler][] = [
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
@@ -389,6 +441,89 @@ const routes: [string, RegExp, Handler][] = [
     c.s.watchlists[user.id] = list.filter((x) => x !== i.symbol);
     return json(200, watchlist(c.s, user.id));
   }],
+
+  ["GET", /^\/research\/status$/, (c) => { authUser(c); return json(200, { engine: "extractive", model: null, embedding_model: "hashing-v1-384 (browser)", documents: c.s.docs.length, chunks: c.s.chunks.length, url_ingestion_enabled: false }); }],
+  ["GET", /^\/research\/documents$/, (c) => {
+    authUser(c);
+    const q = c.query.get("q")?.toLowerCase(), type = c.query.get("doc_type"), sym = c.query.get("symbol");
+    const rows = c.s.docs.filter((d) => (!q || d.title.toLowerCase().includes(q)) && (!type || d.doc_type === type) && (!sym || d.symbols.includes(sym)))
+      .sort((a, b) => (b.published_at ?? "").localeCompare(a.published_at ?? ""));
+    return json(200, { items: rows.map(docRead), total: rows.length, limit: 200, offset: 0 });
+  }],
+  ["GET", /^\/research\/documents\/([\w-]+)$/, (c) => {
+    authUser(c);
+    const d = c.s.docs.find((x) => x.id === c.params[0]);
+    if (!d) throw new HttpError(404, "not_found", "Research document not found");
+    const chunks = c.s.chunks.filter((x) => x.document_id === d.id).sort((a, b) => a.ordinal - b.ordinal).map(({ embedding: _e, document_id: _d, ...rest }) => rest);
+    return json(200, { ...docRead(d), chunks });
+  }],
+  ["POST", /^\/research\/documents$/, async (c) => {
+    const { user } = admin(c);
+    if (!c.body.text) throw new HttpError(422, "business_rule_violation", "Provide `text` (HTML ingestion of pasted markup requires the backend)");
+    const r = await ingest(c.s, { title: String(c.body.title ?? ""), text: String(c.body.text), source_name: String(c.body.source_name ?? "Manual"), source_url: (c.body.source_url as string) ?? null, published_at: (c.body.published_at as string) ?? null, doc_type: (c.body.doc_type as string) ?? null, content_type: "text/plain" });
+    return finishIngest(c.s, user, [r], "manual");
+  }],
+  ["POST", /^\/research\/documents\/upload$/, async (c) => {
+    const { user } = admin(c);
+    const file = c.form?.get("file");
+    if (!(file instanceof File)) throw bad("file is required", "file");
+    if (file.size > 10 * 1024 * 1024) throw new HttpError(422, "business_rule_violation", "Document exceeds the 10 MB limit");
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".pdf") || file.type === "application/pdf") throw new HttpError(422, "business_rule_violation", "PDF extraction runs on the AUREX backend and is not available in the browser demo");
+    const raw = await file.text();
+    const html = name.endsWith(".html") || name.endsWith(".htm") || /^\s*<(!doctype|html)/i.test(raw);
+    const { title, text } = html ? rs.htmlToText(raw) : { title: "", text: raw };
+    const r = await ingest(c.s, { title: title || file.name, text, source_name: String(c.form?.get("source_name") ?? "Upload"), published_at: (c.form?.get("published_at") as string) || null, content_type: html ? "text/html" : "text/plain" });
+    return finishIngest(c.s, user, [r], "upload");
+  }],
+  ["POST", /^\/research\/documents\/fetch$/, (c) => { admin(c); throw new HttpError(403, "forbidden", "URL ingestion requires the AUREX backend"); }],
+  ["DELETE", /^\/research\/documents\/([\w-]+)$/, async (c) => {
+    const { user } = admin(c);
+    const d = c.s.docs.find((x) => x.id === c.params[0]);
+    if (!d) throw new HttpError(404, "not_found", "Research document not found");
+    c.s.docs = c.s.docs.filter((x) => x.id !== d.id);
+    c.s.chunks = c.s.chunks.filter((x) => x.document_id !== d.id);
+    await audit(c.s, user.id, "research.document.delete", { type: "research_document", id: d.id, details: { title: d.title } });
+    return json(204, null);
+  }],
+  ["POST", /^\/research\/samples$/, async (c) => {
+    const { user } = admin(c);
+    const created = await loadSamples(c.s);
+    if (created) await audit(c.s, user.id, "research.samples.load", { details: { documents: created } });
+    const samples = c.s.docs.filter((d) => d.is_sample);
+    return json(200, { created, duplicates: samples.length - created, documents: samples.map(docRead) });
+  }],
+  ["GET", /^\/research\/search$/, (c) => {
+    authUser(c);
+    const q = c.query.get("q") ?? "";
+    const syms = (c.query.get("symbols") ?? "").split(",").filter(Boolean);
+    const hits = rs.search(c.s.docs, c.s.chunks, q, Number(c.query.get("k") ?? 8), syms);
+    return json(200, hits.map((h) => ({ chunk_id: h.chunk.id, document: docRead(h.doc), text: h.chunk.text, page: h.chunk.page, paragraph: h.chunk.paragraph, score: h.score, stale: false })));
+  }],
+  ["POST", /^\/research\/ask$/, async (c) => {
+    const { user } = authUser(c);
+    const question = String(c.body.question ?? "").trim();
+    if (question.length < 3) throw bad("Question is too short", "question");
+    const t0 = performance.now();
+    const symbols = Array.isArray(c.body.symbols) ? (c.body.symbols as string[]) : [];
+    const ev = rs.search(c.s.docs, c.s.chunks, question, 8, symbols, (c.body.max_age_days as number) || undefined);
+    const body = rs.report(question, ev);
+    const r = { id: uuid(), user_id: user.id, question, symbols, engine: body.engine, confidence: body.confidence.score, insufficient_evidence: body.insufficient_evidence, created_at: now(), latency_ms: Math.round(performance.now() - t0), body };
+    c.s.reports.push(r);
+    await audit(c.s, user.id, "research.ask", { type: "research_report", id: r.id, details: { engine: r.engine, sources: ev.length, facts: body.facts.length } });
+    return json(201, r);
+  }],
+  ["GET", /^\/research\/reports$/, (c) => {
+    const { user } = authUser(c);
+    const mine = c.s.reports.filter((r) => r.user_id === user.id).reverse();
+    return json(200, { items: mine.slice(0, 30).map(reportSummary), total: mine.length, limit: 30, offset: 0 });
+  }],
+  ["GET", /^\/research\/reports\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c);
+    const r = c.s.reports.find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!r) throw new HttpError(404, "not_found", "Report not found");
+    return json(200, r);
+  }],
 ];
 
 /** fetch()-compatible entry point used by services/api.ts in demo builds. */
@@ -403,7 +538,8 @@ export async function demoFetch(input: string, init: RequestInit = {}): Promise<
       const match = path.match(re);
       if (!match) continue;
       const body = typeof init.body === "string" && init.body ? JSON.parse(init.body) : {};
-      const res = await handler({ s, body, headers: new Headers(init.headers), params: match.slice(1), query: url.searchParams });
+      const form = init.body instanceof FormData ? init.body : undefined;
+      const res = await handler({ s, body, form, headers: new Headers(init.headers), params: match.slice(1), query: url.searchParams });
       if (method !== "GET" || path.startsWith("/markets/watchlist") || path.startsWith("/users/me/settings")) save();
       return res;
     }
