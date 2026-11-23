@@ -10,6 +10,7 @@ import { fromUnits, toUnits } from "@/lib/utils";
 import { INSTRUMENTS } from "./instruments";
 import * as mkt from "./market";
 import * as rs from "./research";
+import * as ag from "./agents";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -36,6 +37,8 @@ interface State {
   watchlists: Record<string, string[]>;
   docs: rs.DDoc[];
   chunks: rs.DChunk[];
+  aiRuns: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+  aiAgents: Record<string, { enabled: boolean; weight: number }>;
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
 
@@ -47,10 +50,11 @@ function load(): State {
     if (raw) {
       memory = JSON.parse(raw) as State;
       memory.docs ??= []; memory.chunks ??= []; memory.reports ??= []; // states saved by older demo builds
+      memory.aiRuns ??= []; memory.aiAgents ??= {};
       return memory;
     }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [] });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {} });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -253,6 +257,32 @@ async function loadSamples(s: State) {
   return created;
 }
 const reportSummary = (r: State["reports"][number]) => { const { body: _b, user_id: _u, latency_ms: _l, ...rest } = r; return rest; };
+
+// ---- agents -------------------------------------------------------------------------------
+const AGENT_META: [string, string, "directional" | "gate", string][] = [
+  ["technical", "Technical Agent", "directional", "Trend, momentum and volatility from hourly OHLCV (SMA, RSI, MACD, Bollinger, ATR)."],
+  ["quant", "Quant Agent", "directional", "Statistical drift estimate with a forecast interval and mean-reversion check."],
+  ["fundamental", "Fundamental Agent", "directional", "Earnings and filings evidence for shares and ETFs."],
+  ["news", "News Agent", "directional", "Recent instrument news/analysis tone and high-impact event windows."],
+  ["sentiment", "Sentiment Agent", "directional", "30-day research tone for the instrument."],
+  ["regime", "Regime Agent", "gate", "Volatility regime, trend efficiency and distribution-drift (KS) gate."],
+  ["portfolio", "Portfolio Agent", "gate", "Position sizing at 0.5% risk of equity, no leverage, exposure caps."],
+  ["risk", "Risk Agent", "gate", "Advisory pre-check: market state, staleness, spread, events, limits. The independent risk gate has final authority."],
+];
+const agentList = (s: State) => AGENT_META.map(([name, display_name, kind, role]) => ({
+  name, display_name, kind, role, version: "1.0",
+  weight: s.aiAgents[name]?.weight ?? ag.DEFAULT_WEIGHTS[name] ?? 0, enabled: s.aiAgents[name]?.enabled ?? true,
+}));
+function lastPrice(sym: string) { const i = INSTRUMENTS.find((x) => x.symbol === sym); return i ? +mkt.quote(i).last : null; }
+function fxRate(src: string, dst: string): number | null {
+  if (src === dst) return 1;
+  const rate = (a: string, b: string) => { const d = lastPrice(`${a}/${b}`); if (d) return d; const inv = lastPrice(`${b}/${a}`); return inv ? 1 / inv : null; };
+  const direct = rate(src, dst); if (direct) return direct;
+  const x = rate(src, "USD"), y = rate("USD", dst);
+  return x != null && y != null ? x * y : null;
+}
+const withEffective = (p: Record<string, unknown> | null) => p && ({ ...p, effective_status: p.status === "PENDING_RISK_REVIEW" && Date.parse(p.expires_at as string) <= Date.now() ? "EXPIRED" : p.status });
+const runSummary = (r: Record<string, unknown>) => ({ id: r.id, symbol: r.symbol, decision: r.decision, bias: r.bias, net_score: r.net_score, agreement: r.agreement, coverage: r.coverage, confidence: r.confidence, created_at: r.created_at, latency_ms: r.latency_ms });
 
 const routes: [string, RegExp, Handler][] = [
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
@@ -517,6 +547,85 @@ const routes: [string, RegExp, Handler][] = [
     const { user } = authUser(c);
     const mine = c.s.reports.filter((r) => r.user_id === user.id).reverse();
     return json(200, { items: mine.slice(0, 30).map(reportSummary), total: mine.length, limit: 30, offset: 0 });
+  }],
+  ["GET", /^\/ai\/agents$/, (c) => { authUser(c); return json(200, agentList(c.s)); }],
+  ["PATCH", /^\/ai\/agents\/(\w+)$/, async (c) => {
+    const { user } = admin(c);
+    const meta = agentList(c.s).find((a) => a.name === c.params[0]);
+    if (!meta) throw new HttpError(404, "not_found", "Agent not found");
+    if (meta.kind === "gate" && (c.body.enabled === false || (c.body.weight != null && c.body.weight !== 0))) throw new HttpError(422, "business_rule_violation", "Gate agents (regime, portfolio, risk) cannot be disabled or weighted");
+    const w = c.body.weight as number | undefined;
+    if (w != null && (typeof w !== "number" || w < 0 || w > 1)) throw bad("weight must be between 0 and 1", "weight");
+    c.s.aiAgents[meta.name] = { enabled: (c.body.enabled as boolean | undefined) ?? meta.enabled, weight: w ?? meta.weight };
+    await audit(c.s, user.id, "ai.agent.update", { type: "ai_agent", id: meta.name, details: c.body });
+    return json(200, agentList(c.s).find((a) => a.name === meta.name));
+  }],
+  ["POST", /^\/ai\/run$/, async (c) => {
+    const { user } = authUser(c);
+    const t0 = performance.now(), started = now();
+    const inst = findInst(String(c.body.symbol ?? ""));
+    const mine = c.s.accounts.filter((a) => a.owner_id === user.id && a.status === "ACTIVE");
+    const acct = c.body.account_id ? mine.find((a) => a.id === c.body.account_id) : mine[0];
+    if (c.body.account_id && !acct) throw new HttpError(404, "not_found", "Trading account not found");
+    const bars = (tf: string, n: number) => mkt.candles(inst, tf, n).map((b) => ({ t: b.open_time, o: +b.open, h: +b.high, l: +b.low, c: +b.close }));
+    const q = mkt.quote(inst);
+    const nowMs = Date.now();
+    const sig = (d: rs.DDoc) => ({ title: d.title, doc_type: d.doc_type, age_days: d.published_at ? (nowMs - Date.parse(d.published_at)) / 86_400_000 : 9999, sentiment: d.sentiment, is_sample: d.is_sample });
+    const docs = c.s.docs.filter((d) => d.symbols.includes(inst.symbol) && d.published_at).map(sig).filter((d) => d.age_days <= 400);
+    const macro = inst.asset_class === "FX" || inst.asset_class === "ETF"
+      ? c.s.docs.filter((d) => (d.doc_type === "central_bank" || d.doc_type === "economic_data") && d.published_at).map(sig).filter((d) => d.age_days <= 30) : [];
+    const bal = acct ? balances(c.s, acct) : null;
+    const ctx: ag.Ctx = {
+      symbol: inst.symbol, asset_class: inst.asset_class, quote_currency: inst.quote_currency, price_decimals: inst.price_decimals,
+      lot_size: Number(inst.lot_size), now: nowMs, h1: bars("1h", 300), d1: bars("1d", 250),
+      quote: { last: +q.last, bid: +q.bid, ask: +q.ask, market_open: q.market_open, stale: q.stale, tradable: q.tradable, source: q.source },
+      docs, macro, account: acct && bal ? { id: acct.id, currency: acct.base_currency, equity: +bal.equity, cash: +bal.cash } : null,
+      fx: acct ? fxRate(inst.quote_currency, acct.base_currency) : null, open_positions: 0,
+    };
+    const agents = agentList(c.s);
+    const enabled = new Set(agents.filter((a) => a.enabled).map((a) => a.name));
+    const weights = Object.fromEntries(agents.filter((a) => a.kind === "directional" && a.enabled).map((a) => [a.name, a.weight]));
+    if (!Object.keys(weights).length) throw new HttpError(422, "business_rule_violation", "All directional agents are disabled");
+    const findings = ag.runAgents(ctx, enabled);
+    const d = ag.decide(ctx, findings, weights);
+    const id = uuid();
+    const run = {
+      id, user_id: user.id, account_id: acct?.id ?? null, symbol: inst.symbol, ...d, proposal: null as Record<string, unknown> | null,
+      context: { as_of: new Date(nowMs).toISOString(), quote: ctx.quote, bars_1h: ctx.h1.length, bars_1d: ctx.d1.length, research_docs: docs.length, macro_docs: macro.length, account: ctx.account, fx_to_account: ctx.fx, open_positions: 0 },
+      findings: ag.ORDER.map((n) => { const { data: _d, ...rest } = findings[n]!; return rest; }),
+      started_at: started, finished_at: now(), created_at: now(), latency_ms: Math.round(performance.now() - t0),
+    };
+    if (d.proposal && acct) run.proposal = { ...d.proposal, id: uuid(), run_id: id, account_id: acct.id, account_currency: acct.base_currency, status: "PENDING_RISK_REVIEW", created_at: now(), dismissed_at: null };
+    c.s.aiRuns.push(run);
+    await audit(c.s, user.id, "ai.run", { type: "ai_run", id, details: { symbol: run.symbol, decision: run.decision, net_score: run.net_score, proposal: run.proposal?.id ?? null } });
+    const { user_id: _u, ...out } = run;
+    return json(201, { ...out, proposal: withEffective(run.proposal) });
+  }],
+  ["GET", /^\/ai\/runs$/, (c) => {
+    const { user } = authUser(c);
+    const mine = c.s.aiRuns.filter((r) => r.user_id === user.id).reverse();
+    return json(200, { items: mine.slice(0, 30).map(runSummary), total: mine.length, limit: 30, offset: 0 });
+  }],
+  ["GET", /^\/ai\/runs\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c);
+    const r = c.s.aiRuns.find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!r) throw new HttpError(404, "not_found", "Run not found");
+    const { user_id: _u, ...out } = r;
+    return json(200, { ...out, proposal: withEffective(r.proposal) });
+  }],
+  ["GET", /^\/ai\/proposals$/, (c) => {
+    const { user } = authUser(c);
+    const ps = c.s.aiRuns.filter((r) => r.user_id === user.id && r.proposal).map((r) => withEffective(r.proposal)).reverse();
+    return json(200, { items: ps.slice(0, 30), total: ps.length, limit: 30, offset: 0 });
+  }],
+  ["POST", /^\/ai\/proposals\/([\w-]+)\/dismiss$/, async (c) => {
+    const { user } = authUser(c);
+    const r = c.s.aiRuns.find((x) => x.user_id === user.id && x.proposal?.id === c.params[0]);
+    if (!r) throw new HttpError(404, "not_found", "Proposal not found");
+    if (r.proposal.status !== "PENDING_RISK_REVIEW") throw new HttpError(422, "business_rule_violation", "Only pending proposals can be dismissed");
+    r.proposal.status = "DISMISSED"; r.proposal.dismissed_at = now();
+    await audit(c.s, user.id, "ai.proposal.dismiss", { type: "trade_proposal", id: r.proposal.id });
+    return json(200, withEffective(r.proposal));
   }],
   ["GET", /^\/research\/reports\/([\w-]+)$/, (c) => {
     const { user } = authUser(c);

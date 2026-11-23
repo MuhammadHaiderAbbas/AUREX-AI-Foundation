@@ -20,6 +20,9 @@ Delivered so far:
   classification and instrument tagging; pgvector + full-text hybrid retrieval; grounded
   research reports with quote-checked citations, labelled interpretation, contradictions,
   staleness and heuristic confidence; offline engine plus an optional Claude engine.
+- **Phase 5, AI agent department:** technical, quant, fundamental, news, sentiment, regime,
+  portfolio and risk agents; an orchestrator and consensus engine with explicit NO TRADE
+  rules; sized trade proposals that await the independent risk gate.
 
 ## Quick start (Docker)
 
@@ -48,9 +51,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 86 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 105 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -65,7 +68,8 @@ backend/          FastAPI app, Alembic migrations, tests
   app/services/   auth, accounts, ledger, audit
   app/market/     calendars, providers, indicators, market service (Phase 3)
   app/research/   extraction, chunking, embeddings, retrieval, reports, Claude engine (Phase 4)
-  app/{agents,trading,risk,research,integrations}/   reserved for later phases
+  app/agents/     specialists, consensus, orchestrator (Phase 5)
+  app/{trading,risk,integrations}/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
   src/features/   auth + accounts state
@@ -116,8 +120,18 @@ Coinbase and ECB data (the server needs outbound access to those hosts).
 
 Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude.
 
-**Next: Phase 5, the AI agent department:** an orchestrator plus specialist agents
-(technical, fundamental, news, sentiment, quant, regime, portfolio, risk) that produce
-structured, evidence-backed trade *proposals* for the independent risk gate.
+## Phase 5 deliverables
+
+- [x] Eight specialist agents with evidence, uncertainty and abstention
+- [x] Regime gate with a volatility percentile and a KS concept-drift test
+- [x] Portfolio sizing at 0.5% risk of equity, no leverage, exposure caps and FX conversion
+- [x] Advisory risk pre-check (market state, staleness, spread, events, limits)
+- [x] Consensus engine that defaults to NO TRADE and explains every reason
+- [x] Trade proposals in the blueprint format, inert by database constraint, with expiry and dismissal
+- [x] Agent registry with admin weights and toggles; runs persisted and audited
+- [x] Agent desk UI (decision, agent cards, evidence, proposal, activity timeline); works in the static demo
+
+**Next: Phase 6, quantitative models:** feature pipelines, model training, walk-forward
+validation, a model registry, and concept-drift monitoring.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

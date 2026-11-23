@@ -15,6 +15,7 @@ from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from app.api.v1 import ai as ai_api  # noqa: E402
 from app.api.v1 import research as research_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
@@ -46,7 +47,8 @@ async def clean_state():
         await db.execute(text(
             "TRUNCATE ledger_entries, ledger_transactions, ledger_accounts, trading_accounts, "
             "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
-            "watchlists, research_reports, research_chunks, research_documents, users RESTART IDENTITY CASCADE"
+            "watchlists, research_reports, research_chunks, research_documents, trade_proposals, ai_findings, "
+            "ai_runs, users RESTART IDENTITY CASCADE"
         ))
         await db.commit()
     login_limiter.reset()
@@ -54,6 +56,7 @@ async def clean_state():
     market_service.clear_caches()
     market_service._providers.clear()
     research_api.ask_limiter.reset()
+    ai_api.run_limiter.reset()
     research_llm.set_client(None)
     research_fetch.set_http_client(None)
     yield
@@ -94,3 +97,14 @@ async def admin_headers(client, email="admin@example.com") -> dict:
     r = await login(client, email=email)
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture(autouse=True)
+async def reset_agent_config():
+    yield
+    async with SessionLocal() as db:
+        await db.execute(text("UPDATE ai_agents SET enabled = true"))
+        await db.execute(text(
+            "UPDATE ai_agents SET weight = CASE name WHEN 'technical' THEN 0.35 WHEN 'quant' THEN 0.25 "
+            "WHEN 'fundamental' THEN 0.15 WHEN 'news' THEN 0.15 WHEN 'sentiment' THEN 0.10 ELSE 0 END"))
+        await db.commit()

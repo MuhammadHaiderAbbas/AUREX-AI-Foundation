@@ -15,7 +15,7 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { to: "/", label: "Overview", description: "Market and portfolio overview", icon: LayoutDashboard },
   { to: "/markets", label: "Markets", description: "Crypto, Forex, Stocks and ETFs", icon: CandlestickChart },
-  { to: "/ai-trading", label: "AI Trading", description: "Autonomous trading controls", icon: Bot, phase: 8 },
+  { to: "/ai-trading", label: "AI Trading", description: "Agent department and trade proposals", icon: Bot },
   { to: "/research", label: "AI Research Lab", description: "Agents and research reports", icon: BrainCircuit },
   { to: "/strategies", label: "Strategies", description: "Model and strategy management", icon: Workflow, phase: 7 },
   { to: "/portfolio", label: "Portfolio", description: "Positions and performance", icon: PieChart, phase: 8 },

@@ -27,6 +27,9 @@ const ACTION_LABELS: Record<string, string> = {
   "research.ask": "Research report generated",
   "research.document.add": "Research document indexed",
   "research.samples.load": "Sample research corpus loaded",
+  "ai.run": "Agent analysis run",
+  "ai.proposal.dismiss": "Trade proposal dismissed",
+  "ai.agent.update": "Agent configuration changed",
   "admin.bootstrap": "Administrator account created",
   "admin.user.update": "User updated by administrator",
 };
@@ -71,7 +74,7 @@ export function OverviewPage() {
         <Stat label="Daily P&L" icon={<TrendingUp />} value={primary ? formatMoney(0, primary.ccy) : "—"} tone="muted" sub="No trades executed" />
         <Stat label="Open positions" icon={<Briefcase />} value="0" tone="muted" sub="Execution in Phase 8" />
         <Stat label="Max drawdown" icon={<ShieldAlert />} value="0.00%" tone="muted" sub="Limit 10% (planned)" />
-        <Stat label="AI status" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot /> Offline</span>} sub="Agents arrive in Phase 5" />
+        <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone="accent" /> Advisory</span>} sub="Proposals only; execution in Phase 8" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
@@ -135,10 +138,10 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["AI agents", "Phase 5", "Orchestrator + specialist agents"],
             ["Quant models", "Phase 6", "Features, training, drift detection"],
             ["Strategy lab", "Phase 7", "Event-driven backtests with costs"],
             ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
+            ["Paper execution", "Phase 8", "Orders, fills, positions"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
               <div className="flex items-center justify-between"><span className="text-sm font-medium">{t}</span><Badge>{p}</Badge></div>
