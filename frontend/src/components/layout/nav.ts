@@ -20,7 +20,7 @@ export const NAV: NavItem[] = [
   { to: "/strategies", label: "Model Lab", description: "Models, walk-forward validation and registry", icon: Workflow },
   { to: "/backtests", label: "Backtesting", description: "Event-driven strategy simulation and out-of-sample evaluation", icon: FlaskConical },
   { to: "/portfolio", label: "Portfolio", description: "Positions and performance", icon: PieChart },
-  { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert, phase: 9 },
+  { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert },
   { to: "/wallet", label: "Wallet", description: "Virtual account and ledger", icon: Wallet },
   { to: "/history", label: "Trade History", description: "Orders, executions and decisions", icon: History },
   { to: "/analytics", label: "Analytics", description: "Performance and reports", icon: BarChart3, phase: 10 },

@@ -1,4 +1,5 @@
-import { Bot, Pause, Play, Power, Settings2 } from "lucide-react";
+import { Bot, Settings2 } from "lucide-react";
+import { AutopilotPanel } from "@/features/risk/AutopilotPanel";
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -14,19 +15,6 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useMarketOverview } from "@/features/markets/hooks";
 import { cn, relativeTime } from "@/lib/utils";
 
-function ExecutionControls() {
-  return (
-    <Card>
-      <CardHeader title="Autonomous execution" description="Manual paper orders are live (Markets, Portfolio). Agent proposals become executable only through the independent risk gate in Phase 9" />
-      <CardBody className="flex flex-wrap items-center gap-2">
-        <Badge tone="neutral"><Power className="size-3" />Autonomous execution disabled</Badge>
-        <Button size="sm" variant="secondary" disabled title="Available in Phase 9 (risk gate)"><Play />Start</Button>
-        <Button size="sm" variant="secondary" disabled title="Available in Phase 9 (risk gate)"><Pause />Pause</Button>
-        <Button size="sm" variant="danger" disabled title="Available in Phase 9">Emergency stop</Button>
-      </CardBody>
-    </Card>
-  );
-}
 
 function RunPanel({ onRun }: { onRun: (id: string) => void }) {
   const overview = useMarketOverview();
@@ -159,7 +147,7 @@ export function AITradingPage() {
       </div>
       {tab === "desk" && (
         <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
-          <div className="space-y-4"><RunPanel onRun={select} /><ExecutionControls /><RunHistory selected={selected} onSelect={select} /></div>
+          <div className="space-y-4"><RunPanel onRun={select} /><AutopilotPanel /><RunHistory selected={selected} onSelect={select} /></div>
           <div className="min-w-0">
             {run.data ? <RunView run={run.data} /> : run.isLoading ? <Spinner className="mx-auto mt-16" /> : (
               <Card><EmptyState icon={<Bot />} title="Run an analysis to see the agents' evidence">

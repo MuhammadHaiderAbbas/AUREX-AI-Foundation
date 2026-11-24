@@ -7,9 +7,15 @@ from app.models.ledger import LedgerAccount, LedgerEntry, LedgerTransaction
 from app.models.market import Asset, Instrument, MarketCandle, Watchlist, WatchlistItem
 from app.models.ml import MLModel, ModelEvaluation, ModelVersion
 from app.models.research import ResearchChunk, ResearchDocument, ResearchReport
+from app.models.risk import AutopilotStatus, RiskDecision, RiskEvent, RiskProfile, SystemControl
 from app.models.trading import Execution, Order, OrderEvent, OrderStatus, PortfolioSnapshot, Position
 
 __all__ = [
+    "AutopilotStatus",
+    "RiskDecision",
+    "RiskEvent",
+    "RiskProfile",
+    "SystemControl",
     "AIAgent",
     "AIFinding",
     "AIRun",

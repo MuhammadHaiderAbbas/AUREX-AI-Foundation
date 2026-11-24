@@ -20,6 +20,7 @@ from app.api.v1 import ai as ai_api  # noqa: E402
 from app.api.v1 import backtests as backtests_api  # noqa: E402
 from app.api.v1 import ml as ml_api  # noqa: E402
 from app.api.v1 import research as research_api  # noqa: E402
+from app.api.v1 import risk as risk_api  # noqa: E402
 from app.api.v1 import trading as trading_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
@@ -54,7 +55,8 @@ async def clean_state():
             "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
             "watchlists, research_reports, research_chunks, research_documents, trade_proposals, ai_findings, "
             "ai_runs, model_evaluations, model_versions, ml_models, backtests, executions, order_events, orders, "
-            "positions, portfolio_snapshots, users RESTART IDENTITY CASCADE"
+            "positions, portfolio_snapshots, risk_decisions, risk_events, risk_profiles, system_controls, "
+            "users RESTART IDENTITY CASCADE"
         ))
         await db.commit()
     login_limiter.reset()
@@ -66,6 +68,7 @@ async def clean_state():
     ml_api.train_limiter.reset()
     backtests_api.bt_limiter.reset()
     trading_api.order_limiter.reset()
+    risk_api.cycle_limiter.reset()
     ml_service.clear_cache()
     research_llm.set_client(None)
     research_fetch.set_http_client(None)

@@ -299,9 +299,12 @@ export interface TradeProposal {
   strategy_id: string; entry_type: string; entry_price: string; stop_loss: string; take_profit: string;
   quantity: string; notional: string; risk_amount: string; account_currency: string; confidence: number;
   reward_risk: number; invalidation_conditions: string[]; risk_check_required: boolean;
-  status: "PENDING_RISK_REVIEW" | "DISMISSED"; effective_status: "PENDING_RISK_REVIEW" | "DISMISSED" | "EXPIRED";
+  status: ProposalStatus; effective_status: ProposalStatus | "EXPIRED";
   expires_at: string; created_at: string; dismissed_at: string | null;
+  decided_at?: string | null; decision_reason?: string | null; order_id?: string | null;
 }
+export type ProposalStatus = "PENDING_RISK_REVIEW" | "DISMISSED" | "EXECUTED" | "RISK_REJECTED";
+export interface ProposalExecution { proposal: TradeProposal; order_id: string; order_status: OrderStatus; reason: string | null }
 export interface RunSummary {
   id: string; symbol: string; decision: "BUY" | "NO_TRADE"; bias: "bullish" | "bearish" | "neutral";
   net_score: number; agreement: number; coverage: number; confidence: number; created_at: string; latency_ms: number;
@@ -374,13 +377,17 @@ export type OrderStatus = "OPEN" | "FILLED" | "CANCELLED" | "REJECTED" | "EXPIRE
 export interface OrderInput {
   account_id: string; symbol: string; side: OrderSide; type: OrderType; quantity: string;
   limit_price?: string; stop_price?: string; time_in_force?: "GTC" | "DAY"; client_order_id?: string;
+  stop_loss?: string; take_profit?: string;
 }
 export interface Order {
   id: string; account_id: string; symbol: string; side: OrderSide; type: OrderType; quantity: string;
   limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: OrderStatus;
   filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string;
   reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string;
+  stop_loss?: string | null; take_profit?: string | null; parent_order_id?: string | null; oco_group?: string | null;
+  proposal_id?: string | null;
 }
+export interface RiskCheck { name: string; label: string; passed: boolean; value: string; limit: string; message: string }
 export interface Execution {
   id: string; order_id: string; account_id: string; symbol: string; side: OrderSide; quantity: string; price: string;
   reference_price: string; mid_price: string; fx_rate: string; fee: string; spread_cost: string; slippage_cost: string;
@@ -389,6 +396,8 @@ export interface Execution {
 export interface OrderDetail extends Order {
   events: { type: string; detail: Record<string, unknown>; created_at: string }[];
   executions: Execution[];
+  risk_checks: RiskCheck[];
+  children: Order[];
 }
 export interface Position {
   id: string; symbol: string; asset_class: AssetClass; quantity: string; avg_price: string; last: string; bid: string;
@@ -403,3 +412,29 @@ export interface PortfolioSummary {
   fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[];
 }
 export interface PortfolioSnapshot { taken_at: string; cash: string; market_value: string; equity: string; reason: string }
+
+// ---- Risk engine (Phase 9) ------------------------------------------------------
+export interface RiskLimits {
+  risk_per_trade_pct: number; max_position_pct: number; max_gross_exposure_pct: number; max_open_positions: number;
+  daily_loss_limit_pct: number; max_drawdown_pct: number; max_orders_per_minute: number; price_collar_pct: number;
+}
+export interface SystemHalt { halted: boolean; reason: string | null; since: string | null }
+export type AutopilotState = "STOPPED" | "RUNNING" | "PAUSED";
+export interface RiskOverview {
+  account_id: string; currency: string; limits: RiskLimits; defaults: RiskLimits; ceilings: RiskLimits;
+  state: { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halted: boolean;
+    drawdown_halted: boolean; drawdown_halted_at: string | null; blocked_reason: string | null };
+  metrics: { equity: string; pnl_equity: string; peak_pnl_equity: string | null; day_start_equity: string | null; daily_pnl: string;
+    daily_loss_pct: number; drawdown_pct: number; exposure_pct: number; largest_position_pct: number; open_positions: number };
+  autopilot: { status: AutopilotState; symbols: string[]; last_cycle_at: string | null; interval_seconds: number };
+  system: SystemHalt;
+}
+export interface RiskDecision {
+  id: string; order_id: string | null; proposal_id: string | null; source: string; symbol: string; side: OrderSide;
+  approved: boolean; reason: string | null; checks: RiskCheck[]; created_at: string;
+}
+export interface RiskEvent { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }
+export interface AutopilotCycle {
+  at: string; skipped?: string;
+  results: { symbol: string; outcome: "executed" | "risk_rejected" | "no_trade" | "skipped" | "error"; detail?: string; run_id?: string; order_id?: string }[];
+}

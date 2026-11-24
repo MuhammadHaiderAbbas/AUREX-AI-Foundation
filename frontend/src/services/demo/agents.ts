@@ -215,7 +215,7 @@ export function riskCheck(c: Ctx, reg: Finding, nw: Finding, pf: Finding): Findi
   const ok = !reasons.length;
   return {
     agent: "risk", status: "ok", direction: 0, score: ok ? 1 : 0, confidence: 1,
-    summary: `${ok ? "Pre-check passed. " : `Pre-check failed: ${reasons.join("; ")}. `}Advisory only; the independent risk gate (Phase 9) has final authority.`,
+    summary: `${ok ? "Pre-check passed. " : `Pre-check failed: ${reasons.join("; ")}. `}Advisory only; the independent risk engine has final authority over any order.`,
     evidence: [
       { label: "Market open", value: q ? String(q.market_open) : "—", detail: "" },
       { label: "Quote stale", value: q ? String(q.stale) : "—", detail: "" },

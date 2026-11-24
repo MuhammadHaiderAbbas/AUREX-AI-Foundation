@@ -8,7 +8,7 @@ from app.api.deps import current_user, get_audit_context, require_admin
 from app.core.errors import NotFound, RateLimited
 from app.core.rate_limit import SlidingWindowLimiter
 from app.database.session import get_db
-from app.models import Execution, Order, OrderEvent, PortfolioSnapshot, Position, TradingAccount, User
+from app.models import Execution, Order, OrderEvent, PortfolioSnapshot, Position, RiskDecision, TradingAccount, User
 from app.schemas.common import Page
 from app.schemas.trading import (
     ClosedPositionRead,
@@ -41,8 +41,13 @@ async def _owned_account_ids(db: AsyncSession, user: User, account_id: uuid.UUID
 async def _detail(db: AsyncSession, o: Order) -> OrderDetail:
     evs = await db.scalars(select(OrderEvent).where(OrderEvent.order_id == o.id).order_by(OrderEvent.created_at))
     exes = await db.scalars(select(Execution).where(Execution.order_id == o.id))
+    decision = await db.scalar(select(RiskDecision).where(RiskDecision.order_id == o.id)
+                               .order_by(RiskDecision.created_at.desc()).limit(1))
+    children = await db.scalars(select(Order).where(Order.parent_order_id == o.id).order_by(Order.created_at))
     return OrderDetail(**OrderRead.model_validate(o).model_dump(), events=[OrderEventRead.model_validate(e) for e in evs],
-                       executions=[ExecutionRead.model_validate(x) for x in exes])
+                       executions=[ExecutionRead.model_validate(x) for x in exes],
+                       risk_checks=decision.checks if decision else [],
+                       children=[OrderRead.model_validate(c) for c in children])
 
 
 @router.post("/trading/orders", response_model=OrderDetail, status_code=status.HTTP_201_CREATED)
@@ -57,7 +62,9 @@ async def place_order(data: OrderCreate, response: Response, user: User = Depend
         await AuditService(db).record(ctx, "order.submit", resource_type="order", resource_id=order.id,
                                       details={"symbol": order.symbol, "side": order.side, "type": order.type,
                                                "quantity": str(order.quantity), "status": order.status,
-                                               "reason": order.reject_reason})
+                                               "reason": order.reject_reason,
+                                               "stop_loss": str(order.stop_loss) if order.stop_loss else None,
+                                               "take_profit": str(order.take_profit) if order.take_profit else None})
     else:
         response.status_code = status.HTTP_200_OK
         response.headers["Idempotent-Replay"] = "true"

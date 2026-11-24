@@ -11,6 +11,7 @@ import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
 import { useLiveQuotes, useWatchlist } from "@/features/markets/hooks";
 import { usePortfolio } from "@/features/trading/hooks";
+import { useRiskOverview } from "@/features/risk/hooks";
 import { Change, QuoteState, SourceBadge } from "@/pages/MarketsPage";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatMoney, formatPrice, relativeTime, sumDecimals } from "@/lib/utils";
@@ -62,6 +63,7 @@ export function OverviewPage() {
   const primary = totals[0];
   const portfolio = usePortfolio(list[0]?.id);
   const pf = portfolio.data;
+  const risk = useRiskOverview(list[0]?.id).data;
   const pnl = pf ? Number(pf.unrealised_pnl) + Number(pf.realised_pnl) : 0;
 
   return (
@@ -86,8 +88,11 @@ export function OverviewPage() {
           tone={pnl > 0 ? "positive" : pnl < 0 ? "negative" : "muted"} sub={pf ? `Realised + unrealised · ${pf.account_name}` : "No trades executed"} />
         <Stat label="Open positions" icon={<Briefcase />} value={<Link to="/portfolio" className="hover:text-accent">{pf?.open_positions ?? 0}</Link>}
           tone={pf?.open_positions ? undefined : "muted"} sub={pf ? `Exposure ${(pf.exposure * 100).toFixed(1)}%` : "Paper execution"} />
-        <Stat label="Max drawdown" icon={<ShieldAlert />} value="0.00%" tone="muted" sub="Limit 10% (planned)" />
-        <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone="accent" /> Advisory</span>} sub="Proposals advisory; risk gate in Phase 9" />
+        <Stat label="Drawdown" icon={<ShieldAlert />} value={risk ? `${risk.metrics.drawdown_pct.toFixed(2)}%` : "—"}
+          tone={risk?.state.blocked_reason ? "negative" : "muted"}
+          sub={risk ? (risk.state.blocked_reason ? "New exposure blocked" : `Limit ${risk.limits.max_drawdown_pct}% · risk gate on`) : "Risk engine"} />
+        <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone={risk?.autopilot.status === "RUNNING" ? "positive" : "accent"} /> {risk?.autopilot.status === "RUNNING" ? "Autopilot on" : "Advisory"}</span>}
+          sub={risk?.autopilot.status === "RUNNING" ? `${risk.autopilot.symbols.join(", ")} · via risk gate` : "Proposals go through the risk gate"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
@@ -151,8 +156,9 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Risk engine", "Phase 9", "Limits, circuit breakers, kill switch"],
             ["Analytics", "Phase 10", "Performance and audit reports"],
+            ["Security hardening", "Phase 11", "Threat model, secrets, pen-test fixes"],
+            ["Production", "Phase 12", "Deployment, monitoring, live-trading gates"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
               <div className="flex items-center justify-between"><span className="text-sm font-medium">{t}</span><Badge>{p}</Badge></div>

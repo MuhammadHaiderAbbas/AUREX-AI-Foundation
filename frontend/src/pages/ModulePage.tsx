@@ -4,9 +4,6 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { NavItem } from "@/components/layout/nav";
 
 const PLANS: Record<string, { summary: string; items: string[] }> = {
-  "/risk": { summary: "Independent risk controller with final authority over every order.", items: [
-    "Per-trade risk (dev default 0.5% of equity)", "Daily loss (2%) and max drawdown (10%) circuit breakers",
-    "Max 5 open positions, 50% gross exposure, zero leverage on spot", "Manual kill switch and automatic abnormal-activity halt"] },
   "/analytics": { summary: "Objective performance evaluation.", items: [
     "Equity curve and drawdown", "Sharpe, Sortino, profit factor, turnover", "Model calibration and drift response"] },
 };

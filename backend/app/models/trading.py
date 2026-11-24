@@ -67,6 +67,13 @@ class Order(UUIDPk, Timestamps, Base):
     source: Mapped[str] = mapped_column(String(12), nullable=False, default="manual")
     reject_reason: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Phase 9: brackets and provenance. stop_loss/take_profit on an entry order spawn
+    # protective child orders (one-cancels-other) once it fills.
+    stop_loss: Mapped[Decimal | None] = mapped_column(PRICE)
+    take_profit: Mapped[Decimal | None] = mapped_column(PRICE)
+    parent_order_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("orders.id", ondelete="RESTRICT"))
+    oco_group: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("trade_proposals.id", ondelete="SET NULL"))
 
 
 class OrderEvent(UUIDPk, Base):

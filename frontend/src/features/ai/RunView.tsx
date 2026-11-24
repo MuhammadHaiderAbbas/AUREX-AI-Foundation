@@ -6,6 +6,8 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
 import type { AgentFinding, AgentRun, TradeProposal } from "@/services/api";
+import { Link } from "react-router-dom";
+import { useExecuteProposal } from "@/features/risk/hooks";
 import { useDismissProposal } from "./hooks";
 
 export const AGENT_LABEL: Record<string, string> = {
@@ -84,8 +86,11 @@ function AgentCard({ f, weight }: { f: AgentFinding; weight?: number }) {
   );
 }
 
+const STATUS_LABEL: Record<string, string> = { PENDING_RISK_REVIEW: "Pending risk review", EXECUTED: "Executed", RISK_REJECTED: "Risk rejected", DISMISSED: "Dismissed", EXPIRED: "Expired" };
+
 export function ProposalCard({ p }: { p: TradeProposal }) {
   const dismiss = useDismissProposal();
+  const execute = useExecuteProposal();
   const [json, setJson] = useState(false);
   const pending = p.effective_status === "PENDING_RISK_REVIEW";
   // Price precision: the most significant decimals used by any of the three levels.
@@ -102,9 +107,10 @@ export function ProposalCard({ p }: { p: TradeProposal }) {
       <CardHeader
         title={<span className="flex items-center gap-2">Trade proposal <Badge tone="positive">{p.direction} {p.symbol}</Badge></span>}
         description={`${p.strategy_id} · created ${formatDateTime(p.created_at)}`}
-        action={<Badge tone={pending ? "warning" : "neutral"}>{p.effective_status === "PENDING_RISK_REVIEW" ? "Pending risk review" : p.effective_status.toLowerCase()}</Badge>} />
+        action={<Badge tone={pending ? "warning" : p.effective_status === "EXECUTED" ? "positive" : p.effective_status === "RISK_REJECTED" ? "negative" : "neutral"}>
+          {STATUS_LABEL[p.effective_status] ?? p.effective_status.toLowerCase()}</Badge>} />
       <CardBody className="space-y-4">
-        <ErrorBanner error={dismiss.error} />
+        <ErrorBanner error={dismiss.error ?? execute.error} />
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
           {[
             ["Entry (limit)", formatPrice(p.entry_price, dp)], ["Stop loss", formatPrice(p.stop_loss, dp)],
@@ -119,9 +125,14 @@ export function ProposalCard({ p }: { p: TradeProposal }) {
         </div>
         <div className="flex items-start gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
           <ShieldAlert className="mt-0.5 size-4 shrink-0 text-accent" />
-          <span>This proposal cannot execute. Paper execution (Phase 8) and the independent risk gate (Phase 9), which has final authority, must both exist and approve it first. {pending && <>Expires {formatDateTime(p.expires_at)}.</>}</span>
+          <span data-testid="proposal-gate">
+            {p.effective_status === "EXECUTED" ? <>Approved by the risk gate and executed as a paper market order with a protective stop and take-profit. {p.order_id && <Link className="text-accent hover:underline" to={`/history?account=${p.account_id}&order=${p.order_id}`}>View order</Link>}</>
+              : p.effective_status === "RISK_REJECTED" ? <>Refused by the risk gate: {p.decision_reason}</>
+              : <>Agents cannot place orders. Executing sends this proposal to the independent risk engine, which has the final say. {pending && <>Expires {formatDateTime(p.expires_at)}.</>}</>}
+          </span>
         </div>
         <div className="flex flex-wrap gap-2">
+          {pending && <Button size="sm" onClick={() => execute.mutate(p.id)} disabled={execute.isPending}><ShieldAlert />Send to risk gate</Button>}
           {pending && <Button size="sm" variant="outline" onClick={() => dismiss.mutate(p.id)} disabled={dismiss.isPending}><Ban />Dismiss</Button>}
           <Button size="sm" variant="ghost" onClick={() => setJson(!json)}>{json ? "Hide" : "View"} JSON</Button>
         </div>

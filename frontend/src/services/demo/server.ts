@@ -13,6 +13,7 @@ import * as rs from "./research";
 import * as ag from "./agents";
 import * as ml from "./ml";
 import * as bt from "./backtest";
+import * as risk from "./risk";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -33,7 +34,9 @@ interface DEntry { ledger_code: string; direction: "DEBIT" | "CREDIT"; amount: s
 interface DTxn { id: string; account_id: string; type: string; description: string; created_at: string; created_by: string; idem: string | null; entries: DEntry[] }
 interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE"; created_at: string }
 interface DAudit { id: number; occurred_at: string; actor_user_id: string | null; action: string; resource_type: string | null; resource_id: string | null; outcome: string; ip_address: string | null; request_id: string | null; details: Record<string, unknown>; prev_hash: string; hash: string }
-interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[] }
+interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[]; stop_loss: string | null; take_profit: string | null; parent_order_id: string | null; oco_group: string | null; proposal_id: string | null }
+interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null }
+interface DDecision { id: string; account_id: string; order_id: string; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
@@ -47,6 +50,8 @@ interface State {
   mlVersions: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   backtests: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   mlEvals: { id: string; version_id: string; kind: string; status: string; metrics: Record<string, unknown>; created_at: string }[];
+  riskProfiles: Record<string, DRisk>; riskDecisions: DDecision[]; systemHalt: { halted: boolean; reason: string | null; since: string | null };
+  riskEvents: { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }[];
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -62,10 +67,12 @@ function load(): State {
       memory.aiRuns ??= []; memory.aiAgents ??= {};
       memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= []; memory.backtests ??= [];
       memory.orders ??= []; memory.executions ??= []; memory.positions ??= []; memory.snapshots ??= [];
+      memory.riskProfiles ??= {}; memory.riskDecisions ??= []; memory.riskEvents ??= []; memory.systemHalt ??= { halted: false, reason: null, since: null };
+      for (const o of memory.orders) { o.stop_loss ??= null; o.take_profit ??= null; o.parent_order_id ??= null; o.oco_group ??= null; o.proposal_id ??= null; }
       return memory;
     }
   } catch { /* storage unavailable: fall back to memory */ }
-  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [], backtests: [], orders: [], executions: [], positions: [], snapshots: [] });
+  return (memory = { users: [], sessions: [], accounts: [], txns: [], audit: [], settings: {}, watchlists: {}, docs: [], chunks: [], reports: [], aiRuns: [], aiAgents: {}, mlModels: [], mlVersions: [], mlEvals: [], backtests: [], orders: [], executions: [], positions: [], snapshots: [], riskProfiles: {}, riskDecisions: [], riskEvents: [], systemHalt: { halted: false, reason: null, since: null } });
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ } }
 const refreshStore = {
@@ -316,15 +323,20 @@ const hourBars = (inst: mkt.DemoInstrument, n: number) => mkt.candles(inst, "1h"
 // ---- paper execution (mirror of backend app/trading) -------------------------------------
 const FEE_BPS: Record<string, number> = { CRYPTO: 10, FX: 0, STOCK: 1, ETF: 1 };
 const SLIP_BPS: Record<string, number> = { CRYPTO: 2, FX: 0.5, STOCK: 2, ETF: 1 };
-const MAX_POSITIONS = 5;
+const AUTOPILOT_INTERVAL_S = 900;
 const u8 = (n: number) => toUnits(n.toFixed(8));
 const DEC_RE = /^\d+(\.\d{1,10})?$/;
 const instOf = (sym: string) => INSTRUMENTS.find((i) => i.symbol === sym)!;
 const openPos = (s: State, acct: string, sym: string) => s.positions.find((p) => p.account_id === acct && p.symbol === sym && p.status === "OPEN");
 const orderRead = (o: DOrder) => { const { events: _e, user_id: _u, ...rest } = o; return rest; };
-const orderDetail = (s: State, o: DOrder) => ({ ...orderRead(o), events: o.events, executions: s.executions.filter((x) => x.order_id === o.id) });
+const orderDetail = (s: State, o: DOrder) => ({
+  ...orderRead(o), events: o.events, executions: s.executions.filter((x) => x.order_id === o.id),
+  risk_checks: [...s.riskDecisions].reverse().find((d) => d.order_id === o.id)?.checks ?? [],
+  children: s.orders.filter((x) => x.parent_order_id === o.id).map(orderRead),
+});
 function ev(o: DOrder, type: string, detail: Record<string, unknown> = {}) { o.events.push({ type, detail, created_at: now() }); o.updated_at = now(); }
 function reject(o: DOrder, reason: string) { o.status = "REJECTED"; o.reject_reason = reason; ev(o, "REJECTED", { reason }); }
+function cancelOrder(o: DOrder, reason: string, type = "CANCELLED") { o.status = "CANCELLED"; o.reject_reason = reason; ev(o, type, { reason }); }
 
 function matchFill(o: DOrder, bid: number, ask: number, slip: number): { price: number; reference: number } | null {
   const lim = o.limit_price ? +o.limit_price : null, stop = o.stop_price ? +o.stop_price : null;
@@ -354,21 +366,20 @@ function businessCheck(s: State, a: DAccount, o: DOrder): string | null {
   const i = instOf(o.symbol);
   const pos = openPos(s, a.id, o.symbol);
   if (o.side === "SELL") {
-    const pending = s.orders.filter((x) => x.account_id === a.id && x.symbol === o.symbol && x.side === "SELL" && x.status === "OPEN" && x.id !== o.id).reduce((acc, x) => acc + +x.quantity, 0);
+    const pending = s.orders.filter((x) => x.account_id === a.id && x.symbol === o.symbol && x.side === "SELL" && x.status === "OPEN" && x.id !== o.id && x.source !== "protective").reduce((acc, x) => acc + +x.quantity, 0);
     const held = pos ? +pos.quantity : 0;
     if (+o.quantity > held - pending + 1e-12) return `insufficient position: holding ${held}, ${pending} already in open sell orders (short selling is disabled)`;
     return null;
   }
-  if (!pos && s.positions.filter((p) => p.account_id === a.id && p.status === "OPEN").length >= MAX_POSITIONS) return `maximum of ${MAX_POSITIONS} open positions reached`;
   const fx = fxRate(i.quote_currency, a.base_currency);
   if (fx == null) return `no FX rate from ${i.quote_currency} to ${a.base_currency}`;
-  const ask = +mkt.quote(i).ask, slip = SLIP_BPS[i.asset_class]! / 1e4;
-  const px = o.type === "LIMIT" ? +o.limit_price! : o.type === "STOP" ? Math.max(+o.stop_price!, ask) * (1 + slip) : ask * (1 + slip);
-  const est = u8(+o.quantity * px * fx * (1 + FEE_BPS[i.asset_class]! / 1e4));
+  const est = u8(+o.quantity * estimate(o, +mkt.quote(i).ask, SLIP_BPS[i.asset_class]! / 1e4) * fx * (1 + FEE_BPS[i.asset_class]! / 1e4));
   const avail = toUnits(balances(s, a).cash) - reservedUnits(s, a, o.id);
   if (est > avail) return `insufficient cash: needs ≈${(Number(est) / 1e8).toFixed(2)} ${a.base_currency}, available ${(Number(avail) / 1e8).toFixed(2)} (no leverage)`;
   return null;
 }
+const estimate = (o: DOrder, ask: number, slip: number) =>
+  o.type === "LIMIT" ? +o.limit_price! : o.type === "STOP" ? Math.max(+o.stop_price!, ask) * (1 + slip) : ask * (1 + slip);
 
 function portfolio(s: State, a: DAccount) {
   const b = balances(s, a);
@@ -395,16 +406,108 @@ function snapshot(s: State, a: DAccount, reason: string) {
   const p = portfolio(s, a);
   s.snapshots.push({ account_id: a.id, taken_at: now(), cash: p.cash, market_value: p.market_value, equity: p.equity, reason });
   if (s.snapshots.length > 1500) s.snapshots.splice(0, s.snapshots.length - 1500);
+  return p;
+}
+
+// ---- risk engine (mirror of backend app/risk) --------------------------------------------
+const today = () => new Date().toISOString().slice(0, 10);
+function profile(s: State, accountId: string): DRisk {
+  return (s.riskProfiles[accountId] ??= { ...risk.DEFAULTS, kill_switch: false, kill_reason: null, kill_engaged_at: null, daily_halt_date: null,
+    drawdown_halted: false, drawdown_halted_at: null, peak_pnl_equity: null, day_date: null, day_start_pnl_equity: null, day_start_equity: null,
+    autopilot_status: "STOPPED", autopilot_symbols: ["BTC-USD", "ETH-USD", "SPY"], autopilot_last_cycle_at: null });
+}
+function riskEvent(s: State, accountId: string | null, type: string, message: string, detail: Record<string, unknown> = {}) {
+  s.riskEvents.push({ id: uuid(), account_id: accountId, type, message, detail, created_at: now() });
+  if (s.riskEvents.length > 400) s.riskEvents.splice(0, s.riskEvents.length - 400);
+}
+function cancelOpen(s: State, accountId: string | null, reason: string, pred: (o: DOrder) => boolean = (o) => o.side === "BUY") {
+  let n = 0;
+  for (const o of s.orders) if (o.status === "OPEN" && (accountId == null || o.account_id === accountId) && pred(o)) { cancelOrder(o, reason); n++; }
+  return n;
+}
+const dailyHalted = (p: DRisk) => p.daily_halt_date === today();
+function blockReason(s: State, p: DRisk): string | null {
+  if (s.systemHalt.halted) return `platform trading is halted: ${s.systemHalt.reason}`;
+  if (p.kill_switch) return `account kill switch is engaged: ${p.kill_reason}`;
+  if (dailyHalted(p)) return `daily loss limit of ${p.daily_loss_limit_pct}% reached`;
+  if (p.drawdown_halted) return `maximum drawdown of ${p.max_drawdown_pct}% reached`;
+  return null;
+}
+function trip(s: State, a: DAccount, p: DRisk, type: string, message: string, detail: Record<string, unknown>) {
+  const cancelled = cancelOpen(s, a.id, `risk: ${message}`);
+  if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
+  riskEvent(s, a.id, type, message, { ...detail, cancelled_orders: cancelled });
+}
+function metrics(s: State, a: DAccount, pf = portfolio(s, a)) {
+  const p = profile(s, a.id);
+  const b = balances(s, a);
+  const line = (c: string) => +b.lines.find((l) => l.code === c)!.balance;
+  const netContrib = line("CAPITAL_CONTRIBUTIONS") + line("CAPITAL_WITHDRAWALS");
+  const equity = +pf.equity, pnl = equity - netContrib;
+  if (p.day_date !== today() || p.day_start_pnl_equity == null) { p.day_date = today(); p.day_start_pnl_equity = pnl; p.day_start_equity = equity; }
+  if (p.peak_pnl_equity == null || pnl > p.peak_pnl_equity) p.peak_pnl_equity = pnl;
+  const dayLoss = p.day_start_pnl_equity - pnl;
+  const dailyPct = p.day_start_equity! > 0 ? (dayLoss / p.day_start_equity!) * 100 : 0;
+  const ddBase = p.peak_pnl_equity + netContrib;
+  const ddPct = ddBase > 0 ? ((p.peak_pnl_equity - pnl) / ddBase) * 100 : 0;
+  if (dailyPct >= p.daily_loss_limit_pct && p.daily_halt_date !== today()) {
+    p.daily_halt_date = today();
+    trip(s, a, p, "BREAKER_DAILY_LOSS", `Daily loss breaker tripped: −${dailyPct.toFixed(2)}% (limit ${p.daily_loss_limit_pct}%)`, { loss_pct: dailyPct });
+  }
+  if (ddPct >= p.max_drawdown_pct && !p.drawdown_halted) {
+    p.drawdown_halted = true; p.drawdown_halted_at = now();
+    trip(s, a, p, "BREAKER_DRAWDOWN", `Drawdown breaker tripped: −${ddPct.toFixed(2)}% from peak (limit ${p.max_drawdown_pct}%)`, { drawdown_pct: ddPct });
+  }
+  const largest = pf.positions.reduce((m, x) => Math.max(m, +x.market_value), 0);
+  return { equity: pf.equity, pnl_equity: pnl.toFixed(8), peak_pnl_equity: p.peak_pnl_equity.toFixed(8), day_start_equity: p.day_start_equity!.toFixed(8),
+    daily_pnl: (-dayLoss).toFixed(8), daily_loss_pct: Math.max(0, dailyPct), drawdown_pct: Math.max(0, ddPct), exposure_pct: pf.exposure * 100,
+    largest_position_pct: equity > 0 ? (largest / equity) * 100 : 0, open_positions: pf.positions.length };
+}
+function engageKill(s: State, a: DAccount, p: DRisk, reason: string, automatic = false) {
+  p.kill_switch = true; p.kill_reason = reason; p.kill_engaged_at = now();
+  if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
+  const cancelled = cancelOpen(s, a.id, `risk: kill switch engaged (${reason})`);
+  riskEvent(s, a.id, automatic ? "ABNORMAL_ACTIVITY" : "KILL_SWITCH_ON", `Kill switch engaged${automatic ? " automatically" : ""}: ${reason}`, { cancelled_orders: cancelled });
+}
+function riskGate(s: State, a: DAccount, o: DOrder, entry: number, bid: number, ask: number) {
+  const i = instOf(o.symbol);
+  const p = profile(s, a.id);
+  const pf = portfolio(s, a);
+  metrics(s, a, pf);
+  const fx = fxRate(i.quote_currency, a.base_currency) ?? 1;
+  const held = openPos(s, a.id, o.symbol);
+  const notional = +o.quantity * entry * fx;
+  const stop = o.stop_loss != null ? +o.stop_loss : entry * (1 - risk.DEFAULT_STOP_PCT[i.asset_class]! / 100);
+  const current = +(pf.positions.find((x) => x.symbol === o.symbol)?.market_value ?? 0);
+  const symbols = new Set([...pf.positions.map((x) => x.symbol), ...s.orders.filter((x) => x.account_id === a.id && x.side === "BUY" && x.status === "OPEN" && x.id !== o.id).map((x) => x.symbol), o.symbol]);
+  let collar: number | null = null;
+  if (o.type === "LIMIT" && o.limit_price) collar = o.side === "BUY" ? (+o.limit_price / ask - 1) * 100 : (1 - +o.limit_price / bid) * 100;
+  const recent = s.orders.filter((x) => x.account_id === a.id && x.id !== o.id && x.source !== "protective" && Date.now() - Date.parse(x.created_at) < 60_000).length;
+  const checks = risk.evaluate({
+    side: o.side, reduces: o.side === "SELL" && !!held, system_halt: s.systemHalt.halted ? (s.systemHalt.reason ?? "halted") : null,
+    kill_switch: p.kill_switch ? (p.kill_reason ?? "engaged") : null, daily_halted: dailyHalted(p), drawdown_halted: p.drawdown_halted,
+    equity: +pf.equity, notional, risk_amount: +o.quantity * Math.max(entry - stop, 0) * fx, position_after: current + notional,
+    exposure_after: +pf.market_value + Number(reservedUnits(s, a, o.id)) / 1e8 + notional, open_positions_after: symbols.size,
+    collar_through_pct: collar, orders_last_minute: recent,
+  }, p);
+  const reason = risk.firstFailure(checks);
+  const rate = checks.find((c) => c.name === "order_rate")!;
+  if (!rate.passed && !p.kill_switch) engageKill(s, a, p, rate.message, true);
+  s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: o.id, proposal_id: o.proposal_id, source: o.source, symbol: o.symbol, side: o.side,
+    approved: reason == null, reason, checks, created_at: now() });
+  if (s.riskDecisions.length > 400) s.riskDecisions.splice(0, s.riskDecisions.length - 400);
+  return { approved: reason == null, checks, reason };
 }
 
 function fill(s: State, a: DAccount, o: DOrder, f: { price: number; reference: number }, bid: number, ask: number) {
   const i = instOf(o.symbol);
   const fx = fxRate(i.quote_currency, a.base_currency);
   if (fx == null) return reject(o, "FX rate unavailable at fill time");
+  let pos = openPos(s, a.id, o.symbol);
+  if (o.side === "SELL" && o.source === "protective" && pos && +o.quantity > +pos.quantity) { o.quantity = pos.quantity; ev(o, "RESIZED", { quantity: o.quantity }); }
   const qty = +o.quantity, px = f.price;
   const notional = u8(qty * px * fx), fee = (notional * BigInt(Math.round(FEE_BPS[i.asset_class]! * 100))) / 1_000_000n;
   const mid = (bid + ask) / 2;
-  let pos = openPos(s, a.id, o.symbol);
   let realised: bigint | null = null;
   let txn: DTxn;
   const label = `${o.side === "BUY" ? "Buy" : "Sell"} ${qty} ${o.symbol} @ ${+px.toFixed(8)}`;
@@ -438,7 +541,37 @@ function fill(s: State, a: DAccount, o: DOrder, f: { price: number; reference: n
     slippage_cost: (Math.abs(px - f.reference) * qty * fx).toFixed(8), realised_pnl: realised == null ? null : fromUnits(realised), ledger_transaction_id: txn.id, executed_at: now() });
   o.status = "FILLED"; o.filled_qty = o.quantity; o.avg_fill_price = px.toFixed(10);
   ev(o, "FILLED", { price: px.toFixed(8), quantity: o.quantity, fee: fromUnits(fee), reference: f.reference.toFixed(8) });
-  snapshot(s, a, "fill");
+  if (o.oco_group) for (const x of s.orders) if (x.oco_group === o.oco_group && x.id !== o.id && x.status === "OPEN") cancelOrder(x, "one-cancels-other: sibling filled", "OCO_CANCELLED");
+  if (o.side === "BUY" && (o.stop_loss || o.take_profit)) spawnBrackets(s, o);
+  if (o.side === "SELL") {
+    const remaining = +pos.quantity;
+    for (const x of s.orders) if (x.account_id === a.id && x.symbol === o.symbol && x.source === "protective" && x.status === "OPEN") {
+      if (remaining <= 0) cancelOrder(x, "position closed");
+      else if (+x.quantity > remaining) { x.quantity = pos.quantity; ev(x, "RESIZED", { quantity: x.quantity }); }
+    }
+  }
+  metrics(s, a, snapshot(s, a, "fill"));
+}
+
+function newOrder(o: Partial<DOrder> & Pick<DOrder, "account_id" | "user_id" | "symbol" | "side" | "type" | "quantity">): DOrder {
+  return { id: uuid(), limit_price: null, stop_price: null, time_in_force: "GTC", status: "OPEN", filled_qty: "0", avg_fill_price: null, client_order_id: null,
+    source: "manual", reject_reason: null, expires_at: null, created_at: now(), updated_at: now(), events: [], stop_loss: null, take_profit: null,
+    parent_order_id: null, oco_group: null, proposal_id: null, ...o };
+}
+function spawnBrackets(s: State, parent: DOrder) {
+  const group = parent.stop_loss && parent.take_profit ? uuid() : null;
+  const expires = new Date(Date.now() + 30 * 864e5).toISOString();
+  const legs: ["STOP" | "LIMIT", string | null, string | null][] = [];
+  if (parent.stop_loss) legs.push(["STOP", null, parent.stop_loss]);
+  if (parent.take_profit) legs.push(["LIMIT", parent.take_profit, null]);
+  for (const [type, limit, stop] of legs) {
+    const child = newOrder({ account_id: parent.account_id, user_id: parent.user_id, symbol: parent.symbol, side: "SELL", type, quantity: parent.quantity,
+      limit_price: limit, stop_price: stop, source: "protective", expires_at: expires, parent_order_id: parent.id, oco_group: group, proposal_id: parent.proposal_id });
+    s.orders.push(child);
+    ev(child, "CREATED", { side: "SELL", type, quantity: parent.quantity, limit_price: limit, stop_price: stop, parent: parent.id, source: "protective" });
+    ev(child, "ACCEPTED", { expires_at: expires });
+    ev(parent, "BRACKET_PLACED", { child: child.id, type, price: limit ?? stop });
+  }
 }
 
 /** The matcher. The backend runs it every few seconds; the demo runs it on every trading request. */
@@ -447,6 +580,10 @@ function processOpen(s: State) {
   for (const o of s.orders.filter((x) => x.status === "OPEN")) {
     stats.checked++;
     if (o.expires_at && Date.parse(o.expires_at) <= Date.now()) { o.status = "EXPIRED"; ev(o, "EXPIRED"); stats.expired++; continue; }
+    if (o.side === "BUY") {
+      const block = blockReason(s, profile(s, o.account_id));
+      if (block) { cancelOrder(o, `risk: ${block}`); stats.rejected++; continue; }
+    } else if (o.source === "protective" && !openPos(s, o.account_id, o.symbol)) { cancelOrder(o, "position closed"); continue; }
     const i = instOf(o.symbol); const q = mkt.quote(i);
     if (!q.tradable) continue;
     const f = matchFill(o, +q.bid, +q.ask, SLIP_BPS[i.asset_class]! / 1e4);
@@ -454,6 +591,7 @@ function processOpen(s: State) {
     fill(s, s.accounts.find((a) => a.id === o.account_id)!, o, f, +q.bid, +q.ask);
     stats[o.status === "FILLED" ? "filled" : "rejected"]++;
   }
+  for (const a of s.accounts) if (s.positions.some((p) => p.account_id === a.id && p.status === "OPEN")) metrics(s, a);
   return stats;
 }
 function accountIds(c: Ctx, user: DUser) {
@@ -463,49 +601,162 @@ function accountIds(c: Ctx, user: DUser) {
 }
 const page = <T,>(c: Ctx, all: T[]) => { const limit = Number(c.query.get("limit") ?? 50), offset = Number(c.query.get("offset") ?? 0); return { items: all.slice(offset, offset + limit), total: all.length, limit, offset }; };
 
+interface OrderBody { account_id?: unknown; symbol?: unknown; side?: unknown; type?: unknown; quantity?: unknown; limit_price?: unknown; stop_price?: unknown; time_in_force?: unknown; client_order_id?: unknown; stop_loss?: unknown; take_profit?: unknown }
+async function placeOrder(s: State, user: DUser, a: DAccount, b: OrderBody, source = "manual", proposalId: string | null = null): Promise<{ o: DOrder; replay: boolean }> {
+  const coid = b.client_order_id == null ? null : String(b.client_order_id);
+  if (coid != null && !/^[A-Za-z0-9_-]{8,64}$/.test(coid)) throw bad("client_order_id must be 8-64 characters of A-Z, 0-9, _ or -", "client_order_id");
+  if (coid) { const ex = s.orders.find((o) => o.account_id === a.id && o.client_order_id === coid); if (ex) return { o: ex, replay: true }; }
+  const inst = findInst(String(b.symbol ?? ""));
+  const side = b.side, type = (b.type ?? "MARKET") as DOrder["type"], tif = (b.time_in_force ?? "GTC") as DOrder["time_in_force"];
+  if (side !== "BUY" && side !== "SELL") throw bad("side must be BUY or SELL", "side");
+  if (!["MARKET", "LIMIT", "STOP"].includes(type)) throw bad("type must be MARKET, LIMIT or STOP", "type");
+  if (tif !== "GTC" && tif !== "DAY") throw bad("time_in_force must be GTC or DAY", "time_in_force");
+  const qty = String(b.quantity ?? "");
+  if (!DEC_RE.test(qty) || +qty <= 0) throw bad("Quantity must be positive", "quantity");
+  const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+  const lot = +inst.lot_size;
+  if (Math.abs(Math.round(+qty / lot) * lot - +qty) > lot * 1e-6) throw rule(`Quantity must be a multiple of the lot size ${lot}`);
+  for (const k of ["limit_price", "stop_price", "stop_loss", "take_profit"] as const) {
+    const v = b[k];
+    if (v == null) continue;
+    if (!DEC_RE.test(String(v)) || +String(v) <= 0 || (String(v).split(".")[1]?.length ?? 0) > inst.price_decimals) throw rule(`${k} must be positive with at most ${inst.price_decimals} decimals`);
+    if ((k === "stop_loss" || k === "take_profit") && side !== "BUY") throw rule(`${k} can only be attached to BUY (entry) orders`);
+  }
+  if (type === "LIMIT" && b.limit_price == null) throw rule("LIMIT orders need a limit_price");
+  if (type === "STOP" && b.stop_price == null) throw rule("STOP orders need a stop_price");
+  if (type === "MARKET" && (b.limit_price != null || b.stop_price != null)) throw rule("MARKET orders take no limit or stop price");
+  if (b.stop_loss != null && b.take_profit != null && +String(b.stop_loss) >= +String(b.take_profit)) throw rule("stop_loss must be below take_profit");
+  processOpen(s);
+  const t = new Date();
+  const expires = type === "MARKET" ? null : tif === "DAY" ? new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1)).toISOString() : new Date(t.getTime() + 30 * 864e5).toISOString();
+  const str = (v: unknown) => (v == null ? null : String(v));
+  const o = newOrder({ account_id: a.id, user_id: user.id, symbol: inst.symbol, side, type, quantity: qty, limit_price: str(b.limit_price), stop_price: str(b.stop_price),
+    time_in_force: tif, client_order_id: coid, source, expires_at: expires, stop_loss: str(b.stop_loss), take_profit: str(b.take_profit), proposal_id: proposalId });
+  s.orders.push(o);
+  ev(o, "CREATED", { side, type, quantity: qty, limit_price: o.limit_price, stop_price: o.stop_price, tif, stop_loss: o.stop_loss, take_profit: o.take_profit, source });
+  const done = async () => {
+    if (s.orders.length > 400) s.orders.splice(0, s.orders.length - 400);
+    await audit(s, user.id, "order.submit", { type: "order", id: o.id, details: { symbol: o.symbol, side, type, quantity: qty, status: o.status, reason: o.reject_reason } });
+    return { o, replay: false };
+  };
+  const why = businessCheck(s, a, o);
+  if (why) { reject(o, why); return done(); }
+  const q = mkt.quote(inst), slip = SLIP_BPS[inst.asset_class]! / 1e4;
+  let f = null as { price: number; reference: number } | null;
+  if (type === "MARKET") {
+    if (!q.tradable) { reject(o, q.market_open ? "quote is stale" : "market is closed"); return done(); }
+    f = matchFill(o, +q.bid, +q.ask, slip);
+  }
+  const entry = f ? f.price : estimate(o, +q.ask, slip);
+  const d = inst.price_decimals;
+  if (o.stop_loss && +o.stop_loss >= entry) { reject(o, `stop_loss ${+o.stop_loss} must be below the entry price (≈${entry.toFixed(d)})`); return done(); }
+  if (o.take_profit && +o.take_profit <= entry) { reject(o, `take_profit ${+o.take_profit} must be above the entry price (≈${entry.toFixed(d)})`); return done(); }
+  const gate = riskGate(s, a, o, entry, +q.bid, +q.ask);
+  ev(o, gate.approved ? "RISK_APPROVED" : "RISK_REJECTED", { failed: gate.checks.filter((c) => !c.passed).map((c) => c.name) });
+  if (!gate.approved) { reject(o, `risk: ${gate.reason}`); return done(); }
+  if (f) fill(s, a, o, f, +q.bid, +q.ask);
+  else ev(o, "ACCEPTED", { expires_at: expires });
+  return done();
+}
+
+function executeProposal(s: State, user: DUser, run: Record<string, any>, source = "ai") { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const p = run.proposal;
+  if (p.status !== "PENDING_RISK_REVIEW") throw new HttpError(422, "business_rule_violation", `Proposal is ${String(p.status).toLowerCase().replaceAll("_", " ")}`);
+  if (Date.parse(p.expires_at) <= Date.now()) throw new HttpError(422, "business_rule_violation", "Proposal has expired");
+  const a = s.accounts.find((x) => x.id === p.account_id)!;
+  const inst = instOf(p.symbol);
+  const f = 10 ** inst.price_decimals;
+  return placeOrder(s, user, a, { symbol: p.symbol, side: "BUY", type: "MARKET", quantity: String(+p.quantity), client_order_id: `proposal-${p.id.replaceAll("-", "")}`.slice(0, 64),
+    stop_loss: (Math.floor(+p.stop_loss * f) / f).toFixed(inst.price_decimals), take_profit: (Math.ceil(+p.take_profit * f) / f).toFixed(inst.price_decimals) }, source, p.id)
+    .then(({ o }) => {
+      p.decided_at = now(); p.order_id = o.id;
+      if (o.status === "REJECTED") { p.status = "RISK_REJECTED"; p.decision_reason = o.reject_reason; } else { p.status = "EXECUTED"; p.decision_reason = null; }
+      return { p, o };
+    });
+}
+
+async function autopilotCycle(s: State, a: DAccount) {
+  const p = profile(s, a.id);
+  const user = s.users.find((u) => u.id === a.owner_id)!;
+  const out: { at: string; skipped?: string; results: Record<string, unknown>[] } = { at: now(), results: [] };
+  const block = blockReason(s, p);
+  p.autopilot_last_cycle_at = now();
+  if (block) { out.skipped = block; riskEvent(s, a.id, "AUTOPILOT_CYCLE", `Autopilot cycle skipped: ${block}`); return out; }
+  for (const symbol of p.autopilot_symbols) {
+    if (openPos(s, a.id, symbol) || s.orders.some((o) => o.account_id === a.id && o.symbol === symbol && o.side === "BUY" && o.status === "OPEN")) {
+      out.results.push({ symbol, outcome: "skipped", detail: "already positioned" }); continue;
+    }
+    const run = await runAnalysis(s, user, symbol, a.id);
+    if (!run.proposal) { out.results.push({ symbol, outcome: "no_trade", run_id: run.id, detail: run.reasons.slice(0, 2).join("; ") || "no proposal" }); continue; }
+    const { p: prop, o } = await executeProposal(s, user, run, "autopilot");
+    out.results.push({ symbol, outcome: prop.status === "EXECUTED" ? "executed" : "risk_rejected", run_id: run.id, order_id: o.id, detail: prop.decision_reason ?? o.status });
+  }
+  riskEvent(s, a.id, "AUTOPILOT_CYCLE", `Autopilot cycle: ${out.results.length} symbols analysed, ${out.results.filter((r) => r.outcome === "executed").length} orders placed`, { results: out.results });
+  return out;
+}
+
+function riskOverview(s: State, a: DAccount) {
+  const p = profile(s, a.id);
+  const m = metrics(s, a);
+  const limits = Object.fromEntries(Object.keys(risk.DEFAULTS).map((k) => [k, p[k as keyof risk.Limits]]));
+  return { account_id: a.id, currency: a.base_currency, limits, defaults: risk.DEFAULTS, ceilings: risk.CEILINGS,
+    state: { kill_switch: p.kill_switch, kill_reason: p.kill_reason, kill_engaged_at: p.kill_engaged_at, daily_halted: dailyHalted(p),
+      drawdown_halted: p.drawdown_halted, drawdown_halted_at: p.drawdown_halted_at, blocked_reason: blockReason(s, p) },
+    metrics: m, autopilot: { status: p.autopilot_status, symbols: p.autopilot_symbols, last_cycle_at: p.autopilot_last_cycle_at, interval_seconds: AUTOPILOT_INTERVAL_S },
+    system: s.systemHalt };
+}
+async function dueAutopilot(s: State, a: DAccount) {
+  const p = profile(s, a.id);
+  if (p.autopilot_status === "RUNNING" && (!p.autopilot_last_cycle_at || Date.now() - Date.parse(p.autopilot_last_cycle_at) >= AUTOPILOT_INTERVAL_S * 1000)) await autopilotCycle(s, a);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runAnalysis(s: State, user: DUser, symbol: string, accountId: string | null): Promise<Record<string, any>> {
+  const t0 = performance.now(), started = now();
+  const inst = findInst(symbol);
+  const mine = s.accounts.filter((a) => a.owner_id === user.id && a.status === "ACTIVE");
+  const acct = accountId ? mine.find((a) => a.id === accountId) : mine[0];
+  if (accountId && !acct) throw new HttpError(404, "not_found", "Trading account not found");
+  const bars = (tf: string, n: number) => mkt.candles(inst, tf, n).map((b) => ({ t: b.open_time, o: +b.open, h: +b.high, l: +b.low, c: +b.close }));
+  const q = mkt.quote(inst);
+  const nowMs = Date.now();
+  const sig = (d: rs.DDoc) => ({ title: d.title, doc_type: d.doc_type, age_days: d.published_at ? (nowMs - Date.parse(d.published_at)) / 86_400_000 : 9999, sentiment: d.sentiment, is_sample: d.is_sample });
+  const docs = s.docs.filter((d) => d.symbols.includes(inst.symbol) && d.published_at).map(sig).filter((d) => d.age_days <= 400);
+  const macro = inst.asset_class === "FX" || inst.asset_class === "ETF"
+    ? s.docs.filter((d) => (d.doc_type === "central_bank" || d.doc_type === "economic_data") && d.published_at).map(sig).filter((d) => d.age_days <= 30) : [];
+  const bal = acct ? balances(s, acct) : null;
+  const ctx: ag.Ctx = {
+    symbol: inst.symbol, asset_class: inst.asset_class, quote_currency: inst.quote_currency, price_decimals: inst.price_decimals,
+    lot_size: Number(inst.lot_size), now: nowMs, h1: bars("1h", 300), d1: bars("1d", 250),
+    quote: { last: +q.last, bid: +q.bid, ask: +q.ask, market_open: q.market_open, stale: q.stale, tradable: q.tradable, source: q.source },
+    docs, macro, account: acct && bal ? { id: acct.id, currency: acct.base_currency, equity: +bal.equity, cash: +bal.cash } : null,
+    fx: acct ? fxRate(inst.quote_currency, acct.base_currency) : null, open_positions: 0,
+  };
+  const agents = agentList(s);
+  const enabled = new Set(agents.filter((a) => a.enabled).map((a) => a.name));
+  const weights = Object.fromEntries(agents.filter((a) => a.kind === "directional" && a.enabled).map((a) => [a.name, a.weight]));
+  if (!Object.keys(weights).length) throw new HttpError(422, "business_rule_violation", "All directional agents are disabled");
+  const findings = ag.runAgents(ctx, enabled);
+  const d = ag.decide(ctx, findings, weights);
+  const id = uuid();
+  const run = {
+    id, user_id: user.id, account_id: acct?.id ?? null, symbol: inst.symbol, ...d, proposal: null as Record<string, unknown> | null,
+    context: { as_of: new Date(nowMs).toISOString(), quote: ctx.quote, bars_1h: ctx.h1.length, bars_1d: ctx.d1.length, research_docs: docs.length, macro_docs: macro.length, account: ctx.account, fx_to_account: ctx.fx, open_positions: 0 },
+    findings: ag.ORDER.map((n) => { const { data: _d, ...rest } = findings[n]!; return rest; }),
+    started_at: started, finished_at: now(), created_at: now(), latency_ms: Math.round(performance.now() - t0),
+  };
+  if (d.proposal && acct) run.proposal = { ...d.proposal, id: uuid(), run_id: id, account_id: acct.id, account_currency: acct.base_currency, status: "PENDING_RISK_REVIEW", created_at: now(), dismissed_at: null };
+  s.aiRuns.push(run);
+  await audit(s, user.id, "ai.run", { type: "ai_run", id, details: { symbol: run.symbol, decision: run.decision, net_score: run.net_score, proposal: run.proposal?.id ?? null } });
+  return run;
+}
+
 const tradingRoutes: [string, RegExp, Handler][] = [
   ["POST", /^\/trading\/orders$/, async (c) => {
     const { user } = authUser(c);
-    const b = c.body as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const { a } = ownedAccount(c, String(b.account_id ?? ""));
-    const coid = b.client_order_id == null ? null : String(b.client_order_id);
-    if (coid != null && !/^[A-Za-z0-9_-]{8,64}$/.test(coid)) throw bad("client_order_id must be 8-64 characters of A-Z, 0-9, _ or -", "client_order_id");
-    if (coid) { const ex = c.s.orders.find((o) => o.account_id === a.id && o.client_order_id === coid); if (ex) { processOpen(c.s); return json(200, orderDetail(c.s, ex), { "Idempotent-Replay": "true" }); } }
-    const inst = findInst(String(b.symbol ?? ""));
-    const side = b.side, type = b.type ?? "MARKET", tif = b.time_in_force ?? "GTC";
-    if (side !== "BUY" && side !== "SELL") throw bad("side must be BUY or SELL", "side");
-    if (!["MARKET", "LIMIT", "STOP"].includes(type)) throw bad("type must be MARKET, LIMIT or STOP", "type");
-    if (tif !== "GTC" && tif !== "DAY") throw bad("time_in_force must be GTC or DAY", "time_in_force");
-    const qty = String(b.quantity ?? "");
-    if (!DEC_RE.test(qty) || +qty <= 0) throw bad("Quantity must be positive", "quantity");
-    const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
-    const lot = +inst.lot_size;
-    if (Math.abs(Math.round(+qty / lot) * lot - +qty) > lot * 1e-6) throw rule(`Quantity must be a multiple of the lot size ${lot}`);
-    for (const k of ["limit_price", "stop_price"]) {
-      const v = b[k];
-      if (v == null) continue;
-      if (!DEC_RE.test(String(v)) || +v <= 0 || (String(v).split(".")[1]?.length ?? 0) > inst.price_decimals) throw rule(`${k} must be positive with at most ${inst.price_decimals} decimals`);
-    }
-    if (type === "LIMIT" && b.limit_price == null) throw rule("LIMIT orders need a limit_price");
-    if (type === "STOP" && b.stop_price == null) throw rule("STOP orders need a stop_price");
-    if (type === "MARKET" && (b.limit_price != null || b.stop_price != null)) throw rule("MARKET orders take no limit or stop price");
-    processOpen(c.s);
-    const t = new Date();
-    const expires = type === "MARKET" ? null : tif === "DAY" ? new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate() + 1)).toISOString() : new Date(t.getTime() + 30 * 864e5).toISOString();
-    const o: DOrder = { id: uuid(), account_id: a.id, user_id: user.id, symbol: inst.symbol, side, type, quantity: qty, limit_price: b.limit_price ?? null, stop_price: b.stop_price ?? null,
-      time_in_force: tif, status: "OPEN", filled_qty: "0", avg_fill_price: null, client_order_id: coid, source: "manual", reject_reason: null, expires_at: expires, created_at: now(), updated_at: now(), events: [] };
-    c.s.orders.push(o);
-    ev(o, "CREATED", { side, type, quantity: qty, limit_price: o.limit_price, stop_price: o.stop_price, tif });
-    const why = businessCheck(c.s, a, o);
-    if (why) reject(o, why);
-    else if (type === "MARKET") {
-      const q = mkt.quote(inst);
-      if (!q.tradable) reject(o, q.market_open ? "quote is stale" : "market is closed");
-      else fill(c.s, a, o, matchFill(o, +q.bid, +q.ask, SLIP_BPS[inst.asset_class]! / 1e4)!, +q.bid, +q.ask);
-    } else ev(o, "ACCEPTED", { expires_at: expires });
-    if (c.s.orders.length > 400) c.s.orders.splice(0, c.s.orders.length - 400);
-    await audit(c.s, user.id, "order.submit", { type: "order", id: o.id, details: { symbol: o.symbol, side, type, quantity: qty, status: o.status, reason: o.reject_reason } });
-    return json(201, orderDetail(c.s, o));
+    const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const { o, replay } = await placeOrder(c.s, user, a, c.body as OrderBody);
+    return replay ? json(200, orderDetail(c.s, o), { "Idempotent-Replay": "true" }) : json(201, orderDetail(c.s, o));
   }],
   ["GET", /^\/trading\/orders$/, (c) => {
     const { user } = authUser(c); const ids = accountIds(c, user); processOpen(c.s); save();
@@ -537,9 +788,10 @@ const tradingRoutes: [string, RegExp, Handler][] = [
       .map(({ id, symbol, avg_price, realised_pnl, fees, opened_at, closed_at }) => ({ id, symbol, avg_price, realised_pnl, fees, opened_at, closed_at })));
   }],
   ["POST", /^\/trading\/process$/, (c) => { admin(c); return json(200, processOpen(c.s)); }],
-  ["GET", /^\/portfolio\/summary$/, (c) => {
+  ["GET", /^\/portfolio\/summary$/, async (c) => {
     authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
     processOpen(c.s);
+    await dueAutopilot(c.s, a);
     const last = c.s.snapshots.filter((x) => x.account_id === a.id).at(-1);
     if (!last || Date.now() - Date.parse(last.taken_at) > 3600e3) snapshot(c.s, a, "periodic");
     save();
@@ -548,6 +800,134 @@ const tradingRoutes: [string, RegExp, Handler][] = [
   ["GET", /^\/portfolio\/history$/, (c) => {
     authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
     return json(200, c.s.snapshots.filter((x) => x.account_id === a.id).map(({ account_id: _a, ...r }) => r));
+  }],
+  // ---- risk centre
+  ["GET", /^\/risk\/status$/, (c) => { authUser(c); return json(200, c.s.systemHalt); }],
+  ["GET", /^\/risk\/accounts\/([\w-]+)$/, async (c) => {
+    const { a } = ownedAccount(c, c.params[0]!);
+    processOpen(c.s);
+    await dueAutopilot(c.s, a);
+    save();
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["PUT", /^\/risk\/accounts\/([\w-]+)\/limits$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const p = profile(c.s, a.id);
+    const diff: Record<string, { from: number; to: number }> = {};
+    for (const k of Object.keys(risk.DEFAULTS) as (keyof risk.Limits)[]) {
+      const v = c.body[k];
+      if (v == null) continue;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0 || n > risk.CEILINGS[k] || ((k === "max_open_positions" || k === "max_orders_per_minute") && !Number.isInteger(n)))
+        throw bad(`${k} must be greater than 0 and at most ${risk.CEILINGS[k]}`, k);
+      if (p[k] !== n) { diff[k] = { from: p[k], to: n }; p[k] = n; }
+    }
+    if (Object.keys(diff).length) {
+      const loosened = Object.entries(diff).filter(([, d]) => d.to > d.from).map(([k]) => k);
+      riskEvent(c.s, a.id, "LIMITS_CHANGED", "Risk limits changed" + (loosened.length ? ` (loosened: ${loosened.join(", ")})` : ""), { changes: diff });
+      await audit(c.s, user.id, "risk.limits.update", { type: "trading_account", id: a.id, details: diff });
+    }
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["POST", /^\/risk\/accounts\/([\w-]+)\/kill-switch$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const p = profile(c.s, a.id);
+    const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+    if (c.body.engaged) {
+      if (p.kill_switch) throw rule("Kill switch is already engaged");
+      engageKill(c.s, a, p, String(c.body.reason || "engaged manually"));
+    } else {
+      if (!p.kill_switch) throw rule("Kill switch is not engaged");
+      p.kill_switch = false; p.kill_reason = null; p.kill_engaged_at = null;
+      riskEvent(c.s, a.id, "KILL_SWITCH_OFF", "Kill switch released");
+    }
+    await audit(c.s, user.id, `risk.kill_switch.${c.body.engaged ? "engage" : "release"}`, { type: "trading_account", id: a.id, details: { reason: c.body.reason ?? null } });
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["POST", /^\/risk\/accounts\/([\w-]+)\/breakers\/drawdown\/reset$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const p = profile(c.s, a.id);
+    if (!p.drawdown_halted) throw new HttpError(422, "business_rule_violation", "Drawdown breaker is not tripped");
+    p.drawdown_halted = false; p.drawdown_halted_at = null; p.peak_pnl_equity = null;
+    metrics(c.s, a);
+    riskEvent(c.s, a.id, "BREAKER_RESET", "Drawdown breaker reset; peak re-based to current equity");
+    await audit(c.s, user.id, "risk.breaker.reset", { type: "trading_account", id: a.id });
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["POST", /^\/risk\/accounts\/([\w-]+)\/autopilot$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const p = profile(c.s, a.id);
+    const action = String(c.body.action);
+    if (!["start", "pause", "stop"].includes(action)) throw bad("action must be start, pause or stop", "action");
+    if (Array.isArray(c.body.symbols)) {
+      if (c.body.symbols.length < 1 || c.body.symbols.length > 5) throw bad("Choose 1 to 5 instruments", "symbols");
+      p.autopilot_symbols = [...new Set((c.body.symbols as string[]).map((x) => findInst(x).symbol))];
+    }
+    if (action === "start") {
+      const block = blockReason(c.s, p);
+      if (block) throw new HttpError(422, "business_rule_violation", `Autopilot cannot start: ${block}`);
+    }
+    p.autopilot_status = action === "start" ? "RUNNING" : action === "pause" ? "PAUSED" : "STOPPED";
+    riskEvent(c.s, a.id, `AUTOPILOT_${action.toUpperCase()}`, action === "stop" ? "Autopilot stopped" : `Autopilot ${action}ed`, { symbols: p.autopilot_symbols });
+    await audit(c.s, user.id, `risk.autopilot.${action}`, { type: "trading_account", id: a.id, details: { symbols: p.autopilot_symbols } });
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["POST", /^\/risk\/accounts\/([\w-]+)\/autopilot\/run$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    if (profile(c.s, a.id).autopilot_status !== "RUNNING") throw new HttpError(422, "business_rule_violation", "Start the autopilot first");
+    processOpen(c.s);
+    const out = await autopilotCycle(c.s, a);
+    await audit(c.s, user.id, "risk.autopilot.cycle", { type: "trading_account", id: a.id, details: { results: out.results.map((r) => ({ symbol: r.symbol, outcome: r.outcome })), skipped: out.skipped ?? null } });
+    return json(200, out);
+  }],
+  ["POST", /^\/risk\/accounts\/([\w-]+)\/emergency-stop$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const p = profile(c.s, a.id);
+    const reason = String(c.body.reason || "emergency stop");
+    p.autopilot_status = "STOPPED";
+    if (!p.kill_switch) engageKill(c.s, a, p, reason);
+    let cancelled = cancelOpen(c.s, a.id, "emergency stop", (o) => o.side === "BUY" || o.source !== "protective");
+    const flattened: Record<string, unknown>[] = [];
+    if (c.body.flatten) {
+      cancelled += cancelOpen(c.s, a.id, "emergency stop: flattening", () => true);
+      for (const pos of c.s.positions.filter((x) => x.account_id === a.id && x.status === "OPEN")) {
+        const { o } = await placeOrder(c.s, user, a, { symbol: pos.symbol, side: "SELL", type: "MARKET", quantity: pos.quantity }, "emergency");
+        flattened.push({ symbol: pos.symbol, status: o.status, reason: o.reject_reason });
+      }
+    }
+    riskEvent(c.s, a.id, "EMERGENCY_STOP", `Emergency stop: ${reason}`, { cancelled_orders: cancelled, flatten: !!c.body.flatten, flattened });
+    await audit(c.s, user.id, "risk.emergency_stop", { type: "trading_account", id: a.id, details: { flatten: !!c.body.flatten, cancelled, flattened } });
+    return json(200, riskOverview(c.s, a));
+  }],
+  ["GET", /^\/risk\/decisions$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    const ap = c.query.get("approved");
+    return json(200, page(c, c.s.riskDecisions.filter((d) => d.account_id === a.id && (ap == null || String(d.approved) === ap)).reverse().map(({ account_id: _a, ...d }) => d)));
+  }],
+  ["GET", /^\/risk\/events$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    return json(200, page(c, c.s.riskEvents.filter((e) => e.account_id === a.id || e.account_id == null).reverse()));
+  }],
+  ["POST", /^\/admin\/risk\/halt$/, async (c) => {
+    const { user } = admin(c);
+    const halted = !!c.body.halted;
+    if (halted && !c.body.reason) throw new HttpError(422, "business_rule_violation", "A reason is required to halt trading");
+    c.s.systemHalt = { halted, reason: halted ? String(c.body.reason) : null, since: halted ? now() : null };
+    riskEvent(c.s, null, halted ? "SYSTEM_HALT" : "SYSTEM_RESUME", `Platform trading ${halted ? "halted" : "resumed"}${halted ? `: ${c.body.reason}` : ""}`);
+    if (halted) {
+      cancelOpen(c.s, null, "risk: platform trading halted");
+      for (const p of Object.values(c.s.riskProfiles)) if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
+    }
+    await audit(c.s, user.id, `risk.system.${halted ? "halt" : "resume"}`, { details: { reason: c.body.reason ?? null } });
+    return json(200, c.s.systemHalt);
+  }],
+  ["POST", /^\/ai\/proposals\/([\w-]+)\/execute$/, async (c) => {
+    const { user } = authUser(c);
+    const run = c.s.aiRuns.find((x) => x.user_id === user.id && x.proposal?.id === c.params[0]);
+    if (!run) throw new HttpError(404, "not_found", "Proposal not found");
+    const { p, o } = await executeProposal(c.s, user, run);
+    await audit(c.s, user.id, "ai.proposal.execute", { type: "trade_proposal", id: p.id, details: { status: p.status, order_id: o.id, reason: p.decision_reason } });
+    return json(200, { proposal: withEffective(p), order_id: o.id, order_status: o.status, reason: p.decision_reason });
   }],
 ];
 
@@ -830,42 +1210,7 @@ const routes: [string, RegExp, Handler][] = [
   }],
   ["POST", /^\/ai\/run$/, async (c) => {
     const { user } = authUser(c);
-    const t0 = performance.now(), started = now();
-    const inst = findInst(String(c.body.symbol ?? ""));
-    const mine = c.s.accounts.filter((a) => a.owner_id === user.id && a.status === "ACTIVE");
-    const acct = c.body.account_id ? mine.find((a) => a.id === c.body.account_id) : mine[0];
-    if (c.body.account_id && !acct) throw new HttpError(404, "not_found", "Trading account not found");
-    const bars = (tf: string, n: number) => mkt.candles(inst, tf, n).map((b) => ({ t: b.open_time, o: +b.open, h: +b.high, l: +b.low, c: +b.close }));
-    const q = mkt.quote(inst);
-    const nowMs = Date.now();
-    const sig = (d: rs.DDoc) => ({ title: d.title, doc_type: d.doc_type, age_days: d.published_at ? (nowMs - Date.parse(d.published_at)) / 86_400_000 : 9999, sentiment: d.sentiment, is_sample: d.is_sample });
-    const docs = c.s.docs.filter((d) => d.symbols.includes(inst.symbol) && d.published_at).map(sig).filter((d) => d.age_days <= 400);
-    const macro = inst.asset_class === "FX" || inst.asset_class === "ETF"
-      ? c.s.docs.filter((d) => (d.doc_type === "central_bank" || d.doc_type === "economic_data") && d.published_at).map(sig).filter((d) => d.age_days <= 30) : [];
-    const bal = acct ? balances(c.s, acct) : null;
-    const ctx: ag.Ctx = {
-      symbol: inst.symbol, asset_class: inst.asset_class, quote_currency: inst.quote_currency, price_decimals: inst.price_decimals,
-      lot_size: Number(inst.lot_size), now: nowMs, h1: bars("1h", 300), d1: bars("1d", 250),
-      quote: { last: +q.last, bid: +q.bid, ask: +q.ask, market_open: q.market_open, stale: q.stale, tradable: q.tradable, source: q.source },
-      docs, macro, account: acct && bal ? { id: acct.id, currency: acct.base_currency, equity: +bal.equity, cash: +bal.cash } : null,
-      fx: acct ? fxRate(inst.quote_currency, acct.base_currency) : null, open_positions: 0,
-    };
-    const agents = agentList(c.s);
-    const enabled = new Set(agents.filter((a) => a.enabled).map((a) => a.name));
-    const weights = Object.fromEntries(agents.filter((a) => a.kind === "directional" && a.enabled).map((a) => [a.name, a.weight]));
-    if (!Object.keys(weights).length) throw new HttpError(422, "business_rule_violation", "All directional agents are disabled");
-    const findings = ag.runAgents(ctx, enabled);
-    const d = ag.decide(ctx, findings, weights);
-    const id = uuid();
-    const run = {
-      id, user_id: user.id, account_id: acct?.id ?? null, symbol: inst.symbol, ...d, proposal: null as Record<string, unknown> | null,
-      context: { as_of: new Date(nowMs).toISOString(), quote: ctx.quote, bars_1h: ctx.h1.length, bars_1d: ctx.d1.length, research_docs: docs.length, macro_docs: macro.length, account: ctx.account, fx_to_account: ctx.fx, open_positions: 0 },
-      findings: ag.ORDER.map((n) => { const { data: _d, ...rest } = findings[n]!; return rest; }),
-      started_at: started, finished_at: now(), created_at: now(), latency_ms: Math.round(performance.now() - t0),
-    };
-    if (d.proposal && acct) run.proposal = { ...d.proposal, id: uuid(), run_id: id, account_id: acct.id, account_currency: acct.base_currency, status: "PENDING_RISK_REVIEW", created_at: now(), dismissed_at: null };
-    c.s.aiRuns.push(run);
-    await audit(c.s, user.id, "ai.run", { type: "ai_run", id, details: { symbol: run.symbol, decision: run.decision, net_score: run.net_score, proposal: run.proposal?.id ?? null } });
+    const run = await runAnalysis(c.s, user, String(c.body.symbol ?? ""), c.body.account_id ? String(c.body.account_id) : null);
     const { user_id: _u, ...out } = run;
     return json(201, { ...out, proposal: withEffective(run.proposal) });
   }],

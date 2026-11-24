@@ -44,8 +44,8 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await expect(page.getByText("Virtual deposit").first()).toBeVisible();
 
   // Placeholder modules are clearly labelled
-  await page.getByRole("link", { name: /Risk Centre/ }).click();
-  await expect(page.getByText("scheduled for Phase 9")).toBeVisible();
+  await page.getByRole("link", { name: /Analytics/ }).click();
+  await expect(page.getByText("scheduled for Phase 10")).toBeVisible();
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -255,4 +255,71 @@ async function tradeFlow(page: import("@playwright/test").Page) {
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
   await expect(page.getByText("Trade · sell")).toBeVisible();
   await expect(page.getByText(/^Sell 0.05 BTC-USD @/)).toBeVisible();
+}
+
+test("risk engine: limits, rejection with checks, brackets, kill switch, autopilot", async ({ page }) => {
+  const email = `e2e-risk-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Risk Manager");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Risk Manager" })).toBeVisible();
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.getByLabel("Account name").fill("Risk paper");
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("link", { name: "Risk paper" })).toBeVisible();
+  await riskFlow(page);
+});
+
+// Shared with the static demo spec (kept in sync manually).
+async function riskFlow(page: import("@playwright/test").Page) {
+  await page.goto("risk");
+  await expect(page.getByTestId("risk-status")).toContainText("Trading allowed");
+  await page.getByLabel("Max position size").fill("2");
+  await page.getByRole("button", { name: "Save limits" }).click();
+  await expect(page.getByText("Saved")).toBeVisible();
+
+  // The gate refuses an oversized order and shows every check
+  await page.goto("markets?symbol=BTC-USD");
+  await page.getByRole("button", { name: "Buy", exact: true }).click();
+  const dialog = page.locator("dialog");
+  await dialog.getByLabel("Quantity").fill("0.05");
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("risk: position would be");
+  await expect(dialog.getByTestId("risk-checks")).toContainText("Position size");
+  // A small bracketed order passes and places protective orders
+  await dialog.getByRole("button", { name: "New order" }).click();
+  await dialog.getByLabel("Quantity").fill("0.01");
+  const ask = Number((await dialog.getByText(/^Ask/).textContent())!.replace(/[^\d.]/g, ""));
+  await dialog.getByLabel("Stop loss (optional)").fill((Math.floor(ask * 0.95 * 100) / 100).toFixed(2));
+  await dialog.getByLabel("Take profit (optional)").fill((Math.ceil(ask * 1.1 * 100) / 100).toFixed(2));
+  await dialog.getByRole("button", { name: "Place paper buy order" }).click();
+  await expect(page.getByTestId("order-result")).toContainText("Filled 0.01 BTC-USD");
+  await expect(page.getByTestId("order-result")).toContainText("Protective orders placed: STOP");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+
+  // Decisions log, kill switch
+  await page.getByRole("link", { name: "Risk Centre" }).click();
+  await page.getByLabel("Decision filter").selectOption("false");
+  await expect(page.getByRole("cell", { name: /position would be/ })).toBeVisible();
+  await page.getByLabel("Kill switch reason").fill("e2e drill");
+  await page.getByRole("button", { name: "Engage" }).click();
+  await expect(page.getByTestId("risk-status")).toContainText("account kill switch is engaged: e2e drill");
+  await expect(page.getByTestId("risk-events")).toContainText("Kill switch engaged");
+  await page.getByRole("button", { name: "Release" }).click();
+  await expect(page.getByTestId("risk-status")).toContainText("Trading allowed");
+
+  // Autopilot through the gate
+  const ap = page.getByTestId("autopilot");
+  for (const s of ["ETH-USD", "SPY"]) await ap.getByRole("button", { name: s, exact: true }).click();   // leave BTC-USD only
+  await ap.getByRole("button", { name: "Start" }).click();
+  await expect(ap.getByText("running")).toBeVisible();
+  await ap.getByRole("button", { name: "Run cycle now" }).click();
+  await expect(ap.getByTestId("cycle-result")).toContainText("BTC-USD");
+  await ap.getByRole("button", { name: "Emergency stop" }).click();
+  await page.locator("dialog").getByRole("button", { name: "Confirm emergency stop" }).click();
+  await expect(page.getByTestId("risk-status")).toContainText("kill switch is engaged");
+  await expect(ap.getByText("stopped")).toBeVisible();
+  await page.getByRole("button", { name: "Release" }).click();
 }

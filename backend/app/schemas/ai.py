@@ -57,6 +57,9 @@ class ProposalRead(ORMModel):
     expires_at: datetime
     created_at: datetime
     dismissed_at: datetime | None
+    decided_at: datetime | None = None
+    decision_reason: str | None = None
+    order_id: uuid.UUID | None = None
 
     @computed_field
     @property
@@ -93,3 +96,10 @@ class RunRead(RunSummary):
 class RunRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     account_id: uuid.UUID | None = None
+
+
+class ProposalExecution(BaseModel):
+    proposal: ProposalRead
+    order_id: uuid.UUID
+    order_status: str
+    reason: str | None

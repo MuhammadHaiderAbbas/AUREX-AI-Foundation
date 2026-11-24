@@ -65,6 +65,8 @@ class Settings(BaseSettings):
 
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
     order_matcher_interval_seconds: float = 5.0
+    # Autopilot: minimum seconds between cycles for an account whose autopilot is RUNNING.
+    autopilot_interval_seconds: float = 900.0
 
     @field_validator("cors_origins", "supported_currencies", "research_allowed_hosts",
                      mode="before")
