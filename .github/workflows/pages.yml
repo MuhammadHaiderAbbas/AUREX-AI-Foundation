@@ -34,7 +34,7 @@ jobs:
           npx playwright install --with-deps chromium
           node scripts/pages-preview.cjs dist "$VITE_BASE" 4173 &
           AUREX_E2E_DEMO=1 AUREX_WEB_URL="http://localhost:4173$VITE_BASE" npx playwright test e2e/demo.spec.ts --trace off
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with: { path: frontend/dist }
 
   deploy:
