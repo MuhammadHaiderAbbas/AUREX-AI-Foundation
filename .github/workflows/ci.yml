@@ -15,6 +15,9 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U aurex" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:                         # shared rate-limit tests (tests/test_ops.py)
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +74,50 @@ jobs:
           npx playwright install --with-deps chromium
           npx playwright test --trace off
 
+  ops:
+    name: Backup and restore drill
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_USER: aurex, POSTGRES_PASSWORD: aurex, POSTGRES_DB: aurex }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aurex" --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults: { run: { working-directory: backend } }
+    env:
+      AUREX_DATABASE_URL: postgresql+asyncpg://aurex:aurex@localhost:5432/aurex
+      DATABASE_URL: postgresql://aurex:aurex@localhost:5432/aurex
+      AUREX_AUDIT_ANCHOR_FILE: /tmp/anchors/aurex.jsonl
+      AUREX_CLI: python -m app.cli
+      BACKUP_DIR: /tmp/backups
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip, cache-dependency-path: backend/requirements*.txt }
+      - run: pip install -r requirements.txt
+      - name: Postgres client matches the server (16)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 >/dev/null
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Schema and some audited activity
+        run: |
+          alembic upgrade head
+          AUREX_ADMIN_PASSWORD='Ci-Operator-Key-42!' python -m app.cli create-admin --email ops@example.com --name "CI Ops"
+          python -m app.cli audit-anchor
+      - name: Backup
+        run: ops/backup/backup.sh
+      - name: Restore drill (restore into a scratch database + integrity checks)
+        run: ops/backup/restore-drill.sh
+      - name: Live database still intact and anchors verify
+        run: |
+          python -m app.cli integrity-check
+          python -m app.cli audit-verify-anchors "$AUREX_AUDIT_ANCHOR_FILE"
+          test "$(psql "$DATABASE_URL" -Atc "select value->>'ok' from system_controls where key='last_restore_drill'")" = "true"
+      - name: Refuses to restore without confirmation
+        run: |
+          ! ops/backup/restore.sh "$(ls -1 $BACKUP_DIR/aurex-*.dump | head -1)"
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +125,7 @@ jobs:
       - name: Build images
         run: |
           docker build -t aurex-backend ./backend
+          docker build --target ops -t aurex-ops ./backend
           docker build -t aurex-web ./frontend
       - name: Smoke-test backend image (ML stack incl. LightGBM/OpenMP)
         run: |

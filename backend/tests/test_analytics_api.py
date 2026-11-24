@@ -18,11 +18,13 @@ from tests.test_trading import PRICES, fake_quotes, order, set_price, setup  # n
 
 async def backdate(aid: str, days: int, equity_path: list[float]):
     """Pretend the account is `days` old with one snapshot per day along `equity_path`."""
-    start = datetime.now(UTC) - timedelta(days=days)
+    # anchored to UTC midnight so each snapshot lands on its own calendar day whatever the time of day
+    midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = midnight - timedelta(days=days)
     async with SessionLocal() as db:
         await db.execute(text("UPDATE trading_accounts SET created_at = :t WHERE id = :i"), {"t": start, "i": aid})
         for k, eq in enumerate(equity_path):
-            db.add(PortfolioSnapshot(account_id=aid, taken_at=start + timedelta(days=k, hours=12), cash=D(str(eq)),
+            db.add(PortfolioSnapshot(account_id=aid, taken_at=start + timedelta(days=k, hours=1), cash=D(str(eq)),
                                      market_value=D(0), equity=D(str(eq)), reason="periodic"))
         await db.commit()
 

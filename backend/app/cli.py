@@ -5,6 +5,10 @@
     python -m app.cli audit-export --out audit.jsonl     # export (JSON Lines) for archiving
     python -m app.cli audit-verify-file audit.jsonl      # verify an export offline, no database
     python -m app.cli ml-sign-artifacts                  # sign model artifacts trained before Phase 11
+    python -m app.cli integrity-check                    # schema, audit chain, ledger, triggers, anchors
+    python -m app.cli audit-anchor                       # write the audit head to the configured sinks
+    python -m app.cli audit-verify-anchors anchors.jsonl # check external anchors against the chain
+    python -m app.cli ops-record backup --file f --sha256 h --size n   # used by infrastructure/backup scripts
 
 The admin password is read from AUREX_ADMIN_PASSWORD or prompted for interactively.
 """
@@ -102,6 +106,54 @@ async def ml_sign_artifacts(confirm: bool) -> int:
     return 0
 
 
+async def integrity_check() -> int:
+    from app.ops.integrity import run_checks
+    async with SessionLocal() as db:
+        checks = await run_checks(db)
+    await engine.dispose()
+    for c in checks:
+        print(f"{'OK  ' if c['ok'] else 'FAIL'} {c['name']:<30} {c['detail']}")
+    return 0 if all(c["ok"] for c in checks) else 1
+
+
+async def audit_anchor() -> int:
+    from app.ops import anchoring
+    if not anchoring.sinks_configured():
+        print("No anchor sink configured (AUREX_AUDIT_ANCHOR_FILE / AUREX_AUDIT_ANCHOR_WEBHOOK_URL)", file=sys.stderr)
+        return 2
+    async with SessionLocal() as db:
+        a = await anchoring.anchor_now(db)
+        await db.commit()
+    await engine.dispose()
+    print(json.dumps({"last_record_id": a.last_record_id, "head_hash": a.head_hash, "sinks": a.sinks}))
+    return 0 if all(r["ok"] for r in a.sinks) else 1
+
+
+async def audit_verify_anchors(path: str) -> int:
+    from app.ops.anchoring import verify_anchors
+    lines = (await asyncio.to_thread(Path(path).read_text, encoding="utf-8")).splitlines()
+    async with SessionLocal() as db:
+        r = await verify_anchors(db, lines)
+    await engine.dispose()
+    print(json.dumps(r))
+    return 0 if r["valid"] else 1
+
+
+async def ops_record(kind: str, file: str, sha256: str, size: int, ok: bool, detail: str) -> int:
+    from datetime import UTC, datetime
+
+    from app.ops import controls
+    key = {"backup": controls.LAST_BACKUP, "restore-drill": controls.LAST_RESTORE_DRILL}[kind]
+    value = {"at": datetime.now(UTC).isoformat(), "file": os.path.basename(file), "sha256": sha256, "size": size, "ok": ok, "detail": detail}
+    async with SessionLocal() as db:
+        await controls.put(db, key, value)
+        await AuditService(db).record(AuditContext(), f"ops.{kind.replace('-', '_')}", outcome="success" if ok else "failure", details=value)
+        await db.commit()
+    await engine.dispose()
+    print(json.dumps(value))
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="aurex")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -116,6 +168,17 @@ def main() -> None:
     av.add_argument("path")
     ms = sub.add_parser("ml-sign-artifacts")
     ms.add_argument("--yes", action="store_true")
+    sub.add_parser("integrity-check")
+    sub.add_parser("audit-anchor")
+    va = sub.add_parser("audit-verify-anchors")
+    va.add_argument("path")
+    orc = sub.add_parser("ops-record")
+    orc.add_argument("kind", choices=["backup", "restore-drill"])
+    orc.add_argument("--file", required=True)
+    orc.add_argument("--sha256", required=True)
+    orc.add_argument("--size", type=int, required=True)
+    orc.add_argument("--failed", action="store_true")
+    orc.add_argument("--detail", default="")
     args = p.parse_args()
     if args.cmd == "create-admin":
         password = os.environ.get("AUREX_ADMIN_PASSWORD") or getpass.getpass("Password: ")
@@ -128,6 +191,14 @@ def main() -> None:
         sys.exit(audit_verify_file(args.path))
     elif args.cmd == "ml-sign-artifacts":
         sys.exit(asyncio.run(ml_sign_artifacts(args.yes)))
+    elif args.cmd == "integrity-check":
+        sys.exit(asyncio.run(integrity_check()))
+    elif args.cmd == "audit-anchor":
+        sys.exit(asyncio.run(audit_anchor()))
+    elif args.cmd == "audit-verify-anchors":
+        sys.exit(asyncio.run(audit_verify_anchors(args.path)))
+    elif args.cmd == "ops-record":
+        sys.exit(asyncio.run(ops_record(args.kind, args.file, args.sha256, args.size, not args.failed, args.detail)))
 
 
 if __name__ == "__main__":

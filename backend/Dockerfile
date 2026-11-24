@@ -23,3 +23,17 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # dodge per-IP rate limits or forge audit records. Override with the proxy's address or subnet.
 ENV FORWARDED_ALLOW_IPS=127.0.0.1
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header"]
+
+
+# Operations image: the API image plus the PostgreSQL client, for the backup / restore-drill
+# scheduler (infrastructure/backup). Build with: docker build --target ops -t aurex-ops ./backend
+FROM base AS ops
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
+COPY --chown=aurex:aurex ops/backup /opt/aurex/backup
+USER aurex
+ENTRYPOINT []
+CMD ["/opt/aurex/backup/schedule.sh"]
+
+# Default target: the API (declared last so a plain `docker build` produces it).
+FROM base AS runtime

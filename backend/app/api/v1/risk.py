@@ -31,7 +31,7 @@ from app.services.audit_service import AuditContext, AuditService
 from app.trading.service import OrderRequest, TradingService
 
 router = APIRouter(tags=["risk"])
-cycle_limiter = SlidingWindowLimiter()
+cycle_limiter = SlidingWindowLimiter("autopilot_cycle")
 CYCLES_PER_HOUR = 12
 
 
@@ -146,7 +146,7 @@ async def autopilot_run(account_id: uuid.UUID, user: User = Depends(current_user
     ts, acct, prof = await _ctx(db, user, account_id)
     if prof.autopilot_status != AutopilotStatus.RUNNING:
         raise BusinessRuleViolation("Start the autopilot first")
-    if not cycle_limiter.hit(str(user.id), CYCLES_PER_HOUR, 3600):
+    if not await cycle_limiter.hit(str(user.id), CYCLES_PER_HOUR, 3600):
         raise RateLimited("Autopilot cycle limit reached for this hour")
     out = await run_cycle(db, acct, prof)
     await AuditService(db).record(ctx, "risk.autopilot.cycle", resource_type="trading_account", resource_id=acct.id,

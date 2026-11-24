@@ -9,6 +9,7 @@ from app.api.v1 import (
     backtests,
     markets,
     ml,
+    ops,
     research,
     risk,
     system,
@@ -17,5 +18,6 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
-for module in (system, auth, users, accounts, markets, research, ai, ml, backtests, trading, risk, analytics, admin):
+MODULES = (system, auth, users, accounts, markets, research, ai, ml, backtests, trading, risk, analytics, admin, ops)
+for module in MODULES:
     api_router.include_router(module.router)

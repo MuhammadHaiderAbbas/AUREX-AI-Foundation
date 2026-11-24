@@ -33,11 +33,11 @@ class IssuedTokens:
         self.refresh_token = refresh_token
 
 
-lockout_limiter = SlidingWindowLimiter()       # failed logins per email, any IP
-registration_limiter = SlidingWindowLimiter()  # registrations per IP
+lockout_limiter = SlidingWindowLimiter("lockout")       # failed logins per email, any IP
+registration_limiter = SlidingWindowLimiter("registration")  # registrations per IP
 
 
-mfa_limiter = SlidingWindowLimiter()           # second-factor attempts per user
+mfa_limiter = SlidingWindowLimiter("mfa")           # second-factor attempts per user
 
 MFA_CONTEXT = "user-mfa-secret"
 
@@ -74,7 +74,7 @@ class AuthService:
         return user
 
     async def register(self, data: RegisterRequest, ctx: AuditContext) -> User:
-        if not registration_limiter.hit(ctx.ip_address or "?", self.settings.registrations_per_ip_per_hour, 3600):
+        if not await registration_limiter.hit(ctx.ip_address or "?", self.settings.registrations_per_ip_per_hour, 3600):
             raise RateLimited("Too many registrations from this address. Try again later.")
         if not self.settings.allow_registration:
             raise Forbidden("Registration is disabled")
@@ -102,17 +102,17 @@ class AuthService:
         s = self.settings
         email = data.email.lower()
         key = f"{ctx.ip_address}|{email}"
-        if not login_limiter.hit(key, s.login_rate_limit_attempts,
+        if not await login_limiter.hit(key, s.login_rate_limit_attempts,
                                  s.login_rate_limit_window_seconds):
             raise RateLimited("Too many login attempts. Try again shortly.")
 
         # Account lockout: caps guesses against one account from any number of addresses.
-        failures = lockout_limiter.count(email, s.login_lockout_window_seconds)
+        failures = await lockout_limiter.count(email, s.login_lockout_window_seconds)
         if failures >= s.login_lockout_failures:
             raise RateLimited("This account is temporarily locked after repeated failed sign-ins. Try again later.")
         user = await self.db.scalar(select(User).where(User.email == email))
         if not verify_password(data.password, user.password_hash if user else None):
-            lockout_limiter.hit(email, 10**9, s.login_lockout_window_seconds)
+            await lockout_limiter.hit(email, 10**9, s.login_lockout_window_seconds)
             if failures + 1 == s.login_lockout_failures:
                 await self.audit.record(ctx, "auth.lockout", outcome="failure", resource_type="user",
                                         resource_id=user.id if user else None,
@@ -132,8 +132,8 @@ class AuthService:
 
         if password_needs_rehash(user.password_hash):
             user.password_hash = hash_password(data.password)
-        login_limiter.reset(key)
-        lockout_limiter.reset(email)
+        await login_limiter.clear(key)
+        await lockout_limiter.clear(email)
         if user.mfa_enabled:
             await self.audit.record(ctx.as_actor(user.id), "auth.mfa.challenge", resource_type="user",
                                     resource_id=user.id)
@@ -167,7 +167,7 @@ class AuthService:
             user_id = decode_mfa_challenge(mfa_token)
         except (jwt.PyJWTError, ValueError):
             raise Unauthorized("Sign-in step expired. Enter your password again.")
-        if not mfa_limiter.hit(str(user_id), 5, 300):
+        if not await mfa_limiter.hit(str(user_id), 5, 300):
             raise RateLimited("Too many verification attempts. Try again in a few minutes.")
         user = await self.db.scalar(select(User).where(User.id == user_id).with_for_update(of=User))
         if user is None or not user.is_active or not user.mfa_enabled:
@@ -178,7 +178,7 @@ class AuthService:
                                     resource_type="user", resource_id=user.id)
             await self.db.commit()
             raise Unauthorized("Invalid authentication code")
-        mfa_limiter.reset(str(user_id))
+        await mfa_limiter.clear(str(user_id))
         if method == "recovery":
             await self.audit.record(ctx.as_actor(user.id), "auth.mfa.recovery_used", resource_type="user",
                                     resource_id=user.id, details={"remaining": len(user.mfa_recovery_hashes or [])})

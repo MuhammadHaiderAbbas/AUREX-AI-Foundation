@@ -72,6 +72,10 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | POST | `/auth/mfa/setup` · `/enable` · `/disable` · `/recovery-codes` | bearer | Enrol (password → secret), confirm (code → recovery codes), disable or regenerate (password + code). Audited |
 | GET | `/auth/sessions` · POST `/auth/sessions/{id}/revoke` · `/auth/sessions/revoke-others` | bearer | Signed-in sessions and revocation |
 | GET | `/admin/audit/export?from_id=` | admin | Audit chain as JSON Lines, verifiable offline (`python -m app.cli audit-verify-file`) |
+| GET | `/system/ready` | — | Readiness: database, schema at head, Redis, worker heartbeat (503 until ready) |
+| GET | `/metrics` | metrics token | Prometheus exposition (404 unless `AUREX_METRICS_TOKEN` is set) |
+| GET | `/admin/ops/status` | admin | Health, worker leader, backups, restore drills, anchoring, go-live gates |
+| POST | `/admin/ops/anchor` · `/admin/ops/integrity-check` · `/admin/ops/attestations` | admin | Anchor the audit head now; run integrity checks; record a go-live attestation (audited) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

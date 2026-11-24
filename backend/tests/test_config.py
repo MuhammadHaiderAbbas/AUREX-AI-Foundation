@@ -42,3 +42,14 @@ def test_secrets_can_come_from_files(monkeypatch, tmp_path):
     monkeypatch.setenv("AUREX_JWT_SECRET_FILE", str(f))
     assert Settings().jwt_secret == "z" * 40
     assert Settings().docs_enabled is True     # development default
+
+
+def test_previous_jwt_secrets_and_urls_from_files(monkeypatch, tmp_path):
+    prev = tmp_path / "prev"
+    prev.write_text("a" * 40 + "\n\n" + "b" * 40 + "\n")
+    url = tmp_path / "db"
+    url.write_text("postgresql+asyncpg://u:p@db:5432/aurex\n")
+    monkeypatch.setenv("AUREX_JWT_PREVIOUS_SECRETS_FILE", str(prev))
+    monkeypatch.setenv("AUREX_DATABASE_URL_FILE", str(url))
+    s = Settings()
+    assert s.jwt_previous_secrets == ["a" * 40, "b" * 40] and s.database_url.endswith("@db:5432/aurex")

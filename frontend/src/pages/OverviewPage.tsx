@@ -153,11 +153,10 @@ export function OverviewPage() {
       <MarketSnapshot />
 
       <Card>
-        <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
+        <CardHeader title="Platform roadmap" description="All twelve phases have shipped. What comes next is gated, not scheduled." />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Security hardening", "Phase 11", "Threat model, secrets, pen-test fixes"],
-            ["Production", "Phase 12", "Deployment, monitoring, live-trading gates"],
+            ["Live trading", "Stage 2", "Only after every go-live gate and a reviewed code change"],
           ].map(([t, p, d]) => (
             <div key={t} className="rounded-md border border-border bg-surface-2 p-3">
               <div className="flex items-center justify-between"><span className="text-sm font-medium">{t}</span><Badge>{p}</Badge></div>

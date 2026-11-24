@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
 
     database_url: str = "postgresql+asyncpg://aurex:aurex@localhost:5432/aurex"
+    database_url_file: str | None = None
     database_echo: bool = False
     # NullPool is used in tests so connections never outlive an event loop.
     database_use_null_pool: bool = False
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     jwt_secret_file: str | None = None
     # Rotation: tokens signed with these older secrets still verify until they expire.
     jwt_previous_secrets: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    jwt_previous_secrets_file: str | None = None        # one secret per line
     jwt_algorithm: str = "HS256"
     # HMAC key for ML model artifacts. Defaults to a key derived from jwt_secret.
     artifact_key: str | None = None
@@ -55,6 +57,28 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 11 * 1_048_576      # research document upload
     # OpenAPI/Swagger UI. None = on in development/test, off in staging/production.
     expose_api_docs: bool | None = None
+
+    # -- Production operations (Phase 12) --------------------------------------------------
+    # Shared state for rate limits across API replicas. Empty = in-process (single node).
+    redis_url: str | None = None
+    redis_url_file: str | None = None
+    # Bearer token required to scrape /metrics (empty = metrics endpoint disabled).
+    metrics_token: str | None = None
+    metrics_token_file: str | None = None
+    # Admins must have two-factor authentication to use admin endpoints. None = on outside
+    # development/test.
+    require_admin_mfa: bool | None = None
+    # Run the background worker (matcher, monitor, autopilot, anchoring) in this process.
+    # Only one replica holds the leader lock at a time, so it is safe to leave on everywhere.
+    background_worker: bool = True
+    # Audit anchoring: write the head of the hash chain outside the database.
+    audit_anchor_file: str | None = None                # append-only JSONL, e.g. on a separate volume
+    audit_anchor_webhook_url: str | None = None         # POSTed JSON, HMAC-signed
+    audit_anchor_webhook_secret: str | None = None
+    audit_anchor_interval_seconds: float = 3600.0
+    # Readiness thresholds used by /system/ready and the go-live gates.
+    max_backup_age_hours: float = 26.0
+    max_anchor_age_hours: float = 2.0
 
     # Paper-trading guard rails (Stage 1: virtual capital only).
     default_starting_balance: str = "100000"
@@ -108,6 +132,15 @@ class Settings(BaseSettings):
             self.artifact_key = Path(self.artifact_key_file).read_text().strip()
         if self.data_key_file:
             self.data_key = Path(self.data_key_file).read_text().strip()
+        if self.jwt_previous_secrets_file:
+            lines = Path(self.jwt_previous_secrets_file).read_text().splitlines()
+            self.jwt_previous_secrets = [x.strip() for x in lines if x.strip()]
+        if self.database_url_file:
+            self.database_url = Path(self.database_url_file).read_text().strip()
+        if self.redis_url_file:
+            self.redis_url = Path(self.redis_url_file).read_text().strip()
+        if self.metrics_token_file:
+            self.metrics_token = Path(self.metrics_token_file).read_text().strip()
         return self
 
     @model_validator(mode="after")
@@ -127,6 +160,11 @@ class Settings(BaseSettings):
                 raise ValueError("AUREX_CORS_ORIGINS must list explicit https:// origins outside development")
             if ":aurex@" in self.database_url:
                 raise ValueError("AUREX_DATABASE_URL uses the default development password")
+            if self.metrics_token is not None and len(self.metrics_token) < 32:
+                raise ValueError("AUREX_METRICS_TOKEN must be at least 32 characters")
+            secret = self.audit_anchor_webhook_secret or ""
+            if self.audit_anchor_webhook_url and len(secret) < 32:
+                raise ValueError("AUREX_AUDIT_ANCHOR_WEBHOOK_SECRET (>=32 chars) is required with a webhook")
         return self
 
     @property
@@ -134,6 +172,12 @@ class Settings(BaseSettings):
         if self.expose_api_docs is not None:
             return self.expose_api_docs
         return self.environment in ("development", "test")
+
+    @property
+    def admin_mfa_required(self) -> bool:
+        if self.require_admin_mfa is not None:
+            return self.require_admin_mfa
+        return self.environment in ("staging", "production")
 
     @property
     def hsts_enabled(self) -> bool:

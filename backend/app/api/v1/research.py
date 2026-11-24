@@ -37,7 +37,7 @@ from app.schemas.research import (
 from app.services.audit_service import AuditContext, AuditService
 
 router = APIRouter(prefix="/research", tags=["research"])
-ask_limiter = SlidingWindowLimiter()
+ask_limiter = SlidingWindowLimiter("research_ask")
 DOC_RESOURCE = "research_document"
 
 
@@ -198,7 +198,7 @@ async def search(q: str = Query(min_length=2, max_length=300),
 async def ask(data: AskRequest, user: User = Depends(current_user),
               ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     s = get_settings()
-    if not ask_limiter.hit(str(user.id), s.research_asks_per_hour, 3600):
+    if not await ask_limiter.hit(str(user.id), s.research_asks_per_hour, 3600):
         raise RateLimited("Research question limit reached for this hour")
     started = time.perf_counter()
     question = data.question.strip()

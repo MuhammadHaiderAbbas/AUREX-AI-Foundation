@@ -52,6 +52,14 @@ Delivered so far:
   - JWT key rotation, request and rate limits, and stricter production guards;
   - an audit export with offline verification;
   - hardened containers, and dependency, SAST, secret and image scanning in CI.
+- **Phase 12, Production:**
+  - a production compose stack with automatic HTTPS, secrets as files and API replicas;
+  - background-worker leader election;
+  - Redis-shared rate limits;
+  - Prometheus metrics, alert rules and a Grafana dashboard;
+  - backups with automated restore drills;
+  - external audit anchoring and an integrity checker;
+  - an admin Operations page with go-live gates, runbooks, and tag-triggered image releases.
 
 ## Quick start (Docker)
 
@@ -80,9 +88,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 213 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints), risk engine (every check and its boundary, exits through halts, breakers incl. deposits/withdrawals, kill switches, abnormal activity, platform halt, brackets/OCO/resizing, proposal execution and refusal, autopilot, emergency stop), analytics (TWR with cash flows, ratio definitions and minimum history, drawdown duration, trade stats reconciled to the ledger, attribution, execution costs, rejection reasons, signal forward returns, calibration, report hash, CSV exports and formula-injection guard, privacy), security (headers, docs exposure, body and rate limits, password policy, lockout, registration limit, origin checks, session management, JWT rotation and forgery, artifact HMAC, audit export tamper detection, filename sanitising, production guards), two-factor authentication (RFC 6238 vectors, replay, drift, encryption at rest and key rotation, enrolment, recovery codes, attempt limits, admin reset) |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 229 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints), risk engine (every check and its boundary, exits through halts, breakers incl. deposits/withdrawals, kill switches, abnormal activity, platform halt, brackets/OCO/resizing, proposal execution and refusal, autopilot, emergency stop), analytics (TWR with cash flows, ratio definitions and minimum history, drawdown duration, trade stats reconciled to the ledger, attribution, execution costs, rejection reasons, signal forward returns, calibration, report hash, CSV exports and formula-injection guard, privacy), security (headers, docs exposure, body and rate limits, password policy, lockout, registration limit, origin checks, session management, JWT rotation and forgery, artifact HMAC, audit export tamper detection, filename sanitising, production guards), two-factor authentication (RFC 6238 vectors, replay, drift, encryption at rest and key rotation, enrolment, recovery codes, attempt limits, admin reset), operations (Redis-shared limits across replicas, fail-open on outage, worker leader election and failover, readiness, metrics auth and route labels, file and signed-webhook anchoring with rewrite/truncation detection, integrity checks, admin 2FA enforcement, go-live gates and attestations, monitoring config consistent with exported metrics) |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger); risk centre (limit change, rejection with checks, bracket order, kill switch, autopilot cycle, emergency stop; platform halt in the demo); analytics (every tab, report hash, CSV download); sessions panel; audit export; two-factor enrolment and sign-in |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger); risk centre (limit change, rejection with checks, bracket order, kill switch, autopilot cycle, emergency stop; platform halt in the demo); analytics (every tab, report hash, CSV download); sessions panel; audit export; two-factor enrolment and sign-in; operations page (integrity check, attestation, anchoring in the demo) |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -103,6 +111,8 @@ backend/          FastAPI app, Alembic migrations, tests
   app/trading/    order management, execution model, positions, portfolio (Phase 8)
   app/risk/       pre-trade engine, breakers, kill switches, autopilot (Phase 9)
   app/analytics/  performance, attribution, execution quality, AI evaluation, reports (Phase 10)
+  app/ops/        worker leadership, readiness, metrics, anchoring, integrity, go-live gates (Phase 12)
+  ops/backup/     backup, restore, restore-drill and scheduler scripts
   app/integrations/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
@@ -230,12 +240,26 @@ Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude
 - [x] Hardened compose (read-only, `cap_drop`, `no-new-privileges`, private network), tightened CSP, CSP for the static demo
 - [x] `security.yml`: pip-audit, npm audit, Bandit, detect-secrets, Trivy, run on every PR and weekly; Dependabot
 
-**Next: Phase 12, production:**
-- deployment (TLS, managed Postgres, backups and restore drills);
-- observability (metrics, dashboards, alerting);
-- Redis-backed rate limits;
-- automated audit-head anchoring;
-- secrets management;
-- the gated path to broker sandboxes. Live trading stays disabled.
+## Phase 12 deliverables
+
+- [x] Production stack (`infrastructure/deployment/`):
+  - Caddy with automatic HTTPS;
+  - two API replicas;
+  - Redis on a private network;
+  - a backup scheduler container;
+  - an optional Prometheus/Grafana profile;
+  - every secret as a file (`*_FILE`), created by `make-secrets.sh`.
+- [x] Background worker leader election (Postgres advisory lock) with a heartbeat; safe to run any number of replicas
+- [x] Redis-shared sliding-window rate limits (atomic Lua, Redis clock), failing open with a counted error
+- [x] `/system/ready` readiness (schema at head, Redis, worker heartbeat); `/metrics` for Prometheus (token-protected): HTTP, trading-safety and integrity gauges
+- [x] Alert rules (worker stalled, no leader, 5xx rate, latency, backups or drills stale, anchors stale, rate-limit backend errors) and a Grafana dashboard. A test checks they only use exported metrics.
+- [x] Backup / restore / restore-drill scripts. Every drill restores into a scratch database, runs `integrity-check` and records its outcome. They run in CI on every PR.
+- [x] External audit anchoring (append-only file and/or HMAC-signed webhook), `audit-verify-anchors`, and an append-only `audit_anchors` table
+- [x] Admin 2FA enforced outside development; admin Operations page (health, worker, backups, anchoring, integrity check, go-live gates, attestations)
+- [x] Tag-triggered release workflow: builds, scans and pushes the backend, ops and web images to GHCR
+- [x] Deployment guide and runbooks (`docs/operations/`)
+
+Live trading remains disabled by design. The go-live gates are the precondition for a future,
+separately reviewed change. They are not a switch.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

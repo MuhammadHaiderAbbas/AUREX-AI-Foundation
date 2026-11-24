@@ -66,13 +66,13 @@ CI ──► GitHub Actions (dependency, SAST, secret and image scans)
 | F13 | CORS allowed methods omitted PUT (cross-origin limit updates would fail) | Low | Added |
 
 ## Residual risks and where they are addressed
-- **In-process rate limits** apply per replica. Correct for the single-node deployment; Phase 12
-  moves them to Redis before scaling out.
-- **The audit head hash is not yet anchored off-site.** Exports carry the head hash, so storing
-  each export (or just its last hash) outside the platform makes truncation detectable. Phase 12
-  automates this.
+- ~~In-process rate limits~~: shared through Redis in Phase 12. They fail open on a Redis
+  outage, by design and alerted on.
+- ~~The audit head is not anchored off-site~~: automated in Phase 12. The guarantee depends on
+  operators keeping the anchor file or webhook receiver outside database administrators'
+  reach (see the runbook).
 - **No external penetration test yet.** This review was internal; an external test is planned
   before any live-trading stage.
 - **The static demo** stores everything, including demo TOTP seeds, in the visitor's own
   `localStorage`. It is a demonstration, not a security boundary, as the demo banner says.
-- Backups and restore drills, monitoring and alerting: Phase 12 (production).
+- ~~Backups, restore drills, monitoring~~: Phase 12.

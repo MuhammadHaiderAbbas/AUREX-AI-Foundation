@@ -22,7 +22,7 @@ from app.schemas.ml import (
 from app.services.audit_service import AuditContext, AuditService
 
 router = APIRouter(prefix="/ml", tags=["ml"])
-train_limiter = SlidingWindowLimiter()
+train_limiter = SlidingWindowLimiter("ml_train")
 TRAININGS_PER_HOUR = 20
 
 
@@ -70,7 +70,7 @@ async def list_models(symbol: str | None = Query(None, max_length=32), _: User =
 async def train(data: TrainRequest, admin: User = Depends(require_admin),
                 ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Train a candidate with purged walk-forward validation. Never promotes automatically."""
-    if not train_limiter.hit(str(admin.id), TRAININGS_PER_HOUR, 3600):
+    if not await train_limiter.hit(str(admin.id), TRAININGS_PER_HOUR, 3600):
         raise RateLimited("Training limit reached for this hour")
     v = await MLService(db).train(admin, data.symbol, data.algorithm, data.horizon, data.days)
     await AuditService(db).record(ctx, "ml.train", resource_type="model_version", resource_id=v.id,
