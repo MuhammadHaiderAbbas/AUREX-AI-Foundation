@@ -6,6 +6,8 @@ Autonomous multi-market research and **paper-trading** platform covering crypto,
 > and live trading is disabled in both the code and the database.
 
 **Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/ (click **Launch demo**).
+**Video walkthrough:** see [docs/video/walkthrough.md](docs/video/walkthrough.md) for the scene-by-scene
+script; `frontend/scripts/record-walkthrough.cjs` records a fresh captioned video of the demo.
 The demo is a static build that runs entirely in your browser with simulated data
 (see ADR-008). The real system runs the FastAPI backend below.
 
