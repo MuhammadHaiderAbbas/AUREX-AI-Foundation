@@ -50,12 +50,19 @@
 - CI: pip-audit, npm audit, Bandit, detect-secrets (reviewed baseline) and Trivy image scans
   on every PR and weekly; Dependabot for pip, npm, actions and Docker.
 
-## Planned
-| Control | Phase |
+## Implemented in Phase 12
+- Redis-shared rate limits across replicas (fail open, counted and alerted).
+- External audit anchoring (file and signed webhook) with verification; append-only `audit_anchors`.
+- Admin endpoints require 2FA outside development.
+- All production secrets as files (Docker secrets); the database and Redis URLs included.
+- Backups (`umask 077`, optional GPG encryption, SHA-256 manifest) and weekly restore drills
+  with integrity checks.
+- Metrics are token-protected, and Grafana is bound to localhost.
+- Images are scanned before release.
+
+## Planned (before any live-trading stage)
+| Control | Notes |
 |---|---|
-| Redis-backed distributed rate limiting (multi-replica) | 12 |
-| Automated off-site anchoring of the audit head hash | 12 |
-| Secrets manager for broker credentials (never in DB, logs or frontend) | 12 |
-| Broker keys without withdrawal permission, IP allow-listing | 12 |
-| Backups and restore drills, monitoring and alerting (Prometheus/Grafana) | 12 |
-| External penetration test | before any live-trading stage |
+| Secrets manager for broker credentials (never in DB, logs or frontend) | with the first broker integration |
+| Broker keys without withdrawal permission, IP allow-listing | with the first broker integration |
+| External penetration test | recorded as a go-live attestation |

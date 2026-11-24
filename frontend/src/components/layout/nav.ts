@@ -1,6 +1,6 @@
 import {
   BarChart3, Bot, FlaskConical, BrainCircuit, CandlestickChart, History, LayoutDashboard,
-  Settings, ShieldAlert, ShieldCheck, Wallet, Workflow, type LucideIcon, PieChart,
+  Server, Settings, ShieldAlert, ShieldCheck, Wallet, Workflow, type LucideIcon, PieChart,
 } from "lucide-react";
 
 export interface NavItem {
@@ -25,6 +25,7 @@ export const NAV: NavItem[] = [
   { to: "/history", label: "Trade History", description: "Orders, executions and decisions", icon: History },
   { to: "/analytics", label: "Analytics", description: "Performance and reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", description: "Accounts and configurations", icon: Settings },
+  { to: "/operations", label: "Operations", description: "Health, backups, audit anchoring and go-live gates", icon: Server, adminOnly: true },
   { to: "/admin", label: "Administration", description: "Users and audit trail", icon: ShieldCheck, adminOnly: true },
 ];
 

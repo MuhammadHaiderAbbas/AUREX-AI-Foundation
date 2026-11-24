@@ -24,7 +24,7 @@ from app.services.audit_service import AuditContext, AuditService
 from app.trading.service import OrderRequest, TradingService
 
 router = APIRouter(tags=["trading"])
-order_limiter = SlidingWindowLimiter()
+order_limiter = SlidingWindowLimiter("orders")
 ORDERS_PER_MINUTE = 60
 
 
@@ -54,7 +54,7 @@ async def _detail(db: AsyncSession, o: Order) -> OrderDetail:
 async def place_order(data: OrderCreate, response: Response, user: User = Depends(current_user),
                       ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Submit a paper order. Business rejections are persisted (status REJECTED) for the audit trail."""
-    if not order_limiter.hit(str(user.id), ORDERS_PER_MINUTE, 60):
+    if not await order_limiter.hit(str(user.id), ORDERS_PER_MINUTE, 60):
         raise RateLimited("Order rate limit reached")
     svc = TradingService(db)
     order, created = await svc.place(user, OrderRequest(**data.model_dump()))

@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.errors import Forbidden, Unauthorized
 from app.core.security import decode_access_token
 from app.database.session import get_db
@@ -66,6 +67,9 @@ async def current_user(principal: Principal = Depends(get_principal)) -> User:
 async def require_admin(user: User = Depends(current_user)) -> User:
     if not user.is_admin:
         raise Forbidden("Administrator role required")
+    if get_settings().admin_mfa_required and not user.mfa_enabled:
+        raise Forbidden("Administrators must turn on two-factor authentication (Settings) before using admin functions",
+                        code="mfa_required")
     return user
 
 

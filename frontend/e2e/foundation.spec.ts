@@ -70,6 +70,16 @@ test("admin can verify the audit chain", async ({ page }) => {
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export" }).click();
   expect((await download).suggestedFilename()).toMatch(/^aurex-audit-\d{8}T\d{6}Z\.jsonl$/);
+
+  // Operations: readiness, integrity check, go-live gates and an attestation
+  await page.getByRole("link", { name: "Operations" }).click();
+  await expect(page.getByTestId("ops-ready")).toContainText("Live trading disabled");
+  await page.getByRole("button", { name: "Run integrity check" }).click();
+  await expect(page.getByTestId("integrity-result")).toContainText("audit_chain");
+  await expect(page.getByTestId("integrity-result")).toContainText("append_only_triggers");
+  await page.getByLabel("Reference").fill("PT-e2e-report");
+  await page.getByRole("button", { name: "Record attestation" }).click();
+  await expect(page.getByTestId("ops-gates")).toContainText("PT-e2e-report");
 });
 
 test("non-admin users do not see administration", async ({ page }) => {

@@ -1,0 +1,73 @@
+# Alert rules. Every metric referenced here is checked against the API's exporter in
+# backend/tests/test_monitoring_config.py, so the rules cannot silently drift from the code.
+groups:
+  - name: aurex-availability
+    rules:
+      - alert: AurexApiDown
+        expr: up{job="aurex-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "AUREX API is not answering metrics scrapes" }
+      - alert: AurexHighErrorRate
+        expr: sum(rate(aurex_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(aurex_http_requests_total[5m])), 1) > 0.02
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "More than 2% of API requests are failing with 5xx" }
+      - alert: AurexSlowRequests
+        expr: histogram_quantile(0.95, sum by (le) (rate(aurex_http_request_duration_seconds_bucket[5m]))) > 1
+        for: 15m
+        labels: { severity: ticket }
+        annotations: { summary: "p95 API latency above 1 s" }
+
+  - name: aurex-trading-safety
+    rules:
+      - alert: AurexWorkerStalled
+        expr: aurex_worker_heartbeat_age_seconds > 120
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "Background worker has not completed a pass for over 2 minutes"
+          description: "Resting orders, breakers, protective stops and autopilots are not being processed. Check worker leadership and the database."
+      - alert: AurexNoWorkerLeader
+        expr: max(aurex_worker_is_leader) == 0
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "No API replica holds the background-worker lease" }
+      - alert: AurexPlatformHalted
+        expr: aurex_platform_halted == 1
+        labels: { severity: info }
+        annotations: { summary: "Platform trading halt is engaged (expected only during incidents)" }
+      - alert: AurexDrawdownBreakersTripped
+        expr: increase(aurex_drawdown_breakers_tripped[1h]) > 0
+        labels: { severity: ticket }
+        annotations: { summary: "A drawdown breaker tripped in the last hour" }
+      - alert: AurexRiskRejectionSpike
+        expr: aurex_risk_rejections_last_hour > 100
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "Unusually many orders refused by the risk gate (abnormal activity?)" }
+
+  - name: aurex-integrity
+    rules:
+      - alert: AurexBackupStale
+        expr: aurex_last_backup_age_seconds > 26 * 3600 or absent(aurex_last_backup_age_seconds)
+        for: 30m
+        labels: { severity: page }
+        annotations: { summary: "No successful database backup in 26 hours" }
+      - alert: AurexRestoreDrillStale
+        expr: aurex_last_restore_drill_age_seconds > 8 * 86400
+        labels: { severity: ticket }
+        annotations: { summary: "No restore drill in 8 days (weekly drill missed)" }
+      - alert: AurexAuditAnchorStale
+        expr: aurex_last_anchor_age_seconds > 2 * 3600
+        for: 15m
+        labels: { severity: page }
+        annotations: { summary: "Audit head not anchored externally for 2 hours" }
+      - alert: AurexAuditChainStalled
+        expr: changes(aurex_audit_records[6h]) == 0 and sum(rate(aurex_http_requests_total[6h])) > 0
+        labels: { severity: ticket }
+        annotations: { summary: "Traffic but no new audit records for 6 hours" }
+      - alert: AurexRateLimitBackendErrors
+        expr: increase(aurex_rate_limit_backend_errors[10m]) > 0
+        labels: { severity: ticket }
+        annotations: { summary: "Redis unavailable to the rate limiter: limits are failing open" }

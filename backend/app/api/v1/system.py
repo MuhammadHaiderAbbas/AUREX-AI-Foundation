@@ -33,3 +33,13 @@ async def info():
         "registration_open": s.allow_registration,
         "supported_currencies": s.supported_currencies,
     }
+
+
+@router.get("/ready")
+async def ready(db: AsyncSession = Depends(get_db)):
+    """Readiness for load balancers and orchestrators: database, schema at head, Redis (if
+    configured) and a fresh background-worker heartbeat. 503 until ready."""
+    from app.ops.status import readiness
+
+    ok, checks = await readiness(db)
+    return JSONResponse({"status": "ready" if ok else "not_ready", "checks": checks}, status_code=200 if ok else 503)

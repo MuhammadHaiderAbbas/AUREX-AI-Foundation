@@ -512,3 +512,16 @@ export interface FullReport {
   integrity: { ledger_balanced: boolean; ledger_lines: Record<string, string> };
   performance: Omit<Performance, "curve">; trades: TradesReport; execution: ExecutionReport; risk: RiskReport; ai: AIReport;
 }
+
+// ---- Operations (Phase 12) ---------------------------------------------------------
+export interface OpsGate { key: string; label: string; ok: boolean; detail: string }
+export interface OpsStatus {
+  version: string; environment: string; ready: boolean; checks: Record<string, string>;
+  worker: { leader_instance: string | null; heartbeat_age_seconds: number | null; passes: number | null; last_error: string | null; this_process: string; this_process_is_leader: boolean };
+  backup: { at?: string; file?: string; sha256?: string; size?: number; ok?: boolean; detail?: string; age_hours: number | null };
+  restore_drill: { at?: string; file?: string; ok?: boolean; detail?: string; age_hours: number | null };
+  anchoring: { sinks: string[]; last: null | { at: string; last_record_id: number; head_hash: string; records: number; sinks: { sink: string; ok: boolean; status?: number; error?: string }[]; age_hours: number | null } };
+  gates: OpsGate[]; gates_met: number; gates_total: number; live_trading_enabled: boolean;
+  users: { total: number; admins: number };
+}
+export interface IntegrityResult { ok: boolean; checks: { name: string; ok: boolean; detail: string }[] }

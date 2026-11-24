@@ -1,0 +1,43 @@
+name: Release
+
+# Publishes versioned images to GitHub Container Registry when a version tag is pushed:
+#   git tag v1.0.0 && git push origin v1.0.0
+# Nothing is published on ordinary pushes or pull requests.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io/${{ github.repository_owner }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          owner="$(echo "$REGISTRY" | tr '[:upper:]' '[:lower:]')"
+          echo "OWNER=$owner" >> "$GITHUB_ENV"
+          labels=(--label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
+                  --label "org.opencontainers.image.revision=${{ github.sha }}"
+                  --label "org.opencontainers.image.version=$VERSION")
+          docker build "${labels[@]}" -t "$owner/aurex-backend:$VERSION" ./backend
+          docker build "${labels[@]}" --target ops -t "$owner/aurex-ops:$VERSION" ./backend
+          docker build "${labels[@]}" -t "$owner/aurex-web:$VERSION" ./frontend
+      - name: Scan backend (block on fixable critical)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0, pinned by commit
+        with: { image-ref: "${{ env.OWNER }}/aurex-backend:${{ env.VERSION }}", severity: CRITICAL, ignore-unfixed: true, exit-code: "1" }
+      - name: Scan web (block on fixable critical)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0, pinned by commit
+        with: { image-ref: "${{ env.OWNER }}/aurex-web:${{ env.VERSION }}", severity: CRITICAL, ignore-unfixed: true, exit-code: "1" }
+      - name: Push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for img in aurex-backend aurex-ops aurex-web; do
+            docker push "$OWNER/$img:$VERSION"
+          done

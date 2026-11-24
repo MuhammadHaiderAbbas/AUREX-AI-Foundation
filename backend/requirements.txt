@@ -18,3 +18,5 @@ numpy==2.5.5
 scikit-learn==1.9.1
 lightgbm==4.7.0
 cryptography==50.0.2
+redis==8.2.0
+prometheus-client==0.26.0

@@ -16,7 +16,7 @@ from app.schemas.common import Page
 from app.services.audit_service import AuditContext, AuditService
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
-bt_limiter = SlidingWindowLimiter()
+bt_limiter = SlidingWindowLimiter("backtest")
 RUNS_PER_HOUR = 30
 
 
@@ -31,7 +31,7 @@ async def strategies(_: User = Depends(current_user), db: AsyncSession = Depends
 async def run_backtest(data: BacktestRequest, user: User = Depends(current_user),
                        ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Event-driven backtest with in-sample optimisation and a single out-of-sample evaluation."""
-    if not bt_limiter.hit(str(user.id), RUNS_PER_HOUR, 3600):
+    if not await bt_limiter.hit(str(user.id), RUNS_PER_HOUR, 3600):
         raise RateLimited("Backtest limit reached for this hour")
     bt = await BacktestService(db).run(
         user, strategy=data.strategy, symbol=data.symbol, days=data.days, params=data.params,

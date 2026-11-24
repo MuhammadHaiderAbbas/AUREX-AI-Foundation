@@ -58,7 +58,7 @@ async def clean_state():
             "user_sessions, user_settings, audit_logs, market_candles, watchlist_items, "
             "watchlists, research_reports, research_chunks, research_documents, trade_proposals, ai_findings, "
             "ai_runs, model_evaluations, model_versions, ml_models, backtests, executions, order_events, orders, "
-            "positions, portfolio_snapshots, risk_decisions, risk_events, risk_profiles, system_controls, "
+            "positions, portfolio_snapshots, risk_decisions, risk_events, risk_profiles, system_controls, audit_anchors, "
             "users RESTART IDENTITY CASCADE"
         ))
         await db.commit()

@@ -17,7 +17,7 @@ from app.schemas.common import Page
 from app.services.audit_service import AuditContext, AuditService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-run_limiter = SlidingWindowLimiter()
+run_limiter = SlidingWindowLimiter("ai_run")
 RUNS_PER_HOUR = 60
 
 
@@ -51,7 +51,7 @@ async def run_analysis(data: RunRequest, user: User = Depends(current_user),
                        ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Run the agent department on one instrument. Produces evidence, a decision and, at
     most, a proposal awaiting independent risk review. Never places an order."""
-    if not run_limiter.hit(str(user.id), RUNS_PER_HOUR, 3600):
+    if not await run_limiter.hit(str(user.id), RUNS_PER_HOUR, 3600):
         raise RateLimited("Agent run limit reached for this hour")
     run = await Orchestrator(db).run(user, data.symbol, data.account_id)
     await AuditService(db).record(

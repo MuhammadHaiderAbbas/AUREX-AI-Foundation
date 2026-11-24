@@ -17,39 +17,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("aurex.matcher")
 
 
-async def _matcher_loop(interval: float) -> None:
-    """Background work: fill resting orders, re-value accounts for the breakers, run autopilots."""
-    from app.database.session import SessionLocal
-    from app.risk.autopilot import due_accounts, run_cycle
-    from app.risk.service import RiskService
-    from app.trading.service import TradingService
-
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            async with SessionLocal() as db:
-                stats = await TradingService(db).process_open()
-                await TradingService(db).monitor()
-                await db.commit()
-            if stats["filled"] or stats["expired"]:
-                log.info("order matcher: %s", stats)
-            async with SessionLocal() as db:
-                for acct in await due_accounts(db, get_settings().autopilot_interval_seconds):
-                    prof = await RiskService(db).profile(acct.id, lock=True)
-                    out = await run_cycle(db, acct, prof)
-                    await db.commit()
-                    log.info("autopilot cycle %s: %s", acct.id, [r["outcome"] for r in out["results"]])
-        except Exception:  # noqa: BLE001 - the loop must survive transient failures
-            log.exception("background trading pass failed")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    interval = get_settings().order_matcher_interval_seconds
-    task = asyncio.create_task(_matcher_loop(interval)) if interval > 0 else None
+    from app.core.redis import close_redis
+    from app.ops import worker
+
+    s = get_settings()
+    interval = s.order_matcher_interval_seconds
+    task = asyncio.create_task(worker.run(interval)) if interval > 0 and s.background_worker else None
     yield
     if task:
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    await close_redis()
 
 
 def create_app() -> FastAPI:
@@ -79,6 +62,8 @@ def create_app() -> FastAPI:
     app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(RateLimitMiddleware)
     register_error_handlers(app)
+    from app.ops.metrics import endpoint as metrics_endpoint
+    app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False)
     app.include_router(api_router, prefix=s.api_prefix)
     return app
 

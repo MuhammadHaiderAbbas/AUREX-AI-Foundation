@@ -1,0 +1,21 @@
+# Prometheus for AUREX. The API exposes /metrics only with a bearer token (AUREX_METRICS_TOKEN),
+# mounted here as a secret file.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files: [/etc/prometheus/alerts.yml]
+
+alerting:
+  alertmanagers:
+    - static_configs: [{ targets: ["alertmanager:9093"] }]
+
+scrape_configs:
+  - job_name: aurex-api
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      - targets: ["backend:8000"]
+        labels: { service: aurex-api }

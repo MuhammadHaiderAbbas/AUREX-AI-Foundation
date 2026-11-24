@@ -231,3 +231,35 @@ image (Trivy) scans run on every PR and weekly, with Dependabot proposing update
 **Why.** Phase 11's audit found seven published Starlette advisories in a dependency pinned
 months earlier. Vulnerability data changes after code is written, so scanning has to be
 continuous.
+
+## ADR-032 Leader election with a Postgres advisory lock
+**Decision.** Every API replica runs the background worker loop, but only the holder of a
+session-level Postgres advisory lock does the work. Each pass writes a heartbeat.
+**Why.** It needs no extra infrastructure, since the database is already a hard dependency.
+Failover is automatic when the leader's connection closes. It also stops autopilot cycles and
+audit anchors from running twice. Readiness and alerts watch the heartbeat.
+
+## ADR-033 Rate limits shared through Redis, failing open
+**Decision.** With `AUREX_REDIS_URL` set, all limiters use an atomic Lua sliding window in Redis
+(Redis clock); otherwise they run in process. If Redis is unreachable, limits fail open, the
+error is counted and alerted on.
+**Why.** Per-replica limits multiply with the replica count. Failing closed would turn a cache
+outage into a full login outage. The security controls that must never fail open (the risk
+gate, kill switches, 2FA) do not depend on Redis.
+
+## ADR-034 External audit anchoring
+**Decision.** The worker (and an admin action) periodically writes the audit chain head (the
+last record id and its hash) to sinks outside the database: an append-only file on a separate
+volume that is synced off-host, and/or an HMAC-signed webhook. Anchors are also kept in an
+append-only table.
+**Why.** A hash chain inside the database cannot detect a consistent rewrite by someone with
+full database access. An anchor held elsewhere turns that into a detectable mismatch
+(`audit-verify-anchors`).
+
+## ADR-035 Go-live gates do not switch anything on
+**Decision.** The Operations page reports production gates: settings, 2FA, backups, drills,
+anchoring, monitoring, shared limits, chain integrity and human attestations. Live trading stays
+hard-disabled in code even when every gate is met.
+**Why.** Moving real money is a different risk class. It should take a deliberate, reviewed code
+change made after the gates are green, not a configuration flag that could be flipped by
+accident or by an attacker.

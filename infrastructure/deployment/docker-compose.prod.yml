@@ -1,0 +1,149 @@
+# AUREX production stack (single host, Docker Compose). See docs/operations/deployment.md.
+#
+#   cp .env.prod.example .env.prod && $EDITOR .env.prod      # domain, image tag
+#   ./make-secrets.sh                                         # creates ./secrets/* (mode 600)
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile monitoring up -d
+#
+# Postgres is expected to be a managed service (backups/PITR by the provider *and* our own
+# logical backups + weekly restore drills). Paper trading only: live trading is disabled in code.
+name: aurex-prod
+
+x-backend: &backend
+  image: ghcr.io/${AUREX_IMAGE_OWNER:?set AUREX_IMAGE_OWNER}/aurex-backend:${AUREX_VERSION:?set AUREX_VERSION}
+  environment: &backend-env
+    AUREX_ENVIRONMENT: production
+    AUREX_CORS_ORIGINS: https://${AUREX_DOMAIN:?set AUREX_DOMAIN}
+    AUREX_COOKIE_SECURE: "true"
+    AUREX_ALLOW_REGISTRATION: ${AUREX_ALLOW_REGISTRATION:-false}
+    AUREX_DATABASE_URL_FILE: /run/secrets/database_url
+    AUREX_REDIS_URL_FILE: /run/secrets/redis_url
+    AUREX_JWT_SECRET_FILE: /run/secrets/jwt_secret
+    AUREX_DATA_KEY_FILE: /run/secrets/data_key
+    AUREX_ARTIFACT_KEY_FILE: /run/secrets/artifact_key
+    AUREX_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+    AUREX_AUDIT_ANCHOR_FILE: /anchors/aurex-anchors.jsonl
+    AUREX_AUDIT_ANCHOR_WEBHOOK_URL: ${AUREX_AUDIT_ANCHOR_WEBHOOK_URL:-}
+    AUREX_MARKET_DATA_MODE: ${AUREX_MARKET_DATA_MODE:-live}
+    FORWARDED_ALLOW_IPS: 172.29.0.10           # only the edge proxy may set X-Forwarded-For
+  secrets: [database_url, redis_url, jwt_secret, data_key, artifact_key, metrics_token]
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
+
+services:
+  backend:
+    <<: *backend
+    volumes: [audit_anchors:/anchors]
+    deploy: { replicas: 2 }                     # the background worker elects a single leader
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/ready').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 40s
+      retries: 4
+    depends_on:
+      redis: { condition: service_healthy }
+    networks: [edge, internal]
+
+  web:
+    image: ghcr.io/${AUREX_IMAGE_OWNER}/aurex-web:${AUREX_VERSION}
+    environment:
+      AUREX_SITE_ADDRESS: ${AUREX_DOMAIN}         # a hostname => Caddy obtains and renews TLS certificates
+      AUREX_API_UPSTREAM: backend:8000
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes: [caddy_data:/data]
+    read_only: true
+    tmpfs: [/tmp, /config]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    depends_on:
+      backend: { condition: service_healthy }
+    networks:
+      edge: { ipv4_address: 172.29.0.10 }
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /run/secrets/redis_password)\" --save '' --appendonly no --maxmemory 256mb --maxmemory-policy volatile-lru"]
+    secrets: [redis_password]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      retries: 10
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks: [internal]                        # never published
+
+  ops:                                          # daily backups, weekly restore drills
+    <<: *backend
+    image: ghcr.io/${AUREX_IMAGE_OWNER}/aurex-ops:${AUREX_VERSION}
+    environment:
+      <<: *backend-env
+      AUREX_RUN_MIGRATIONS: "false"
+      AUREX_BACKGROUND_WORKER: "false"
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_AT: ${BACKUP_AT:-02:15}
+      DRILL_WEEKDAY: ${DRILL_WEEKDAY:-7}
+      BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}
+    secrets: [database_url, redis_url, jwt_secret, data_key, artifact_key, metrics_token, drill_admin_url]
+    volumes: [backups:/backups]
+    entrypoint: ["sh", "-c", "export DATABASE_URL=\"$$(cat /run/secrets/database_url)\" DRILL_ADMIN_URL=\"$$(cat /run/secrets/drill_admin_url)\"; exec /opt/aurex/backup/schedule.sh"]
+    networks: [internal]
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    secrets: [metrics_token]
+    restart: unless-stopped
+    networks: [internal]
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    secrets: [grafana_admin_password]
+    ports: ["127.0.0.1:3000:3000"]              # reach it through an SSH tunnel or VPN only
+    restart: unless-stopped
+    networks: [internal]
+
+secrets:
+  database_url: { file: ./secrets/database_url }
+  drill_admin_url: { file: ./secrets/drill_admin_url }
+  redis_url: { file: ./secrets/redis_url }
+  redis_password: { file: ./secrets/redis_password }
+  jwt_secret: { file: ./secrets/jwt_secret }
+  data_key: { file: ./secrets/data_key }
+  artifact_key: { file: ./secrets/artifact_key }
+  metrics_token: { file: ./secrets/metrics_token }
+  grafana_admin_password: { file: ./secrets/grafana_admin_password }
+
+networks:
+  edge:
+    ipam: { config: [{ subnet: 172.29.0.0/24 }] }
+  internal:
+    internal: true                              # no route to the internet
+
+volumes:
+  caddy_data:
+  audit_anchors:                                # mirror off-host (object storage with retention); see runbook
+  backups:                                      # sync off-host daily; see runbook
+  prometheus_data:
+  grafana_data:

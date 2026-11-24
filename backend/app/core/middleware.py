@@ -46,6 +46,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         if s.hsts_enabled:
             h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         h.setdefault("Cache-Control", "no-store")
+        from app.ops.metrics import observe
+        observe(request, response.status_code, elapsed_ms / 1000)
         log.info(
             "%s %s -> %s (%.1f ms) rid=%s",
             request.method, request.url.path, response.status_code, elapsed_ms, request_id,
@@ -118,10 +120,31 @@ def reset_rate_limits() -> None:
 
 
 class RateLimitMiddleware:
-    """Per-client-IP fixed-window limit across the whole API (in-process, single node).
-    Endpoint-specific limits (login, registration, agent runs, ...) still apply on top."""
+    """Per-client-IP fixed-window limit across the whole API, shared through Redis when
+    configured (otherwise in process). Endpoint-specific limits still apply on top."""
 
-    EXEMPT = ("/system/health", "/system/ready")
+    @staticmethod
+    async def _shared_count(ip: str, minute: int) -> int | None:
+        from redis.exceptions import RedisError
+
+        from app.core import rate_limit
+        from app.core.redis import get_redis
+
+        r = get_redis()
+        if r is None:
+            return None
+        key = f"aurex:rl:global:{ip}:{minute}"
+        try:
+            async with r.pipeline(transaction=True) as p:
+                p.incr(key)
+                p.expire(key, 90)
+                count, _ = await p.execute()
+            return int(count)
+        except (RedisError, OSError):
+            rate_limit.backend_errors += 1
+            return 0     # fail open (see app.core.rate_limit)
+
+    EXEMPT = ("/system/health", "/system/ready", "/metrics")
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -134,6 +157,14 @@ class RateLimitMiddleware:
             return
         ip = (scope.get("client") or ("unknown", 0))[0]
         minute = int(time.time() // 60)
+        shared = await self._shared_count(ip, minute)
+        if shared is not None:
+            if shared > limit:
+                await _send_error(send, 429, "rate_limited", "Too many requests from this address",
+                                  [(b"retry-after", str(60 - int(time.time()) % 60).encode())])
+                return
+            await self.app(scope, receive, send)
+            return
         start, count = self.windows.get(ip, (minute, 0))
         if start != minute:
             start, count = minute, 0

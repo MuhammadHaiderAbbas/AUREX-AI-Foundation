@@ -54,6 +54,8 @@ interface State {
   mlVersions: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   backtests: Record<string, any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   mlEvals: { id: string; version_id: string; kind: string; status: string; metrics: Record<string, unknown>; created_at: string }[];
+  opsAnchors?: { at: string; last_record_id: number; head_hash: string; records: number }[];
+  opsAttestations?: Record<string, { at: string; by: string; reference: string; label: string }>;
   riskProfiles: Record<string, DRisk>; riskDecisions: DDecision[]; systemHalt: { halted: boolean; reason: string | null; since: string | null };
   riskEvents: { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }[];
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -1158,8 +1160,86 @@ const analyticsRoutes: [string, RegExp, Handler][] = [
   }],
 ];
 
+
+// ---- operations (mirror of backend app/ops; simulated in the browser) ---------------------
+async function verifyChain(s: State) {
+  let prev = "0".repeat(64);
+  for (const [i, a] of s.audit.entries()) {
+    if (a.prev_hash !== prev) return { valid: false, records_checked: i + 1, first_invalid_id: a.id, reason: "prev_hash does not link" };
+    if ((await sha256(prev + canonical(auditRecord(a)))) !== a.hash) return { valid: false, records_checked: i + 1, first_invalid_id: a.id, reason: "record hash mismatch" };
+    prev = a.hash;
+  }
+  return { valid: true, records_checked: s.audit.length };
+}
+const ATTESTABLE: Record<string, string> = { pentest: "External penetration test completed and findings resolved", broker_sandbox: "Broker sandbox integration certified end to end" };
+const opsRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/admin\/ops\/status$/, async (c) => {
+    admin(c);
+    const chain = await verifyChain(c.s);
+    const anchors = c.s.opsAnchors ?? [], last = anchors.at(-1);
+    const att = c.s.opsAttestations ?? {};
+    const lastAge = last ? (Date.now() - Date.parse(last.at)) / 3600e3 : null;
+    const admins = c.s.users.filter((u) => u.role === "admin" && u.is_active);
+    const noMfa = admins.filter((u) => !u.mfa_enabled).map((u) => u.email);
+    const g = (key: string, label: string, ok: boolean, detail: string) => ({ key, label, ok, detail });
+    const gates = [
+      g("environment", "Running with production settings", false, "environment = demo (static, in your browser)"),
+      g("admin_mfa", "Two-factor authentication enforced for every administrator", false, `not enforced in the demo${noMfa.length ? `; without 2FA: ${noMfa.join(", ")}` : ""}`),
+      g("backups", "Database backup within 26 h", false, "not applicable: the demo stores data in this browser"),
+      g("restore_drill", "Restore drill passed within 30 days", false, "not applicable in the demo"),
+      g("anchoring", "Audit head anchored externally within 2 h", lastAge != null && lastAge <= 2, last ? `sink: browser (simulated); last anchor ${lastAge!.toFixed(2)} h ago` : "sink: browser (simulated); never anchored"),
+      g("monitoring", "Metrics endpoint enabled for monitoring", false, "no metrics in the demo"),
+      g("shared_limits", "Rate limits shared across replicas (Redis)", false, "redis: not configured"),
+      g("audit_chain", "Audit chain intact", chain.valid, `${chain.records_checked} records verified`),
+      ...Object.entries(ATTESTABLE).map(([k, label]) => g(k, label, !!att[k], att[k] ? `attested ${att[k].at.slice(0, 10)} · ${att[k].reference}` : "not attested")),
+    ];
+    return json(200, {
+      version: "demo", environment: "demo", ready: true,
+      checks: { database: "browser storage", schema: "ok", redis: "not configured", worker: "simulated" },
+      worker: { leader_instance: "this browser tab", heartbeat_age_seconds: 0, passes: null, last_error: null, this_process: "browser", this_process_is_leader: true },
+      backup: { age_hours: null }, restore_drill: { age_hours: null },
+      anchoring: { sinks: ["browser"], last: last ? { ...last, sinks: [{ sink: "browser", ok: true }], age_hours: lastAge } : null },
+      gates, gates_met: gates.filter((x) => x.ok).length, gates_total: gates.length, live_trading_enabled: false,
+      users: { total: c.s.users.length, admins: admins.length },
+    });
+  }],
+  ["POST", /^\/admin\/ops\/anchor$/, async (c) => {
+    const { user } = admin(c);
+    await audit(c.s, user.id, "ops.audit.anchor", { details: { sinks: ["browser"] } });
+    const head = c.s.audit.at(-1)!;
+    const a = { at: now(), last_record_id: head.id, head_hash: head.hash, records: c.s.audit.length };
+    (c.s.opsAnchors ??= []).push(a);
+    return json(200, { ...a, sinks: [{ sink: "browser", ok: true }] });
+  }],
+  ["POST", /^\/admin\/ops\/integrity-check$/, async (c) => {
+    const { user } = admin(c);
+    const chain = await verifyChain(c.s);
+    const unbalanced = c.s.accounts.filter((a) => !balances(c.s, a).balanced).length;
+    const anchorsOk = (c.s.opsAnchors ?? []).every((a) => c.s.audit.find((r) => r.id === a.last_record_id)?.hash === a.head_hash);
+    const checks = [
+      { name: "audit_chain", ok: chain.valid, detail: `${chain.records_checked} records` },
+      { name: "ledger_accounts_balanced", ok: unbalanced === 0, detail: `${c.s.accounts.length} accounts${unbalanced ? `, ${unbalanced} unbalanced` : ""}` },
+      { name: "anchors_match_chain", ok: anchorsOk, detail: `${(c.s.opsAnchors ?? []).length} anchors` },
+    ];
+    const ok = checks.every((x) => x.ok);
+    await audit(c.s, user.id, "ops.integrity_check", { outcome: ok ? "success" : "failure", details: { failed: checks.filter((x) => !x.ok).map((x) => x.name) } });
+    return json(200, { ok, checks });
+  }],
+  ["POST", /^\/admin\/ops\/attestations$/, async (c) => {
+    const { user } = admin(c);
+    const gate = String(c.body.gate ?? ""), reference = String(c.body.reference ?? "").trim();
+    if (!(gate in ATTESTABLE)) throw bad("gate must be pentest or broker_sandbox", "gate");
+    if (reference.length < 3) throw bad("reference is required", "reference");
+    const value = { at: now(), by: user.email, reference, label: ATTESTABLE[gate]! };
+    (c.s.opsAttestations ??= {})[gate] = value;
+    await audit(c.s, user.id, "ops.attestation", { type: "gate", id: gate, details: value });
+    return json(200, value);
+  }],
+];
+
 const routes: [string, RegExp, Handler][] = [
   ...tradingRoutes,
+  ...opsRoutes,
   ...analyticsRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
   ["GET", /^\/system\/info$/, () => json(200, { name: "AUREX AI", version: "0.2.0-demo", environment: "demo", trading_mode: "PAPER", live_trading_enabled: false, registration_open: true, supported_currencies: CURRENCIES })],

@@ -39,6 +39,12 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   const auditDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export" }).click();
   expect((await auditDownload).suggestedFilename()).toMatch(/^aurex-audit-.*\.jsonl$/);
+  await page.getByRole("link", { name: "Operations" }).click();
+  await expect(page.getByTestId("ops-ready")).toContainText("Live trading disabled");
+  await page.getByRole("button", { name: "Anchor now" }).click();
+  await expect(page.getByTestId("ops-anchoring")).toContainText("covers record");
+  await page.getByRole("button", { name: "Run integrity check" }).click();
+  await expect(page.getByTestId("integrity-result")).toContainText("anchors_match_chain");
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByTestId("sessions")).toContainText("This session");
 
