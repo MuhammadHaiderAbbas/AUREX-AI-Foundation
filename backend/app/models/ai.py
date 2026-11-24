@@ -100,13 +100,14 @@ class AIFinding(UUIDPk, Base):
 
 
 class TradeProposal(UUIDPk, Base):
-    """A structured trade proposal. It never executes on its own: Phase 8 adds paper
-    execution and Phase 9 the independent risk gate that must approve it first."""
+    """A structured trade proposal. It never executes on its own: it becomes a paper order
+    only after the independent risk engine (Phase 9) approves it."""
 
     __tablename__ = "trade_proposals"
     __table_args__ = (
         CheckConstraint("direction IN ('BUY','SELL')", name="direction_valid"),
-        CheckConstraint("status IN ('PENDING_RISK_REVIEW','DISMISSED')", name="status_valid"),
+        CheckConstraint("status IN ('PENDING_RISK_REVIEW','DISMISSED','EXECUTED','RISK_REJECTED')",
+                        name="status_valid"),
         CheckConstraint("stop_loss < entry_price AND take_profit > entry_price",
                         name="levels_consistent"),
         CheckConstraint("quantity > 0", name="quantity_positive"),
@@ -140,3 +141,7 @@ class TradeProposal(UUIDPk, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), default=utcnow,
         index=True)
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Phase 9: outcome of the risk gate
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

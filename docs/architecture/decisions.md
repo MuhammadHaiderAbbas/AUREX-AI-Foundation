@@ -147,3 +147,30 @@ written in a single transaction while the trading account row is locked. The mat
 **Why.** A fill that is half-written (cash moved but no position) is the worst possible
 accounting bug. Locking the account serialises everything that spends its cash, and
 SKIP LOCKED makes running the matcher in several processes safe.
+
+## ADR-020 One gate for every order source
+**Decision.** Manual tickets, AI proposals, the autopilot and emergency flattening all
+submit ordinary orders through the same OMS path, and the risk engine evaluates every one of
+them. There is no separate "AI execution" route.
+**Why.** The blueprint requires that the AI never trade directly and that the risk engine
+have final authority. A single path means there is no way around the gate, and a single
+decision log covers everything.
+
+## ADR-021 Halts block exposure, never exits
+**Decision.** Kill switches, breakers and the platform halt block orders that increase
+exposure. Sells against held positions, including protective stops, are always allowed.
+**Why.** A halt that also froze exits would turn a safety control into a source of loss:
+positions could not be cut and stops would not fire. Order-rate and price-collar checks still
+apply to exits, because they protect against runaway or mistaken orders.
+
+## ADR-022 Breakers on contribution-neutral equity
+**Decision.** Daily-loss and drawdown breakers are computed on equity minus net virtual
+contributions.
+**Why.** Otherwise a withdrawal would look like a loss and trip a breaker, and a deposit
+could hide a real drawdown.
+
+## ADR-023 Pessimistic default stop for unprotected entries
+**Decision.** An entry without a stop loss is sized for risk as if its stop were a fixed,
+fairly wide distance away (crypto 5%, FX 1%, stocks 3%, ETFs 2%).
+**Why.** "No stop" must not mean "no risk". The assumption rewards attaching a real
+protective stop, which also becomes a working order once the entry fills.

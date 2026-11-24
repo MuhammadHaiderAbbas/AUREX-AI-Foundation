@@ -283,7 +283,7 @@ def portfolio(ctx: AgentContext, atr_1h: float | None) -> Finding:
 
 def risk_precheck(ctx: AgentContext, regime_f: Finding, news_f: Finding,
                   portfolio_f: Finding) -> Finding:
-    """Advisory pre-check. The independent risk gate (Phase 9) has final authority."""
+    """Advisory pre-check. The independent risk engine (app/risk) has final authority."""
     reasons: list[str] = []
     q = ctx.quote
     spread_bps = None
@@ -312,7 +312,7 @@ def risk_precheck(ctx: AgentContext, regime_f: Finding, news_f: Finding,
     return Finding(
         "risk", "ok", 0, 1.0 if ok else 0.0, 1.0,
         ("Pre-check passed. " if ok else "Pre-check failed: " + "; ".join(reasons) + ". ")
-        + "Advisory only; the independent risk gate (Phase 9) has final authority.",
+        + "Advisory only; the independent risk engine has final authority over any order.",
         [Evidence("Market open", str(q.market_open) if q else "—"),
          Evidence("Quote stale", str(q.stale) if q else "—"),
          Evidence("Spread", f"{spread_bps:.2f} bps" if spread_bps is not None else "—",

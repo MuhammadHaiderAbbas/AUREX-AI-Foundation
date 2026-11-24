@@ -8,6 +8,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { useCancelOrder, useExecutions, useOrder, useOrders } from "@/features/trading/hooks";
 import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
+import { ChecksList } from "@/pages/RiskPage";
 import type { OrderStatus } from "@/services/api";
 
 const STATUS_TONE: Record<OrderStatus, "positive" | "info" | "neutral" | "negative" | "warning"> = {
@@ -62,7 +63,7 @@ export function HistoryPage() {
                 {orders.data!.items.map((o) => (
                   <Tr key={o.id} className={cn("cursor-pointer", selected === o.id && "bg-surface-3")} onClick={() => set("order", o.id)}>
                     <Td className="num whitespace-nowrap text-xs text-muted">{formatDateTime(o.created_at)}</Td>
-                    <Td className="font-medium">{o.symbol}</Td>
+                    <Td className="font-medium">{o.symbol}{o.source !== "manual" && <Badge tone="info" className="ml-1.5">{o.source}</Badge>}</Td>
                     <Td className={o.side === "BUY" ? "text-positive" : "text-negative"}>{o.side}</Td>
                     <Td className="text-xs">{o.type}{o.limit_price && ` ${num(o.limit_price)}`}{o.stop_price && ` ${num(o.stop_price)}`}</Td>
                     <Td className="num text-right">{num(o.quantity)}</Td>
@@ -77,7 +78,7 @@ export function HistoryPage() {
             </Table>
           )}
         </Card>
-        <OrderTimeline id={selected} onClose={() => set("order", null)} />
+        <OrderTimeline id={selected} onClose={() => set("order", null)} onSelect={(oid) => set("order", oid)} />
       </div>
 
       <Card>
@@ -108,7 +109,7 @@ export function HistoryPage() {
   );
 }
 
-function OrderTimeline({ id, onClose }: { id: string | null; onClose: () => void }) {
+function OrderTimeline({ id, onClose, onSelect }: { id: string | null; onClose: () => void; onSelect: (id: string) => void }) {
   const order = useOrder(id);
   if (!id) return <Card><EmptyState title="Select an order">Its lifecycle events and fills appear here.</EmptyState></Card>;
   const o = order.data;
@@ -134,6 +135,15 @@ function OrderTimeline({ id, onClose }: { id: string | null; onClose: () => void
                 </li>
               ))}
             </ol>
+            {o.risk_checks.length > 0 && <div className="mt-4"><p className="mb-1.5 text-[11px] uppercase tracking-wider text-subtle">Risk gate</p><ChecksList checks={o.risk_checks} compact /></div>}
+            {o.children.length > 0 && (
+              <div className="mt-4 text-xs"><p className="mb-1.5 text-[11px] uppercase tracking-wider text-subtle">Protective orders{o.children.some((c) => c.oco_group) && " (one cancels the other)"}</p>
+                <ul className="space-y-1">{o.children.map((c) => (
+                  <li key={c.id}><button className="flex w-full justify-between rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => onSelect(c.id)}>
+                    <span>{c.type} {num(c.stop_price ?? c.limit_price)}</span><Badge tone={STATUS_TONE[c.status]}>{c.status}</Badge></button></li>))}</ul>
+              </div>
+            )}
+            {o.parent_order_id && <button className="mt-3 text-xs text-accent hover:underline" onClick={() => onSelect(o.parent_order_id!)}>View entry order</button>}
             {o.executions.map((x) => (
               <dl key={x.id} className="mt-4 grid grid-cols-2 gap-2 rounded-md border border-border bg-surface-2 p-3 text-xs">
                 <div><dt className="text-subtle">Fill price</dt><dd className="num">{formatPrice(x.price, 6)}</dd></div>

@@ -10,6 +10,7 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { useAccounts } from "@/features/accounts/hooks";
 import { usePlaceOrder } from "@/features/trading/hooks";
 import { cn, formatMoney, formatPrice } from "@/lib/utils";
+import { ChecksList } from "@/pages/RiskPage";
 import { api, type InstrumentWithQuote, type OrderDetail, type OrderSide, type OrderType } from "@/services/api";
 
 const slug = (s: string) => s.replace("/", "");
@@ -30,12 +31,14 @@ export function OrderTicket({ open, onClose, symbol, side: initialSide = "BUY", 
   const [qty, setQty] = useState(initialQty);
   const [price, setPrice] = useState("");
   const [tif, setTif] = useState<"GTC" | "DAY">("GTC");
+  const [sl, setSl] = useState("");
+  const [tp, setTp] = useState("");
   const [key, setKey] = useState(() => crypto.randomUUID());
   const [result, setResult] = useState<OrderDetail | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setSide(initialSide); setQty(initialQty); setType("MARKET"); setPrice(""); setResult(null);
+    setSide(initialSide); setQty(initialQty); setType("MARKET"); setPrice(""); setSl(""); setTp(""); setResult(null);
     setKey(crypto.randomUUID()); place.reset();
     if (accountId) setAccount(accountId);
   }, [open, symbol, initialSide, initialQty, accountId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -55,6 +58,7 @@ export function OrderTicket({ open, onClose, symbol, side: initialSide = "BUY", 
     const o = await place.mutateAsync({
       account_id: account, symbol, side, type, quantity: qty, time_in_force: tif, client_order_id: key,
       ...(type === "LIMIT" ? { limit_price: price } : type === "STOP" ? { stop_price: price } : {}),
+      ...(side === "BUY" && sl ? { stop_loss: sl } : {}), ...(side === "BUY" && tp ? { take_profit: tp } : {}),
     });
     setResult(o);
     setKey(crypto.randomUUID());
@@ -107,10 +111,21 @@ export function OrderTicket({ open, onClose, symbol, side: initialSide = "BUY", 
               </Field>
             </div>
           )}
+          {side === "BUY" && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Stop loss (optional)" htmlFor="ot-sl" hint="Protective stop placed on fill">
+                <Input id="ot-sl" inputMode="decimal" pattern="^\d+(\.\d{1,10})?$" className="num" value={sl} onChange={(e) => setSl(e.target.value)} />
+              </Field>
+              <Field label="Take profit (optional)" htmlFor="ot-tp" hint="One cancels the other">
+                <Input id="ot-tp" inputMode="decimal" pattern="^\d+(\.\d{1,10})?$" className="num" value={tp} onChange={(e) => setTp(e.target.value)} />
+              </Field>
+            </div>
+          )}
           <p className="text-xs text-muted">
             Estimated {side === "BUY" ? "cost" : "proceeds"}: <span className="num text-fg">{notional && i ? `${formatPrice(notional, 2)} ${i.quote_currency}` : "—"}</span>
             {acct && i && acct.base_currency !== i.quote_currency && <> · converted to {acct.base_currency} at the live FX rate</>}.
-            Fills include spread, slippage and fees. Spot only: no shorting, no leverage.
+            Fills include spread, slippage and fees. Spot only: no shorting, no leverage. Every order passes the risk gate
+            {side === "BUY" && !sl && <> (without a stop loss, risk is estimated with a default stop distance)</>}.
           </p>
           <Button type="submit" className="w-full" variant={side === "BUY" ? "primary" : "danger"} disabled={place.isPending || !account || !qty}>
             {place.isPending && <Spinner />}Place paper {side === "BUY" ? "buy" : "sell"} order
@@ -132,6 +147,8 @@ function OrderResult({ o, decimals, onClose, onAgain }: { o: OrderDetail; decima
           : o.status === "OPEN" ? `${o.type} order working — it fills when the price is reached`
           : `Order rejected: ${o.reject_reason}`}
       </p>
+      {o.status === "REJECTED" && o.risk_checks.length > 0 && <ChecksList checks={o.risk_checks} compact />}
+      {o.children.length > 0 && <p className="text-xs text-muted">Protective orders placed: {o.children.map((c) => `${c.type} ${Number(c.stop_price ?? c.limit_price)}`).join(" · ")}</p>}
       {exe && (
         <dl className="grid grid-cols-3 gap-2 text-xs">
           <div><dt className="text-subtle">Fee</dt><dd className="num">{formatPrice(exe.fee, 2)}</dd></div>

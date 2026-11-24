@@ -18,7 +18,10 @@ log = logging.getLogger("aurex.matcher")
 
 
 async def _matcher_loop(interval: float) -> None:
+    """Background work: fill resting orders, re-value accounts for the breakers, run autopilots."""
     from app.database.session import SessionLocal
+    from app.risk.autopilot import due_accounts, run_cycle
+    from app.risk.service import RiskService
     from app.trading.service import TradingService
 
     while True:
@@ -26,11 +29,18 @@ async def _matcher_loop(interval: float) -> None:
         try:
             async with SessionLocal() as db:
                 stats = await TradingService(db).process_open()
+                await TradingService(db).monitor()
                 await db.commit()
             if stats["filled"] or stats["expired"]:
                 log.info("order matcher: %s", stats)
+            async with SessionLocal() as db:
+                for acct in await due_accounts(db, get_settings().autopilot_interval_seconds):
+                    prof = await RiskService(db).profile(acct.id, lock=True)
+                    out = await run_cycle(db, acct, prof)
+                    await db.commit()
+                    log.info("autopilot cycle %s: %s", acct.id, [r["outcome"] for r in out["results"]])
         except Exception:  # noqa: BLE001 - the loop must survive transient failures
-            log.exception("order matcher pass failed")
+            log.exception("background trading pass failed")
 
 
 @asynccontextmanager

@@ -8,6 +8,7 @@ import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/form";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useSystemHalt, useSystemHaltControl } from "@/features/risk/hooks";
 import { formatDateTime } from "@/lib/utils";
 import { api, type AuditLog, type Page, type User } from "@/services/api";
 
@@ -96,6 +97,29 @@ function Audit() {
   );
 }
 
+function TradingHalt() {
+  const halt = useSystemHalt();
+  const control = useSystemHaltControl();
+  const [reason, setReason] = useState("");
+  const on = halt.data?.halted;
+  return (
+    <Card>
+      <CardHeader title="Platform kill switch" description="Blocks every exposure-increasing order on every account. Exits and protective stops keep working."
+        action={<Badge tone={on ? "negative" : "positive"}>{on ? "Halted" : "Trading"}</Badge>} />
+      <div className="flex flex-wrap items-center gap-2 px-5 pb-5">
+        <ErrorBanner error={control.error} />
+        {on ? (<>
+          <span className="text-sm text-muted">Halted{halt.data?.since ? ` since ${formatDateTime(halt.data.since)}` : ""}: {halt.data?.reason}</span>
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={() => control.mutate({ halted: false })} disabled={control.isPending}>Resume trading</Button>
+        </>) : (<>
+          <Input aria-label="Halt reason" placeholder="Reason (required)" className="max-w-sm" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} />
+          <Button size="sm" variant="danger" disabled={!reason || control.isPending} onClick={() => { control.mutate({ halted: true, reason }); setReason(""); }}>Halt all trading</Button>
+        </>)}
+      </div>
+    </Card>
+  );
+}
+
 export function AdminPage() {
-  return <div className="space-y-6"><Users /><Audit /></div>;
+  return <div className="space-y-6"><TradingHalt /><Users /><Audit /></div>;
 }

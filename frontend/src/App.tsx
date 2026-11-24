@@ -16,6 +16,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { WalletPage } from "@/pages/WalletPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
 import { HistoryPage } from "@/pages/HistoryPage";
+import { RiskPage } from "@/pages/RiskPage";
 
 function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const { status, user } = useAuth();
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="backtests" element={<BacktestPage />} />
         <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="history" element={<HistoryPage />} />
+        <Route path="risk" element={<RiskPage />} />
         <Route path="wallet" element={<WalletPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="admin" element={<RequireAuth admin><AdminPage /></RequireAuth>} />

@@ -83,7 +83,7 @@ async def test_market_buy_posts_balanced_ledger_and_opens_position(client):
     r = await order(client, h, aid, qty="10")
     assert r.status_code == 201, r.text
     o = r.json()
-    assert o["status"] == "FILLED" and [e["type"] for e in o["events"]] == ["CREATED", "FILLED"]
+    assert o["status"] == "FILLED" and [e["type"] for e in o["events"]] == ["CREATED", "RISK_APPROVED", "FILLED"]
     exe = o["executions"][0]
     px = D("200") * D("1.0001") * (1 + ex.slippage("STOCK"))
     assert D(exe["price"]) == px and D(exe["reference_price"]) == D("200.0200")
@@ -170,7 +170,7 @@ async def test_foreign_currency_instrument_converts_to_account_currency(client):
 async def test_limit_and_stop_orders_fill_through_matcher(client):
     h, aid = await setup(client)
     lim = (await order(client, h, aid, type="LIMIT", limit_price="195.00", qty="5")).json()
-    assert lim["status"] == "OPEN" and lim["expires_at"] and [e["type"] for e in lim["events"]] == ["CREATED", "ACCEPTED"]
+    assert lim["status"] == "OPEN" and lim["expires_at"] and [e["type"] for e in lim["events"]] == ["CREATED", "RISK_APPROVED", "ACCEPTED"]
     ah = await admin_headers(client)
     assert (await client.post(f"{API}/trading/process", headers=h)).status_code == 403
     stats = (await client.post(f"{API}/trading/process", headers=ah)).json()
@@ -199,7 +199,7 @@ async def test_limit_and_stop_orders_fill_through_matcher(client):
 
 async def test_matcher_skips_closed_markets_and_expires_orders(client):
     h, aid = await setup(client)
-    o = (await order(client, h, aid, type="LIMIT", limit_price="250.00", qty="1", time_in_force="DAY")).json()
+    o = (await order(client, h, aid, type="LIMIT", limit_price="205.00", qty="1", time_in_force="DAY")).json()
     # limit above the ask fills immediately on the next pass... unless the market is closed
     PRICES["AAPL"]["open"] = False
     ah = await admin_headers(client)

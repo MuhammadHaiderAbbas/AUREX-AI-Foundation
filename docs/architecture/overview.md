@@ -15,7 +15,7 @@ Browser ──► Caddy (TLS, CSP, static SPA) ──► FastAPI /api/v1
           │ research/   ingestion, hybrid RAG, grounded reports (Phase 4)     │
           │ agents/     orchestrator, 8 specialists, consensus (Phase 5)      │
           │ trading/    OMS + paper execution                     ✓           │
-          │ risk/       independent risk gate, kill switch   (Phase 9)        │
+          │ risk/       independent risk gate, kill switch        ✓           │
           └────────────────────────────────────┬─────────────────────────────┘
                                                ▼
                               PostgreSQL (+pgvector) · Redis · object storage
@@ -77,6 +77,13 @@ strategies including an agent-consensus replay, and one-shot out-of-sample evalu
 orders, fills on the live bid/ask with the backtester's cost model, average-cost positions,
 balanced ledger postings for every trade, fee and realised P&L, a background order matcher,
 and portfolio valuation with equity snapshots. See `paper-trading.md`.
+
+**Phase 9** added the independent risk engine. It is the one gate in front of the order book
+for manual, AI and autopilot orders. It enforces per-trade risk, position, exposure and
+position-count limits, an order-rate check and a price collar. Daily-loss and drawdown
+breakers, account and platform kill switches, and bracket (OCO) protective orders round it
+out. With the gate in place, agent proposals became executable, and there is an autopilot
+with an emergency stop. See `risk-engine.md`.
 
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that

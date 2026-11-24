@@ -11,7 +11,8 @@ from app.core.errors import BusinessRuleViolation, NotFound, RateLimited
 from app.core.rate_limit import SlidingWindowLimiter
 from app.database.session import get_db
 from app.models import AIAgent, AIRun, TradeProposal, User
-from app.schemas.ai import AgentRead, AgentUpdate, ProposalRead, RunRead, RunRequest, RunSummary
+from app.risk.autopilot import execute_proposal
+from app.schemas.ai import AgentRead, AgentUpdate, ProposalExecution, ProposalRead, RunRead, RunRequest, RunSummary
 from app.schemas.common import Page
 from app.services.audit_service import AuditContext, AuditService
 
@@ -107,3 +108,21 @@ async def dismiss_proposal(proposal_id: uuid.UUID, user: User = Depends(current_
     await db.commit()
     await db.refresh(p)
     return p
+
+
+@router.post("/proposals/{proposal_id}/execute", response_model=ProposalExecution)
+async def execute(proposal_id: uuid.UUID, user: User = Depends(current_user),
+                  ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
+    """Send a pending proposal to the independent risk gate. If approved it becomes a paper
+    MARKET order with a protective stop-loss/take-profit bracket; if not, it is marked
+    RISK_REJECTED with the reason. Either way the decision is recorded."""
+    p = await db.scalar(select(TradeProposal).where(TradeProposal.id == proposal_id).with_for_update())
+    if p is None or p.user_id != user.id:
+        raise NotFound("Proposal not found")
+    p, order = await execute_proposal(db, user, p)
+    await AuditService(db).record(ctx, "ai.proposal.execute", resource_type="trade_proposal", resource_id=p.id,
+                                  details={"status": p.status, "order_id": str(order.id), "reason": p.decision_reason})
+    await db.commit()
+    await db.refresh(p)
+    return ProposalExecution(proposal=ProposalRead.model_validate(p), order_id=order.id, order_status=order.status,
+                             reason=p.decision_reason)

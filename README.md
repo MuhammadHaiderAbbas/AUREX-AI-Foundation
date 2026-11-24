@@ -35,6 +35,11 @@ Delivered so far:
   GTC/DAY, idempotent client IDs), fills on the live bid/ask with spread, slippage and fees,
   average-cost positions, balanced ledger postings for trades, fees and realised P&L, a
   background order matcher, and a marked-to-market portfolio with equity history.
+- **Phase 9, Risk engine:** an independent pre-trade gate for every order (risk per trade,
+  position size, gross exposure, open positions, order-rate and price-collar checks);
+  daily-loss and drawdown breakers on contribution-neutral equity; account and platform kill
+  switches; bracket orders with one-cancels-other; AI proposals executed only through the
+  gate; an autopilot with an emergency stop; and append-only decision and event logs.
 
 ## Quick start (Docker)
 
@@ -63,9 +68,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 140 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints) |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 163 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints), risk engine (every check and its boundary, exits through halts, breakers incl. deposits/withdrawals, kill switches, abnormal activity, platform halt, brackets/OCO/resizing, proposal execution and refusal, autopilot, emergency stop) |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger) |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger); risk centre (limit change, rejection with checks, bracket order, kill switch, autopilot cycle, emergency stop; platform halt in the demo) |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -84,7 +89,8 @@ backend/          FastAPI app, Alembic migrations, tests
   app/ml/         features, models, walk-forward validation, drift, registry (Phase 6)
   app/backtest/   event-driven engine, strategies, IS/OOS evaluation (Phase 7)
   app/trading/    order management, execution model, positions, portfolio (Phase 8)
-  app/{risk,integrations}/   reserved for later phases
+  app/risk/       pre-trade engine, breakers, kill switches, autopilot (Phase 9)
+  app/integrations/   reserved for later phases
 frontend/         React + TypeScript + Vite + Tailwind; Caddy image for serving
   src/components/ design system (shadcn-style primitives) and app shell
   src/features/   auth + accounts state
@@ -176,8 +182,18 @@ Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude
 - [x] Background matcher (`FOR UPDATE SKIP LOCKED`) plus an admin trigger
 - [x] Portfolio (KPIs, positions marked at the bid, allocation, equity history, closed positions), Trade History (orders, timeline, executions) and an order ticket on Markets; all work in the static demo
 
-**Next: Phase 9, risk engine:** an independent risk controller with final authority over every
-order (per-trade risk, daily loss and drawdown breakers, exposure limits, kill switch), through
-which AI proposals finally become executable paper orders.
+## Phase 9 deliverables
+
+- [x] Pure pre-trade engine with final authority over every order source: risk per trade (actual or default stop), position size, gross exposure incl. working buys, open positions, order rate, price collar
+- [x] Per-account limits with blueprint defaults, user tightening and capped loosening (DB-enforced ceilings), audited
+- [x] Daily-loss (auto-reset at 00:00 UTC) and drawdown (manual reset) breakers on contribution-neutral equity, valued on every order, fill, view and background pass
+- [x] Account kill switch (manual or automatic on abnormal activity) and admin platform halt; halts block exposure but never exits
+- [x] Bracket orders: protective stop and take-profit placed on fill, one-cancels-other, resized or cancelled as the position shrinks
+- [x] AI proposals executable only through the gate (`EXECUTED` / `RISK_REJECTED`); autopilot with start, pause, stop, scheduled cycles and an emergency stop (optional flatten)
+- [x] Append-only `risk_decisions` and `risk_events`; Risk Centre UI (status, limit meters, controls, limits editor, decision log with every check, events), autopilot on the agent desk, risk checks in the order ticket and trade history; all of it works in the static demo
+
+**Next: Phase 10, analytics:** performance attribution (equity curve, drawdown, Sharpe,
+Sortino, profit factor, turnover), execution-quality reports, model calibration and drift
+response over live paper results, and exportable audit reports.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

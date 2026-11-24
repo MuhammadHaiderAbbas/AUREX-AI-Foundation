@@ -18,6 +18,8 @@ class OrderCreate(BaseModel):
     stop_price: Decimal | None = Field(default=None, gt=0, max_digits=28, decimal_places=10)
     time_in_force: Literal["GTC", "DAY"] = "GTC"
     client_order_id: str | None = Field(default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    stop_loss: Decimal | None = Field(default=None, gt=0, max_digits=28, decimal_places=10)
+    take_profit: Decimal | None = Field(default=None, gt=0, max_digits=28, decimal_places=10)
 
 
 class OrderEventRead(ORMModel):
@@ -64,11 +66,27 @@ class OrderRead(ORMModel):
     expires_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
+    parent_order_id: uuid.UUID | None = None
+    oco_group: uuid.UUID | None = None
+    proposal_id: uuid.UUID | None = None
+
+
+class RiskCheckRead(BaseModel):
+    name: str
+    label: str
+    passed: bool
+    value: str
+    limit: str
+    message: str
 
 
 class OrderDetail(OrderRead):
     events: list[OrderEventRead]
     executions: list[ExecutionRead]
+    risk_checks: list[RiskCheckRead] = []
+    children: list[OrderRead] = []
 
 
 class PositionRead(BaseModel):

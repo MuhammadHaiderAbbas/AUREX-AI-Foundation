@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { useSystemInfo } from "@/features/accounts/hooks";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useSystemHalt } from "@/features/risk/hooks";
 import { isDemo } from "@/services/api";
 import { cn } from "@/lib/utils";
 import { NAV } from "./nav";
@@ -51,6 +52,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell() {
+  const halt = useSystemHalt();
   const { user, logout } = useAuth();
   const info = useSystemInfo();
   const [open, setOpen] = useState(false);
@@ -94,9 +96,15 @@ export function AppShell() {
           <Badge tone="accent" title="Virtual capital only. No real money is traded.">
             <StatusDot tone="accent" /> Paper mode
           </Badge>
-          <Badge tone="neutral" className="hidden md:inline-flex" title="Manual paper orders are enabled. Agents produce proposals only; autonomous execution arrives with the Phase 9 risk gate">
-            <StatusDot /> Autopilot off
-          </Badge>
+          {halt.data?.halted ? (
+            <Badge tone="negative" title={`Platform trading halted: ${halt.data.reason ?? ""}. Exits and protective stops still work.`}>
+              <StatusDot tone="negative" /> Trading halted
+            </Badge>
+          ) : (
+            <Badge tone="neutral" className="hidden md:inline-flex" title="Every order, manual or AI, passes the independent risk engine">
+              <StatusDot tone="positive" /> Risk gate on
+            </Badge>
+          )}
           <div className="hidden text-right sm:block">
             <div className="text-xs font-medium">{user?.full_name}</div>
             <div className="text-[11px] capitalize text-subtle">{user?.role}</div>
