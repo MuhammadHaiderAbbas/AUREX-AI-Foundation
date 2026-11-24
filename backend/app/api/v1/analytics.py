@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import re
 import uuid
 from datetime import datetime
 
@@ -76,7 +77,8 @@ async def report(account_id: uuid.UUID, period: str = Period, download: bool = F
     await db.commit()
     if not download:
         return out
-    name = f"aurex-report-{acct.name.replace(' ', '_')[:30]}-{period}-{datetime.now().strftime('%Y%m%d')}.json"
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", acct.name).strip("_")[:30] or "account"   # never echo raw input into a header
+    name = f"aurex-report-{safe}-{period}-{datetime.now().strftime('%Y%m%d')}.json"
     return Response(json.dumps(out, indent=2, default=str), media_type="application/json",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

@@ -108,3 +108,58 @@ class AuditService:
                         "first_invalid_id": log.id, "reason": "record hash mismatch"}
             prev = log.hash
         return {"valid": True, "records_checked": checked}
+
+
+# -- export & offline verification (Phase 11) ------------------------------------------------
+EXPORT_FORMAT = "aurex-audit-export/1"
+
+
+def export_line(log: AuditLog) -> dict[str, Any]:
+    return {"id": log.id, **_record(log), "prev_hash": log.prev_hash, "hash": log.hash}
+
+
+async def export_lines(db: AsyncSession, from_id: int = 1):
+    """JSON Lines: a header, then one record per line, oldest first. Everything needed to
+    re-verify the chain offline is included, so an export can be checked without database access."""
+    first = await db.scalar(select(AuditLog).where(AuditLog.id >= from_id).order_by(AuditLog.id).limit(1))
+    total = await db.scalar(select(func.count()).select_from(AuditLog).where(AuditLog.id >= from_id))
+    yield json.dumps({"format": EXPORT_FORMAT, "exported_at": datetime.now(UTC).isoformat(), "from_id": from_id,
+                      "records": int(total or 0), "anchor_prev_hash": first.prev_hash if first else None}) + "\n"
+    result = await db.stream_scalars(select(AuditLog).where(AuditLog.id >= from_id).order_by(AuditLog.id))
+    async for log in result:
+        yield json.dumps(export_line(log), sort_keys=True, default=str) + "\n"
+
+
+def _invalid(checked: int, record_id: int, reason: str) -> dict[str, Any]:
+    return {"valid": False, "records_checked": checked, "first_invalid_id": record_id, "reason": reason}
+
+
+def verify_export(lines) -> dict[str, Any]:
+    """Re-verify an export: header, contiguous ids, prev-hash links and every record hash."""
+    it = iter(lines)
+    try:
+        header = json.loads(next(it))
+    except (StopIteration, json.JSONDecodeError):
+        return {"valid": False, "records_checked": 0, "reason": "missing or unreadable header"}
+    if header.get("format") != EXPORT_FORMAT:
+        return {"valid": False, "records_checked": 0, "reason": "unknown export format"}
+    prev = header.get("anchor_prev_hash") or GENESIS_HASH
+    if header.get("from_id", 1) == 1 and prev != GENESIS_HASH:
+        return {"valid": False, "records_checked": 0, "reason": "full export must start at the genesis hash"}
+    checked, last_id, last_hash = 0, None, prev
+    for raw in it:
+        if not raw.strip():
+            continue
+        rec = json.loads(raw)
+        if last_id is not None and rec["id"] != last_id + 1:
+            return _invalid(checked, rec["id"], "gap in record ids")
+        if rec["prev_hash"] != prev:
+            return _invalid(checked, rec["id"], "prev_hash does not link")
+        body = {k: rec[k] for k in ("occurred_at", "actor_user_id", "action", "resource_type", "resource_id",
+                                    "outcome", "ip_address", "request_id", "details")}
+        if _compute_hash(prev, body) != rec["hash"]:
+            return _invalid(checked, rec["id"], "record hash mismatch")
+        prev, last_id, last_hash, checked = rec["hash"], rec["id"], rec["hash"], checked + 1
+    if checked != header.get("records", checked):
+        return {"valid": False, "records_checked": checked, "reason": "record count does not match header"}
+    return {"valid": True, "records_checked": checked, "last_hash": last_hash}

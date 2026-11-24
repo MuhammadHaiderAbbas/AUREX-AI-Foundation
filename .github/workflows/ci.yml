@@ -48,9 +48,9 @@ jobs:
           --health-cmd "pg_isready -U aurex" --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       AUREX_DATABASE_URL: postgresql+asyncpg://aurex:aurex@localhost:5432/aurex
-      AUREX_ADMIN_PASSWORD: Ci-Admin-Passw0rd!
+      AUREX_ADMIN_PASSWORD: Ci-Operator-Key-42!
       AUREX_E2E_ADMIN_EMAIL: admin@example.com
-      AUREX_E2E_ADMIN_PASSWORD: Ci-Admin-Passw0rd!
+      AUREX_E2E_ADMIN_PASSWORD: Ci-Operator-Key-42!
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

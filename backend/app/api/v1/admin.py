@@ -1,10 +1,11 @@
 import uuid
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_audit_context, require_admin
+from app.api.deps import current_user, get_audit_context, require_admin
 from app.core.errors import BusinessRuleViolation, NotFound
 from app.database.session import get_db
 from app.models import Role, User
@@ -12,7 +13,7 @@ from app.schemas.audit import AuditLogRead, AuditVerifyResult
 from app.schemas.auth import UserRead
 from app.schemas.common import Page
 from app.schemas.users import AdminUserUpdate
-from app.services.audit_service import AuditContext, AuditService
+from app.services.audit_service import AuditContext, AuditService, export_lines
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -35,8 +36,9 @@ async def update_user(
     target = await db.get(User, user_id)
     if target is None:
         raise NotFound("User not found")
-    if target.id == admin.id and (data.role == "user" or data.is_active is False):
-        raise BusinessRuleViolation("Administrators cannot demote or disable themselves")
+    if target.id == admin.id and (data.role == "user" or data.is_active is False or data.reset_mfa):
+        raise BusinessRuleViolation(
+            "Administrators cannot demote, disable or reset two-factor authentication for themselves")
     changes: dict = {}
     if data.role is not None and data.role != target.role_name:
         target.role_id = (await db.scalar(select(Role.id).where(Role.name == data.role)))
@@ -44,6 +46,9 @@ async def update_user(
     if data.is_active is not None and data.is_active != target.is_active:
         target.is_active = data.is_active
         changes["is_active"] = data.is_active
+    if data.reset_mfa and target.mfa_enabled:
+        AuthService._clear_mfa(target)
+        changes["mfa_reset"] = True
     if changes:
         # Role or status changes invalidate existing sessions (claims would be stale).
         await AuthService(db).revoke_all_for_user(target.id, "admin_update")
@@ -64,6 +69,19 @@ async def list_audit(
     rows, total = await AuditService(db).list(limit=limit, offset=offset, action=action,
                                               actor_user_id=actor_user_id)
     return Page(items=rows, total=total, limit=limit, offset=offset)
+
+
+@router.get("/audit/export")
+async def export_audit(from_id: int = Query(1, ge=1), _: User = Depends(current_user),
+                       ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
+    """Download the audit chain as JSON Lines, verifiable offline with
+    `python -m app.cli audit-verify-file <file>`. The export itself is audited first."""
+    await AuditService(db).record(ctx, "admin.audit.export", details={"from_id": from_id})
+    await db.commit()
+    body = "".join([line async for line in export_lines(db, from_id)])
+    name = f"aurex-audit-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    return Response(body, media_type="application/x-ndjson",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.get("/audit/verify", response_model=AuditVerifyResult)

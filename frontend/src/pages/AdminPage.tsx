@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, Download, ShieldCheck, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,14 +10,14 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useSystemHalt, useSystemHaltControl } from "@/features/risk/hooks";
 import { formatDateTime } from "@/lib/utils";
-import { api, type AuditLog, type Page, type User } from "@/services/api";
+import { api, apiDownload, type AuditLog, type Page, type User } from "@/services/api";
 
 function Users() {
   const { user: me } = useAuth();
   const qc = useQueryClient();
   const users = useQuery({ queryKey: ["admin-users"], queryFn: () => api<Page<User>>("/admin/users?limit=200") });
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Partial<{ role: string; is_active: boolean }> }) =>
+    mutationFn: ({ id, body }: { id: string; body: Partial<{ role: string; is_active: boolean; reset_mfa: boolean }> }) =>
       api<User>(`/admin/users/${id}`, { method: "PATCH", json: body }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); qc.invalidateQueries({ queryKey: ["admin-audit"] }); },
   });
@@ -32,11 +32,13 @@ function Users() {
             {users.data?.items.map((u) => (
               <Tr key={u.id}>
                 <Td><div className="font-medium">{u.full_name}</div><div className="text-[11px] text-subtle">{u.email}</div></Td>
-                <Td><Badge tone={u.role === "admin" ? "accent" : "neutral"}>{u.role}</Badge></Td>
+                <Td><Badge tone={u.role === "admin" ? "accent" : "neutral"}>{u.role}</Badge>{u.mfa_enabled && <Badge tone="positive" className="ml-1">2FA</Badge>}</Td>
                 <Td><span className="flex items-center gap-1.5 text-xs"><StatusDot tone={u.is_active ? "positive" : "negative"} />{u.is_active ? "Active" : "Disabled"}</span></Td>
                 <Td className="num text-xs text-muted">{u.last_login_at ? formatDateTime(u.last_login_at) : "—"}</Td>
                 <Td className="space-x-2 text-right">
                   {u.id !== me?.id && (<>
+                    {u.mfa_enabled && <Button size="sm" variant="outline" title="For a user who lost their device and recovery codes"
+                      onClick={() => update.mutate({ id: u.id, body: { reset_mfa: true } })}>Reset 2FA</Button>}
                     <Button size="sm" variant="outline" onClick={() => update.mutate({ id: u.id, body: { role: u.role === "admin" ? "user" : "admin" } })}>
                       {u.role === "admin" ? "Make user" : "Make admin"}
                     </Button>
@@ -56,6 +58,7 @@ function Users() {
 
 function Audit() {
   const [action, setAction] = useState("");
+  const [exportErr, setExportErr] = useState<unknown>(null);
   const audit = useQuery({
     queryKey: ["admin-audit", action],
     queryFn: () => api<Page<AuditLog>>(`/admin/audit?limit=100${action ? `&action=${encodeURIComponent(action)}` : ""}`),
@@ -64,7 +67,12 @@ function Audit() {
   return (
     <Card>
       <CardHeader title="Audit trail" description="Append-only, SHA-256 hash-chained"
-        action={<Button size="sm" variant="secondary" onClick={() => verify.mutate()} disabled={verify.isPending}><ShieldCheck />Verify chain</Button>} />
+        action={<div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => verify.mutate()} disabled={verify.isPending}><ShieldCheck />Verify chain</Button>
+          <Button size="sm" variant="outline" onClick={() => { setExportErr(null); apiDownload("/admin/audit/export", "aurex-audit.jsonl").catch(setExportErr); }}
+            title="JSON Lines, verifiable offline with: python -m app.cli audit-verify-file <file>"><Download />Export</Button>
+        </div>} />
+      <ErrorBanner error={exportErr} className="m-4" />
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3">
         <Input placeholder="Filter by action, e.g. auth.login" className="max-w-xs" value={action} onChange={(e) => setAction(e.target.value.trim())} />
         {verify.data && (

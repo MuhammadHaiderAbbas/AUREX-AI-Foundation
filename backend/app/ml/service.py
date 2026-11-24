@@ -6,7 +6,7 @@ validation gate to pass and an administrator to act, and it is audited.
 
 import asyncio
 import hashlib
-import pickle  # noqa: S403 - artifacts are produced by this service and integrity-checked
+import pickle  # noqa: S403  # nosec B403 - artifacts are produced by this service and HMAC-verified
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BusinessRuleViolation, NotFound
+from app.core.security import sign_artifact, verify_artifact
 from app.market.service import MarketService, provider_for
 from app.ml import drift
 from app.ml.features import FEATURES, build_dataset, latest_features
@@ -88,7 +89,8 @@ class MLService:
             params=ALGORITHMS[algorithm].params, features=FEATURES,
             feature_importance=feature_importance(final, FEATURES), reference=drift.reference(ds.X),
             data_source=source, train_from=ds.times[0], train_to=ds.times[-1], n_samples=len(ds.y),
-            artifact=artifact, artifact_sha256=hashlib.sha256(artifact).hexdigest(), trained_by=user.id,
+            artifact=artifact, artifact_sha256=hashlib.sha256(artifact).hexdigest(),
+            artifact_hmac=sign_artifact(artifact), trained_by=user.id,
             trained_at=datetime.now(UTC))
         self.db.add(v)
         await self.db.flush()
@@ -146,7 +148,11 @@ class MLService:
         await self.db.refresh(v, ["artifact"])
         if hashlib.sha256(v.artifact).hexdigest() != v.artifact_sha256:
             raise ArtifactIntegrityError(f"Artifact hash mismatch for model version {v.id}")
-        model = pickle.loads(v.artifact)  # noqa: S301 - integrity verified above
+        if not verify_artifact(v.artifact, v.artifact_hmac):
+            # Never unpickle bytes whose origin we cannot prove: a database write alone must
+            # not be enough to run code in the API process.
+            raise ArtifactIntegrityError(f"Artifact signature missing or invalid for model version {v.id}")
+        model = pickle.loads(v.artifact)  # noqa: S301  # nosec B301 - HMAC-verified above
         _model_cache[v.id] = model
         return model
 

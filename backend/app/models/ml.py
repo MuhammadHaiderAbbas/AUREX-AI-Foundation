@@ -75,6 +75,8 @@ class ModelVersion(UUIDPk, Base):
     n_samples: Mapped[int] = mapped_column(Integer, nullable=False)
     artifact: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
     artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # HMAC-SHA256 with a server-held key; required before an artifact is unpickled (Phase 11).
+    artifact_hmac: Mapped[str | None] = mapped_column(String(64))
     trained_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"))
     trained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

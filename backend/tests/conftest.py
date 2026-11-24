@@ -24,6 +24,7 @@ from app.api.v1 import risk as risk_api  # noqa: E402
 from app.api.v1 import trading as trading_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.errors import Conflict  # noqa: E402
+from app.core.middleware import reset_rate_limits  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
@@ -32,6 +33,7 @@ from app.ml import service as ml_service  # noqa: E402
 from app.models import RoleName  # noqa: E402
 from app.research import fetch as research_fetch  # noqa: E402
 from app.research import llm as research_llm  # noqa: E402
+from app.services import auth_service  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
 PASSWORD = "Correct-Horse-42"
@@ -61,6 +63,10 @@ async def clean_state():
         ))
         await db.commit()
     login_limiter.reset()
+    reset_rate_limits()
+    auth_service.lockout_limiter.reset()
+    auth_service.registration_limiter.reset()
+    auth_service.mfa_limiter.reset()
     get_settings.cache_clear()
     market_service.clear_caches()
     market_service._providers.clear()

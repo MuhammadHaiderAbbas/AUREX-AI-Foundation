@@ -15,6 +15,7 @@ import * as ml from "./ml";
 import * as bt from "./backtest";
 import * as risk from "./risk";
 import * as an from "./analytics";
+import * as totp from "./totp";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -29,8 +30,10 @@ const CHART: [string, string, string][] = [
 ];
 const DEBIT_NORMAL = new Set(["ASSET", "EXPENSE"]);
 
-interface DUser { id: string; email: string; full_name: string; pw: string; salt: string; role: "admin" | "user"; is_active: boolean; created_at: string; last_login_at: string | null }
-interface DSession { id: string; user_id: string; access: string; refresh: string; family: string; revoked: string | null; reason: string | null }
+interface DUser { id: string; email: string; full_name: string; pw: string; salt: string; role: "admin" | "user"; is_active: boolean; created_at: string; last_login_at: string | null;
+  // Demo only: the seed lives in this browser's localStorage. The real backend encrypts it with AES-GCM.
+  mfa_enabled?: boolean; mfa_secret?: string | null; mfa_pending?: string | null; mfa_last_step?: number | null; mfa_recovery?: string[] | null }
+interface DSession { id: string; user_id: string; access: string; refresh: string; family: string; revoked: string | null; reason: string | null; created_at?: string; user_agent?: string }
 interface DEntry { ledger_code: string; direction: "DEBIT" | "CREDIT"; amount: string; currency: string }
 interface DTxn { id: string; account_id: string; type: string; description: string; created_at: string; created_by: string; idem: string | null; entries: DEntry[] }
 interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE"; created_at: string }
@@ -122,7 +125,18 @@ function validatePassword(pw: unknown, field = "password") {
   const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(pw)).length;
   if (classes < 3) throw bad("Password must contain at least three of: lowercase, uppercase, digit, symbol", field);
 }
-const userRead = (u: DUser) => ({ id: u.id, email: u.email, full_name: u.full_name, role: u.role, is_active: u.is_active, created_at: u.created_at, last_login_at: u.last_login_at });
+const userRead = (u: DUser) => ({ id: u.id, email: u.email, full_name: u.full_name, role: u.role, is_active: u.is_active, created_at: u.created_at, last_login_at: u.last_login_at, mfa_enabled: !!u.mfa_enabled });
+const mfaChallenges = new Map<string, { user: string; exp: number }>();     // in memory: challenges die with the tab
+async function secondFactor(u: DUser, code: string): Promise<"totp" | "recovery" | null> {
+  if (u.mfa_secret) {
+    const step = await totp.verify(u.mfa_secret, code, u.mfa_last_step ?? null);
+    if (step != null) { u.mfa_last_step = step; return "totp"; }
+  }
+  const h = await sha256(code.trim().toLowerCase());
+  if (u.mfa_recovery?.includes(h)) { u.mfa_recovery = u.mfa_recovery.filter((x) => x !== h); return "recovery"; }
+  return null;
+}
+async function passwordOk(u: DUser, pw: unknown) { return (await sha256(u.salt + String(pw ?? ""))) === u.pw; }
 
 function balances(s: State, acct: DAccount) {
   const net = new Map<string, bigint>();
@@ -202,7 +216,8 @@ function ownedAccount(c: Ctx, id: string) {
   return { user, a };
 }
 function issue(s: State, user: DUser, family = uuid()) {
-  const sess: DSession = { id: uuid(), user_id: user.id, access: token(), refresh: token(), family, revoked: null, reason: null };
+  const sess: DSession = { id: uuid(), user_id: user.id, access: token(), refresh: token(), family, revoked: null, reason: null,
+    created_at: now(), user_agent: typeof navigator === "undefined" ? undefined : navigator.userAgent };
   s.sessions.push(sess);
   refreshStore.set(sess.refresh);
   return { access_token: sess.access, token_type: "bearer", expires_in: 900, user: userRead(user) };
@@ -1172,10 +1187,62 @@ const routes: [string, RegExp, Handler][] = [
       throw new HttpError(401, "unauthorized", "Invalid email or password");
     }
     if (!u.is_active) throw new HttpError(403, "forbidden", "This account has been disabled");
+    if (u.mfa_enabled) {
+      const t = token();
+      mfaChallenges.set(t, { user: u.id, exp: Date.now() + 300_000 });
+      await audit(s, u.id, "auth.mfa.challenge", { type: "user", id: u.id });
+      return json(200, { mfa_required: true, mfa_token: t, expires_in: 300 });
+    }
     u.last_login_at = now();
     const res = issue(s, u);
-    await audit(s, u.id, "auth.login", { type: "user", id: u.id });
+    await audit(s, u.id, "auth.login", { type: "user", id: u.id, details: { method: "password" } });
     return json(200, res);
+  }],
+  ["POST", /^\/auth\/mfa\/verify$/, async ({ s, body }) => {
+    const ch = mfaChallenges.get(String(body.mfa_token ?? ""));
+    const u = ch && ch.exp > Date.now() ? s.users.find((x) => x.id === ch.user) : undefined;
+    if (!u || !u.mfa_enabled) throw new HttpError(401, "unauthorized", "Sign-in step expired. Enter your password again.");
+    const method = await secondFactor(u, String(body.code ?? ""));
+    if (!method) { await audit(s, u.id, "auth.mfa.verify", { outcome: "failure", type: "user", id: u.id }); save(); throw new HttpError(401, "unauthorized", "Invalid authentication code"); }
+    mfaChallenges.delete(String(body.mfa_token));
+    u.last_login_at = now();
+    const res = issue(s, u);
+    await audit(s, u.id, "auth.login", { type: "user", id: u.id, details: { method: `password+${method}` } });
+    return json(200, res);
+  }],
+  ["POST", /^\/auth\/mfa\/setup$/, async (c) => {
+    const { user } = authUser(c);
+    if (!(await passwordOk(user, c.body.password))) throw new HttpError(401, "unauthorized", "Password is incorrect");
+    if (user.mfa_enabled) throw new HttpError(422, "business_rule_violation", "Two-factor authentication is already enabled");
+    user.mfa_pending = totp.newSecret();
+    await audit(c.s, user.id, "auth.mfa.setup", { type: "user", id: user.id });
+    return json(200, { secret: user.mfa_pending, otpauth_uri: totp.otpauthUri(user.mfa_pending, user.email) });
+  }],
+  ["POST", /^\/auth\/mfa\/enable$/, async (c) => {
+    const { user, session } = authUser(c);
+    if (!user.mfa_pending) throw new HttpError(422, "business_rule_violation", "Start the setup first");
+    const step = await totp.verify(user.mfa_pending, String(c.body.code ?? ""), null);
+    if (step == null) throw new HttpError(422, "business_rule_violation", "That code is not valid. Check the time on your device and try again.");
+    const codes = totp.newRecoveryCodes();
+    Object.assign(user, { mfa_enabled: true, mfa_secret: user.mfa_pending, mfa_pending: null, mfa_last_step: step,
+      mfa_recovery: await Promise.all(codes.map((x) => sha256(x))) });
+    for (const x of c.s.sessions) if (x.user_id === user.id && !x.revoked && x.family !== session.family) { x.revoked = now(); x.reason = "mfa_enabled"; }
+    await audit(c.s, user.id, "auth.mfa.enable", { type: "user", id: user.id });
+    return json(200, { recovery_codes: codes });
+  }],
+  ["POST", /^\/auth\/mfa\/(disable|recovery-codes)$/, async (c) => {
+    const { user } = authUser(c);
+    if (!user.mfa_enabled) throw new HttpError(422, "business_rule_violation", "Two-factor authentication is not enabled");
+    if (!(await passwordOk(user, c.body.password)) || !(await secondFactor(user, String(c.body.code ?? "")))) throw new HttpError(401, "unauthorized", "Password or authentication code is incorrect");
+    if (c.params[0] === "disable") {
+      Object.assign(user, { mfa_enabled: false, mfa_secret: null, mfa_pending: null, mfa_last_step: null, mfa_recovery: null });
+      await audit(c.s, user.id, "auth.mfa.disable", { type: "user", id: user.id });
+      return json(204, null);
+    }
+    const codes = totp.newRecoveryCodes();
+    user.mfa_recovery = await Promise.all(codes.map((x) => sha256(x)));
+    await audit(c.s, user.id, "auth.mfa.recovery_regenerate", { type: "user", id: user.id });
+    return json(200, { recovery_codes: codes });
   }],
   ["POST", /^\/auth\/refresh$/, ({ s }) => {
     const rt = refreshStore.get();
@@ -1262,10 +1329,11 @@ const routes: [string, RegExp, Handler][] = [
     const { user: me } = admin(c);
     const t = c.s.users.find((u) => u.id === c.params[0]);
     if (!t) throw new HttpError(404, "not_found", "User not found");
-    if (t.id === me.id && (c.body.role === "user" || c.body.is_active === false)) throw new HttpError(422, "business_rule_violation", "Administrators cannot demote or disable themselves");
+    if (t.id === me.id && (c.body.role === "user" || c.body.is_active === false || c.body.reset_mfa)) throw new HttpError(422, "business_rule_violation", "Administrators cannot demote, disable or reset two-factor authentication for themselves");
     const changes: Record<string, unknown> = {};
     if (c.body.role && c.body.role !== t.role) { t.role = c.body.role as DUser["role"]; changes.role = t.role; }
     if (typeof c.body.is_active === "boolean" && c.body.is_active !== t.is_active) { t.is_active = c.body.is_active; changes.is_active = t.is_active; }
+    if (c.body.reset_mfa && t.mfa_enabled) { Object.assign(t, { mfa_enabled: false, mfa_secret: null, mfa_pending: null, mfa_last_step: null, mfa_recovery: null }); changes.mfa_reset = true; }
     if (Object.keys(changes).length) {
       for (const x of c.s.sessions) if (x.user_id === t.id && !x.revoked) { x.revoked = now(); x.reason = "admin_update"; }
       await audit(c.s, me.id, "admin.user.update", { type: "user", id: t.id, details: changes });
@@ -1278,6 +1346,37 @@ const routes: [string, RegExp, Handler][] = [
     const rows = c.s.audit.filter((a) => !action || a.action === action).slice().reverse();
     const limit = Number(c.query.get("limit") ?? 50);
     return json(200, { items: rows.slice(0, limit), total: rows.length, limit, offset: 0 });
+  }],
+  ["GET", /^\/auth\/sessions$/, (c) => {
+    const { user, session } = authUser(c);
+    const live = c.s.sessions.filter((x) => x.user_id === user.id && !x.revoked);
+    return json(200, live.map((x) => {
+      const first = c.s.sessions.filter((y) => y.family === x.family).map((y) => y.created_at ?? now()).sort()[0]!;
+      return { id: x.family, signed_in_at: first, last_active_at: x.created_at ?? now(), expires_at: new Date(Date.now() + 7 * 864e5).toISOString(),
+        ip_address: "browser", user_agent: x.user_agent ?? null, current: x.family === session.family };
+    }).reverse());
+  }],
+  ["POST", /^\/auth\/sessions\/revoke-others$/, async (c) => {
+    const { user, session } = authUser(c);
+    for (const x of c.s.sessions) if (x.user_id === user.id && !x.revoked && x.family !== session.family) { x.revoked = now(); x.reason = "revoked_by_user"; }
+    await audit(c.s, user.id, "auth.session.revoke_others", { type: "user", id: user.id });
+    return json(204, null);
+  }],
+  ["POST", /^\/auth\/sessions\/([\w-]+)\/revoke$/, async (c) => {
+    const { user } = authUser(c);
+    const fam = c.s.sessions.filter((x) => x.user_id === user.id && x.family === c.params[0]);
+    if (!fam.length) throw new HttpError(404, "not_found", "Session not found");
+    for (const x of fam) if (!x.revoked) { x.revoked = now(); x.reason = "revoked_by_user"; }
+    await audit(c.s, user.id, "auth.session.revoke", { type: "user_session", id: c.params[0] });
+    return json(204, null);
+  }],
+  ["GET", /^\/admin\/audit\/export$/, async (c) => {
+    const { user } = admin(c);
+    await audit(c.s, user.id, "admin.audit.export", { details: { from_id: 1 } });
+    const lines = [JSON.stringify({ format: "aurex-audit-export/1", exported_at: now(), from_id: 1, records: c.s.audit.length, anchor_prev_hash: "0".repeat(64) }),
+      ...c.s.audit.map((a) => JSON.stringify({ id: a.id, ...auditRecord(a), prev_hash: a.prev_hash, hash: a.hash }))];
+    return new Response(lines.join("\n") + "\n", { status: 200, headers: { "Content-Type": "application/x-ndjson",
+      "Content-Disposition": `attachment; filename="aurex-audit-${now().replace(/[-:]/g, "").slice(0, 15)}Z.jsonl"` } });
   }],
   ["GET", /^\/admin\/audit\/verify$/, async (c) => {
     admin(c);

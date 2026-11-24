@@ -30,3 +30,5 @@ class UserSettingsUpdate(BaseModel):
 class AdminUserUpdate(BaseModel):
     role: Literal["admin", "user"] | None = None
     is_active: bool | None = None
+    # Lost device and recovery codes: an administrator can reset two-factor authentication.
+    reset_mfa: bool = False

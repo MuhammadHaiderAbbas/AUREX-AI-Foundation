@@ -1,13 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, refreshSession, tokenStore, type TokenResponse, type User } from "@/services/api";
+import { api, refreshSession, tokenStore, type MfaChallenge, type TokenResponse, type User } from "@/services/api";
 
 type Status = "loading" | "authenticated" | "anonymous";
 
 interface AuthContextValue {
   status: Status;
   user: User | null;
-  login: (email: string, password: string) => Promise<void>;
+  /** Signs in, or returns an MFA token when the account needs a second factor. */
+  login: (email: string, password: string) => Promise<{ mfaToken: string } | null>;
+  verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   register: (email: string, fullName: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -38,7 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     status,
     user,
     async login(email, password) {
-      const res = await api<TokenResponse>("/auth/login", { method: "POST", json: { email, password } });
+      const res = await api<TokenResponse | MfaChallenge>("/auth/login", { method: "POST", json: { email, password } });
+      if ("mfa_required" in res) return { mfaToken: res.mfa_token };
+      tokenStore.set(res.access_token);
+      setUser(res.user);
+      setStatus("authenticated");
+      return null;
+    },
+    async verifyMfa(mfaToken, code) {
+      const res = await api<TokenResponse>("/auth/mfa/verify", { method: "POST", json: { mfa_token: mfaToken, code } });
       tokenStore.set(res.access_token);
       setUser(res.user);
       setStatus("authenticated");

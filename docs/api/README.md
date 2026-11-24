@@ -67,6 +67,11 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | GET | `/analytics/accounts/{id}/ai?horizon_hours=` | bearer | Signal forward returns (BUY vs NO TRADE), calibration, proposal outcomes, champion drift |
 | GET | `/analytics/accounts/{id}/report?download=` | bearer | Full report with SHA-256 of its content (audited) |
 | GET | `/analytics/accounts/{id}/export/{kind}.csv` | bearer | `kind` ∈ trades, executions, orders, ledger, decisions, equity (audited) |
+| POST | `/auth/login` | — | Returns tokens, or `{mfa_required, mfa_token}` for accounts with 2FA |
+| POST | `/auth/mfa/verify` | — | `{mfa_token, code}` (TOTP or recovery code) → tokens; rate-limited |
+| POST | `/auth/mfa/setup` · `/enable` · `/disable` · `/recovery-codes` | bearer | Enrol (password → secret), confirm (code → recovery codes), disable or regenerate (password + code). Audited |
+| GET | `/auth/sessions` · POST `/auth/sessions/{id}/revoke` · `/auth/sessions/revoke-others` | bearer | Signed-in sessions and revocation |
+| GET | `/admin/audit/export?from_id=` | admin | Audit chain as JSON Lines, verifiable offline (`python -m app.cli audit-verify-file`) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 
@@ -74,6 +79,9 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 
 **Errors**: `{"error": {"code", "message", "details", "request_id"}}` with codes
 `validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
-`rate_limited`, `business_rule_violation`, `market_data_unavailable` (503).
+`rate_limited`, `business_rule_violation`, `market_data_unavailable` (503), `payload_too_large` (413).
+
+Limits: 600 requests/min per client IP (429 with `Retry-After`; health checks exempt); 1 MiB request
+bodies (11 MiB for document uploads). PATCH `/admin/users/{id}` also accepts `{"reset_mfa": true}`.
 
 Accounts belonging to other users return `404` (existence is not disclosed).

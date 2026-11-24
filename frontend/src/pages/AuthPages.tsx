@@ -47,6 +47,34 @@ function AuthLayout({ title, subtitle, children }: { title: string; subtitle: st
   );
 }
 
+function SecondFactor({ mfaToken, onCancel }: { mfaToken: string; onCancel: () => void }) {
+  const { verifyMfa } = useAuth();
+  const navigate = useNavigate();
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try { await verifyMfa(mfaToken, code.trim()); navigate("/", { replace: true }); }
+    catch (err) { setError(err); setCode(""); }
+    finally { setBusy(false); }
+  }
+  return (
+    <AuthLayout title="Two-factor authentication" subtitle="Enter the 6-digit code from your authenticator app, or one of your recovery codes.">
+      <form onSubmit={submit} className="space-y-4" aria-label="Second factor">
+        <ErrorBanner error={error} />
+        <Field label="Authentication code" htmlFor="mfa-code">
+          <Input id="mfa-code" autoComplete="one-time-code" inputMode="text" autoFocus required maxLength={32} className="num tracking-widest"
+            value={code} onChange={(e) => setCode(e.target.value)} />
+        </Field>
+        <Button type="submit" className="w-full" disabled={busy || code.trim().length < 6}>{busy && <Spinner className="text-accent-fg" />}Verify</Button>
+        <button type="button" onClick={onCancel} className="w-full text-center text-xs text-muted hover:text-fg">Use a different account</button>
+      </form>
+    </AuthLayout>
+  );
+}
+
 export function LoginPage() {
   const { login, status } = useAuth();
   const navigate = useNavigate();
@@ -54,12 +82,18 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
   if (status === "authenticated") return <Navigate to="/" replace />;
+  if (mfaToken) return <SecondFactor mfaToken={mfaToken} onCancel={() => { setMfaToken(null); setPassword(""); }} />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
-    try { await login(email, password); navigate("/", { replace: true }); }
+    try {
+      const challenge = await login(email, password);
+      if (challenge) setMfaToken(challenge.mfaToken);
+      else navigate("/", { replace: true });
+    }
     catch (err) { setError(err); }
     finally { setBusy(false); }
   }
@@ -75,7 +109,7 @@ export function LoginPage() {
           <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Button type="submit" className="w-full" disabled={busy}>{busy && <Spinner className="text-accent-fg" />}Sign in</Button>
-        {isDemo && <DemoLaunch onError={setError} />}
+        {isDemo && <DemoLaunch onError={setError} onChallenge={setMfaToken} />}
         <p className="text-center text-xs text-muted">No account? <Link to="/register" className="text-accent hover:underline">Create one</Link></p>
       </form>
     </AuthLayout>
@@ -110,7 +144,7 @@ export function RegisterPage() {
         <Field label="Email" htmlFor="email">
           <Input id="email" type="email" autoComplete="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Password" htmlFor="password" hint="At least 12 characters, using three of: lowercase, uppercase, digits, symbols.">
+        <Field label="Password" htmlFor="password" hint="At least 12 characters using three of: lowercase, uppercase, digits, symbols. Avoid common words, keyboard patterns and your name.">
           <Input id="password" type="password" autoComplete="new-password" required minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
         <Button type="submit" className="w-full" disabled={busy}>{busy && <Spinner className="text-accent-fg" />}Create account</Button>
@@ -124,7 +158,7 @@ const DEMO_EMAIL = "demo@aurex.example";
 const DEMO_PASSWORD = "Demo-Account-2026!";
 
 /** One-click entry for the static demo: creates the demo user and a funded paper account. */
-function DemoLaunch({ onError }: { onError: (e: unknown) => void }) {
+function DemoLaunch({ onError, onChallenge }: { onError: (e: unknown) => void; onChallenge: (token: string) => void }) {
   const { register, login } = useAuth();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -133,7 +167,8 @@ function DemoLaunch({ onError }: { onError: (e: unknown) => void }) {
     try {
       try { await register(DEMO_EMAIL, "Demo Trader", DEMO_PASSWORD); }
       catch (e) { if (!(e instanceof ApiError && e.status === 409)) throw e; }
-      await login(DEMO_EMAIL, DEMO_PASSWORD);
+      const challenge = await login(DEMO_EMAIL, DEMO_PASSWORD);
+      if (challenge) { onChallenge(challenge.mfaToken); return; }
       const accounts = await api<TradingAccount[]>("/accounts");
       if (accounts.length === 0) {
         await api("/accounts", { method: "POST", json: { name: "Demo paper account", base_currency: "USD", starting_balance: "100000" } });

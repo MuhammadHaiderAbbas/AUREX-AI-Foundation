@@ -1,0 +1,69 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"     # weekly, to catch newly published advisories
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python dependencies and SAST
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install "pip-audit==2.10.1" "bandit==1.9.4"
+      - name: Known vulnerabilities (OSV / PyPI advisories)
+        run: pip-audit -r requirements.txt --strict
+      - name: Static analysis (medium and high severity)
+        run: bandit -r app -ll -q
+
+  node:
+    name: Node dependencies
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - name: Known vulnerabilities in shipped dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install "detect-secrets==1.5.0"
+      - name: No secrets beyond the reviewed baseline
+        run: git ls-files -z | grep -zv -e package-lock.json -e '.secrets.baseline' | xargs -0 detect-secrets-hook --baseline .secrets.baseline
+
+  containers:
+    name: Container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -t aurex-backend:scan ./backend
+          docker build -t aurex-web:scan ./frontend
+      - name: Scan backend image (fail on fixable critical)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0, pinned by commit
+        with: { image-ref: "aurex-backend:scan", severity: CRITICAL, ignore-unfixed: true, exit-code: "1", format: table }
+      - name: Scan web image (fail on fixable critical)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0, pinned by commit
+        with: { image-ref: "aurex-web:scan", severity: CRITICAL, ignore-unfixed: true, exit-code: "1", format: table }
+      - name: Report high-severity findings (informational)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0, pinned by commit
+        with: { image-ref: "aurex-backend:scan", severity: HIGH, ignore-unfixed: true, exit-code: "0", format: table }

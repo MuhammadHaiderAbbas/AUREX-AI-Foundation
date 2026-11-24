@@ -163,13 +163,13 @@ class ResearchService:
             SELECT c.id, 1 - (c.embedding <=> CAST(:qvec AS vector)) AS sim
             FROM research_chunks c JOIN research_documents d ON d.id = c.document_id
             WHERE {where} AND c.embedding_model = :model
-            ORDER BY c.embedding <=> CAST(:qvec AS vector) LIMIT :n"""), params)).all()  # noqa: S608
+            ORDER BY c.embedding <=> CAST(:qvec AS vector) LIMIT :n"""), params)).all()  # noqa: S608  # nosec B608 - fixed fragments, bound params
         params["tsq"] = " | ".join(terms[:30])
         lexical = (await self.db.execute(text(f"""
             SELECT c.id, ts_rank_cd(c.tsv, to_tsquery('english', :tsq)) AS r
             FROM research_chunks c JOIN research_documents d ON d.id = c.document_id
             WHERE {where} AND c.tsv @@ to_tsquery('english', :tsq)
-            ORDER BY r DESC LIMIT :n"""), params)).all()  # noqa: S608
+            ORDER BY r DESC LIMIT :n"""), params)).all()  # noqa: S608  # nosec B608 - fixed fragments, bound params
 
         fused: dict[uuid.UUID, float] = {}
         sem_score = {row.id: float(row.sim) for row in semantic}
