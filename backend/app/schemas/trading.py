@@ -137,6 +137,7 @@ class PortfolioSummary(BaseModel):
     open_positions: int
     allocation: dict[str, float]
     positions: list[PositionRead]
+    binary_at_risk: Decimal = Decimal(0)
 
 
 class SnapshotRead(ORMModel):

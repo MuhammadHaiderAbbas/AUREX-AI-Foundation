@@ -28,7 +28,8 @@ async def test_overview_defaults_and_privacy(client):
     r = await risk(client, h, aid)
     assert r["limits"] == {"risk_per_trade_pct": 0.5, "max_position_pct": 20.0, "max_gross_exposure_pct": 50.0,
                            "max_open_positions": 5, "daily_loss_limit_pct": 2.0, "max_drawdown_pct": 10.0,
-                           "max_orders_per_minute": 20, "price_collar_pct": 5.0}
+                           "max_orders_per_minute": 20, "price_collar_pct": 5.0,
+                           "binary_max_stake_pct": 2.0, "binary_max_open": 3, "binary_enabled": True}
     assert r["state"]["blocked_reason"] is None and r["autopilot"]["status"] == "STOPPED"
     assert D(r["metrics"]["equity"]) == 100000 and r["metrics"]["drawdown_pct"] == 0
     async with new_client() as other:

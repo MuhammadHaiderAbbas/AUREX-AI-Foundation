@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { AdminPage } from "@/pages/AdminPage";
 import { AITradingPage } from "@/pages/AITradingPage";
 import { BacktestPage } from "@/pages/BacktestPage";
+import { BinaryPage } from "@/pages/BinaryPage";
 import { LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { ModelLabPage } from "@/pages/ModelLabPage";
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="ai-trading" element={<AITradingPage />} />
         <Route path="strategies" element={<ModelLabPage />} />
         <Route path="backtests" element={<BacktestPage />} />
+        <Route path="binary" element={<BinaryPage />} />
         <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="risk" element={<RiskPage />} />

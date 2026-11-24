@@ -181,11 +181,11 @@ export function portfolio(c: Ctx, a: number | undefined): Finding {
   const cap = Math.min(acct.equity * 0.2, acct.cash) / (entry * c.fx), capped = qty > cap;
   qty = Math.floor(Math.min(qty, cap) / c.lot_size) * c.lot_size;
   qty = +qty.toFixed(8);
-  const notional = qty * entry * c.fx, risk = qty * stop * c.fx, ok = qty > 0;
+  const notional = qty * entry * c.fx, risk = qty * stop * c.fx, ok = qty > 0 && notional >= 1;
   const m = (v: number) => v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     agent: "portfolio", status: "ok", direction: 0, score: ok ? 1 : 0, confidence: 1,
-    summary: ok ? `Size ${qty} units (≈ ${m(notional)} ${acct.currency}, ${(notional / acct.equity * 100).toFixed(1)}% of equity), risking ${m(risk)} ${acct.currency} (${(risk / acct.equity * 100).toFixed(2)}%).${capped ? " Capped by the per-position / cash limit." : ""}` : "Position size rounds to zero within risk and cash limits.",
+    summary: ok ? `Size ${qty} units (≈ ${m(notional)} ${acct.currency}, ${(notional / acct.equity * 100).toFixed(1)}% of equity), risking ${m(risk)} ${acct.currency} (${(risk / acct.equity * 100).toFixed(2)}%).${capped ? " Capped by the per-position / cash limit." : ""}` : qty <= 0 ? "Position size rounds to zero within risk and cash limits." : `Position (≈ ${m(notional)} ${acct.currency}) is below the minimum order of 1.00 ${acct.currency}.`,
     evidence: [
       { label: "Equity", value: `${m(acct.equity)} ${acct.currency}`, detail: "" },
       { label: "Risk budget (0.5%)", value: `${m(budget)} ${acct.currency}`, detail: "" },

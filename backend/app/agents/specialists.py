@@ -10,6 +10,7 @@ from decimal import ROUND_DOWN, Decimal
 
 from app.agents import stats as st
 from app.agents.base import AgentContext, Evidence, Finding
+from app.core.config import get_settings
 from app.market import indicators as ind
 
 MIN_BARS = 60
@@ -264,13 +265,15 @@ def portfolio(ctx: AgentContext, atr_1h: float | None) -> Finding:
     qty = (qty / lot).to_integral_value(rounding=ROUND_DOWN) * lot
     notional = qty * entry * fx
     risk_amt = qty * stop_dist * fx
-    ok = qty > 0
+    minimum = Decimal(get_settings().min_order_value)
+    ok = qty > 0 and notional >= minimum
     return Finding(
         "portfolio", "ok", 0, 1.0 if ok else 0.0, 1.0,
         (f"Size {_qty(qty)} units (≈ {notional:,.2f} {acct.currency}, "
          f"{notional / acct.equity:.1%} of equity), risking {risk_amt:,.2f} {acct.currency} "
          f"({risk_amt / acct.equity:.2%})." + (" Capped by the per-position / cash limit." if capped else ""))
-        if ok else "Position size rounds to zero within risk and cash limits.",
+        if ok else ("Position size rounds to zero within risk and cash limits." if qty <= 0 else
+                    f"Position (≈ {notional:,.2f} {acct.currency}) is below the minimum order of {minimum:,.2f} {acct.currency}."),
         [Evidence("Equity", f"{acct.equity:,.2f} {acct.currency}"),
          Evidence("Risk budget (0.5%)", f"{risk_budget:,.2f} {acct.currency}"),
          Evidence("Stop distance (2 × ATR)", f"{stop_dist:.6f} {ctx.instrument.quote_currency}"),

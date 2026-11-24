@@ -20,6 +20,7 @@ import * as totp from "./totp";
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
 const MAX_BALANCE = toUnits("10000000");
+const MIN_ORDER_VALUE = 1;   // account currency; entry orders only (mirrors AUREX_MIN_ORDER_VALUE)
 const MONEY_RE = /^\d+(\.\d{1,8})?$/;
 const CURRENCIES = ["USD", "GBP", "EUR"];
 const CHART: [string, string, string][] = [
@@ -39,8 +40,9 @@ interface DTxn { id: string; account_id: string; type: string; description: stri
 interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE"; created_at: string }
 interface DAudit { id: number; occurred_at: string; actor_user_id: string | null; action: string; resource_type: string | null; resource_id: string | null; outcome: string; ip_address: string | null; request_id: string | null; details: Record<string, unknown>; prev_hash: string; hash: string }
 interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[]; stop_loss: string | null; take_profit: string | null; parent_order_id: string | null; oco_group: string | null; proposal_id: string | null }
-interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null }
-interface DDecision { id: string; account_id: string; order_id: string; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
+interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
+interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null }
+interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
@@ -58,6 +60,7 @@ interface State {
   opsAttestations?: Record<string, { at: string; by: string; reference: string; label: string }>;
   riskProfiles: Record<string, DRisk>; riskDecisions: DDecision[]; systemHalt: { halted: boolean; reason: string | null; since: string | null };
   riskEvents: { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }[];
+  binaries?: DBinary[];
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -73,6 +76,7 @@ function load(): State {
       memory.aiRuns ??= []; memory.aiAgents ??= {};
       memory.mlModels ??= []; memory.mlVersions ??= []; memory.mlEvals ??= []; memory.backtests ??= [];
       memory.orders ??= []; memory.executions ??= []; memory.positions ??= []; memory.snapshots ??= [];
+      memory.binaries ??= [];
       memory.riskProfiles ??= {}; memory.riskDecisions ??= []; memory.riskEvents ??= []; memory.systemHalt ??= { halted: false, reason: null, since: null };
       for (const o of memory.orders) { o.stop_loss ??= null; o.take_profit ??= null; o.parent_order_id ??= null; o.oco_group ??= null; o.proposal_id ??= null; }
       return memory;
@@ -391,7 +395,9 @@ function businessCheck(s: State, a: DAccount, o: DOrder): string | null {
   }
   const fx = fxRate(i.quote_currency, a.base_currency);
   if (fx == null) return `no FX rate from ${i.quote_currency} to ${a.base_currency}`;
-  const est = u8(+o.quantity * estimate(o, +mkt.quote(i).ask, SLIP_BPS[i.asset_class]! / 1e4) * fx * (1 + FEE_BPS[i.asset_class]! / 1e4));
+  const gross = +o.quantity * estimate(o, +mkt.quote(i).ask, SLIP_BPS[i.asset_class]! / 1e4) * fx;
+  if (gross < MIN_ORDER_VALUE) return `order value ≈${gross.toFixed(2)} ${a.base_currency} is below the minimum order of ${MIN_ORDER_VALUE.toFixed(2)} ${a.base_currency}`;
+  const est = u8(gross * (1 + FEE_BPS[i.asset_class]! / 1e4));
   const avail = toUnits(balances(s, a).cash) - reservedUnits(s, a, o.id);
   if (est > avail) return `insufficient cash: needs ≈${(Number(est) / 1e8).toFixed(2)} ${a.base_currency}, available ${(Number(avail) / 1e8).toFixed(2)} (no leverage)`;
   return null;
@@ -411,14 +417,16 @@ function portfolio(s: State, a: DAccount) {
       unrealised_pct: cost ? Number(mv - cost) / Number(cost) : 0, realised_pnl: p.realised_pnl, fees: p.fees, opened_at: p.opened_at,
       price_as_of: q.as_of, stale: q.stale, price_decimals: i.price_decimals, _mv: mv };
   });
-  const mv = rows.reduce((acc, r) => acc + r._mv, 0n);
+  const atRisk = (s.binaries ?? []).filter((b) => b.account_id === a.id && b.status === "OPEN").reduce((acc, b) => acc + toUnits(b.stake), 0n);
+  const mv = rows.reduce((acc, r) => acc + r._mv, 0n) + atRisk;   // open binaries are carried at their stake
   const cash = line("CASH"), equity = cash + mv;
   const alloc: Record<string, number> = {};
   for (const r of rows) alloc[r.asset_class] = (alloc[r.asset_class] ?? 0) + (equity ? Number(r._mv) / Number(equity) : 0);
+  if (atRisk) alloc.BINARY = equity ? Number(atRisk) / Number(equity) : 0;
   return { account_id: a.id, account_name: a.name, currency: a.base_currency, cash: fromUnits(cash), available_cash: fromUnits(cash - reservedUnits(s, a)),
     investments_at_cost: fromUnits(line("INVESTMENTS")), market_value: fromUnits(mv), equity: fromUnits(equity), unrealised_pnl: fromUnits(mv - line("INVESTMENTS")),
     realised_pnl: fromUnits(line("REALISED_PNL")), fees: fromUnits(line("FEES")), exposure: equity ? Number(mv) / Number(equity) : 0,
-    open_positions: rows.length, allocation: alloc, positions: rows.map(({ _mv, ...r }) => r) };
+    open_positions: rows.length, allocation: alloc, positions: rows.map(({ _mv, ...r }) => r), binary_at_risk: fromUnits(atRisk) };
 }
 function snapshot(s: State, a: DAccount, reason: string) {
   const p = portfolio(s, a);
@@ -430,9 +438,11 @@ function snapshot(s: State, a: DAccount, reason: string) {
 // ---- risk engine (mirror of backend app/risk) --------------------------------------------
 const today = () => new Date().toISOString().slice(0, 10);
 function profile(s: State, accountId: string): DRisk {
+  const existing = s.riskProfiles[accountId];
+  if (existing) { existing.binary_max_stake_pct ??= risk.DEFAULTS.binary_max_stake_pct; existing.binary_max_open ??= risk.DEFAULTS.binary_max_open; existing.binary_enabled ??= true; }
   return (s.riskProfiles[accountId] ??= { ...risk.DEFAULTS, kill_switch: false, kill_reason: null, kill_engaged_at: null, daily_halt_date: null,
     drawdown_halted: false, drawdown_halted_at: null, peak_pnl_equity: null, day_date: null, day_start_pnl_equity: null, day_start_equity: null,
-    autopilot_status: "STOPPED", autopilot_symbols: ["BTC-USD", "ETH-USD", "SPY"], autopilot_last_cycle_at: null });
+    autopilot_status: "STOPPED", autopilot_symbols: ["BTC-USD", "ETH-USD", "SPY"], autopilot_last_cycle_at: null, binary_enabled: true });
 }
 function riskEvent(s: State, accountId: string | null, type: string, message: string, detail: Record<string, unknown> = {}) {
   s.riskEvents.push({ id: uuid(), account_id: accountId, type, message, detail, created_at: now() });
@@ -609,6 +619,7 @@ function processOpen(s: State) {
     fill(s, s.accounts.find((a) => a.id === o.account_id)!, o, f, +q.bid, +q.ask);
     stats[o.status === "FILLED" ? "filled" : "rejected"]++;
   }
+  settleBinaries(s);
   for (const a of s.accounts) if (s.positions.some((p) => p.account_id === a.id && p.status === "OPEN")) metrics(s, a);
   return stats;
 }
@@ -716,7 +727,7 @@ async function autopilotCycle(s: State, a: DAccount) {
 function riskOverview(s: State, a: DAccount) {
   const p = profile(s, a.id);
   const m = metrics(s, a);
-  const limits = Object.fromEntries(Object.keys(risk.DEFAULTS).map((k) => [k, p[k as keyof risk.Limits]]));
+  const limits = { ...Object.fromEntries(Object.keys(risk.DEFAULTS).map((k) => [k, p[k as keyof risk.Limits]])), binary_enabled: p.binary_enabled ?? true };
   return { account_id: a.id, currency: a.base_currency, limits, defaults: risk.DEFAULTS, ceilings: risk.CEILINGS,
     state: { kill_switch: p.kill_switch, kill_reason: p.kill_reason, kill_engaged_at: p.kill_engaged_at, daily_halted: dailyHalted(p),
       drawdown_halted: p.drawdown_halted, drawdown_halted_at: p.drawdown_halted_at, blocked_reason: blockReason(s, p) },
@@ -768,6 +779,145 @@ async function runAnalysis(s: State, user: DUser, symbol: string, accountId: str
   await audit(s, user.id, "ai.run", { type: "ai_run", id, details: { symbol: run.symbol, decision: run.decision, net_score: run.net_score, proposal: run.proposal?.id ?? null } });
   return run;
 }
+
+// ---- binary options (mirror of backend app/binary) ---------------------------------------
+const BINARY_PAYOUT = 0.8, BINARY_EXPIRIES = [60, 300, 900, 3600, 86400], BINARY_VOID_AFTER_S = 600;
+const BINARY_NOTICE = "Paper simulation only. Binary options are banned for retail customers in the UK (FCA, since April 2019) and restricted across the EU/EEA. The payout is below even money, so a forecaster who is right half the time loses money; you need to win more often than the break-even rate just to stand still.";
+const binaryConfig = () => ({ payout_rate: BINARY_PAYOUT, expiries: BINARY_EXPIRIES, break_even_win_rate: 1 / (1 + BINARY_PAYOUT),
+  coin_flip_expected_return: 0.5 * BINARY_PAYOUT - 0.5, minimum_stake: MIN_ORDER_VALUE.toFixed(2), void_after_seconds: BINARY_VOID_AFTER_S });
+const midOf = (q: { bid: string; ask: string }) => (+q.bid + +q.ask) / 2;
+const binaryRead = (b: DBinary) => { const { user_id: _u, ...rest } = b; return { ...rest, potential_return: (+b.stake * (1 + b.payout_rate)).toFixed(2) }; };
+
+function settleBinaries(s: State) {
+  const nowMs = Date.now();
+  for (const b of (s.binaries ?? []).filter((x) => x.status === "OPEN" && Date.parse(x.expires_at) <= nowMs)) {
+    const i = instOf(b.symbol), a = s.accounts.find((x) => x.id === b.account_id)!;
+    const at = Date.parse(b.expires_at);
+    const q = mkt.isOpen(i.market, at) ? mkt.quote(i, at) : null;     // synthetic prices are a function of time: use the price at expiry
+    const stake = toUnits(b.stake);
+    let status: DBinary["status"];
+    if (!q) status = nowMs - at >= BINARY_VOID_AFTER_S * 1000 ? "VOID" : "OPEN";
+    else {
+      const px = midOf(q), k = +b.strike;
+      status = px === k ? "TIE" : (b.direction === "HIGHER" ? px > k : px < k) ? "WON" : "LOST";
+      b.settle_price = String(+px.toFixed(i.price_decimals + 2)); b.settle_price_at = q.as_of;
+    }
+    if (status === "OPEN") continue;
+    const S = fromUnits(stake);
+    if (status === "WON") {
+      const profit = fromUnits((stake * BigInt(Math.round(b.payout_rate * 1e6))) / 1_000_000n);
+      post(s, a, "BINARY_SETTLE", [["CASH", "DEBIT", fromUnits(stake + toUnits(profit))], ["INVESTMENTS", "CREDIT", S], ["REALISED_PNL", "CREDIT", profit]], b.user_id,
+        `Binary ${b.direction} ${b.symbol} won`);
+      b.returned = fromUnits(stake + toUnits(profit)); b.pnl = profit;
+    } else if (status === "LOST") {
+      post(s, a, "BINARY_SETTLE", [["REALISED_PNL", "DEBIT", S], ["INVESTMENTS", "CREDIT", S]], b.user_id, `Binary ${b.direction} ${b.symbol} lost`);
+      b.returned = "0"; b.pnl = fromUnits(-stake);
+    } else {
+      post(s, a, "BINARY_SETTLE", [["CASH", "DEBIT", S], ["INVESTMENTS", "CREDIT", S]], b.user_id, `Binary ${b.direction} ${b.symbol} ${status.toLowerCase()}`);
+      b.returned = S; b.pnl = "0";
+      if (status === "VOID") b.void_reason = "no price was available after expiry";
+    }
+    b.status = status; b.settled_at = now();
+    metrics(s, a, snapshot(s, a, "binary"));
+  }
+}
+
+function binaryStats(s: State, a: DAccount) {
+  const rows = (s.binaries ?? []).filter((b) => b.account_id === a.id);
+  const agg = (items: DBinary[]) => {
+    const won = items.filter((c) => c.status === "WON").length, lost = items.filter((c) => c.status === "LOST").length;
+    const settled = items.filter((c) => c.status !== "OPEN");
+    const staked = settled.reduce((t, c) => t + toUnits(c.stake), 0n), net = settled.reduce((t, c) => t + toUnits(c.pnl ?? "0"), 0n);
+    return { contracts: items.length, open: items.length - settled.length, won, lost, ties: items.filter((c) => c.status === "TIE").length,
+      void: items.filter((c) => c.status === "VOID").length, staked: fromUnits(staked), net_pnl: fromUnits(net),
+      win_rate: won + lost ? won / (won + lost) : null, return_on_stake: staked ? Number(net) / Number(staked) : null };
+  };
+  const group = (key: (b: DBinary) => string, sort?: (x: string, y: string) => number) => {
+    const m: Record<string, DBinary[]> = {};
+    for (const b of rows) (m[key(b)] ??= []).push(b);
+    return Object.fromEntries(Object.keys(m).sort(sort).map((k) => [k, agg(m[k]!)]));
+  };
+  const overall = agg(rows), cfg = binaryConfig(), wr = overall.win_rate;
+  return { account_id: a.id, currency: a.base_currency, ...cfg, ...overall,
+    expected_return_at_win_rate: wr == null ? null : wr * cfg.payout_rate - (1 - wr), edge_vs_break_even: wr == null ? null : wr - cfg.break_even_win_rate,
+    by_expiry: group((b) => String(b.expiry_seconds), (x, y) => +x - +y), by_symbol: group((b) => b.symbol), by_direction: group((b) => b.direction) };
+}
+
+async function openBinary(s: State, user: DUser, a: DAccount, body: Record<string, unknown>): Promise<{ b: DBinary; replay: boolean }> {
+  s.binaries ??= [];
+  const cid = body.client_id == null ? null : String(body.client_id);
+  if (cid != null && !/^[A-Za-z0-9_-]{8,64}$/.test(cid)) throw bad("client_id must be 8-64 characters of A-Z, 0-9, _ or -", "client_id");
+  if (cid) { const ex = s.binaries.find((x) => x.account_id === a.id && x.client_id === cid); if (ex) return { b: ex, replay: true }; }
+  const dir = body.direction, expiry = Number(body.expiry_seconds), stakeStr = String(body.stake ?? "");
+  if (dir !== "HIGHER" && dir !== "LOWER") throw bad("direction must be HIGHER or LOWER", "direction");
+  if (!/^\d+(\.\d{1,2})?$/.test(stakeStr) || +stakeStr <= 0) throw bad("stake must be positive with at most 2 decimals", "stake");
+  const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+  if (!BINARY_EXPIRIES.includes(expiry)) throw rule(`expiry_seconds must be one of [${BINARY_EXPIRIES.join(", ")}]`);
+  const i = findInst(String(body.symbol ?? ""));
+  const q = mkt.quote(i);
+  if (!q.tradable) throw rule("market is closed");
+  const nowMs = Date.now(), expMs = nowMs + expiry * 1000;
+  const sess = mkt.sessions(i.market as mkt.MarketKey, nowMs, expMs + 1000);
+  if (sess.length !== 1 || sess[0]![0] > nowMs || sess[0]![1] < expMs) throw rule("the market closes before this contract would expire; choose a shorter expiry");
+  processOpen(s);
+  const p = profile(s, a.id), pf = portfolio(s, a);
+  metrics(s, a, pf);
+  const stake = +stakeStr;
+  const recent = s.orders.filter((x) => x.account_id === a.id && x.source !== "protective" && nowMs - Date.parse(x.created_at) < 60_000).length
+    + s.binaries.filter((x) => x.account_id === a.id && nowMs - Date.parse(x.opened_at) < 60_000).length;
+  const checks = risk.evaluateBinary({ system_halt: s.systemHalt.halted ? (s.systemHalt.reason ?? "halted") : null, kill_switch: p.kill_switch ? (p.kill_reason ?? "engaged") : null,
+    daily_halted: dailyHalted(p), drawdown_halted: p.drawdown_halted, enabled: p.binary_enabled ?? true, equity: +pf.equity, stake, minimum_stake: MIN_ORDER_VALUE,
+    open_after: s.binaries.filter((x) => x.account_id === a.id && x.status === "OPEN").length + 1, orders_last_minute: recent }, p);
+  let reason = risk.firstFailure(checks);
+  if (!reason && stake > +pf.available_cash) {
+    reason = `insufficient cash: stake ${stake.toFixed(2)}, available ${(+pf.available_cash).toFixed(2)}`;
+    checks.push({ name: "cash", label: "Available cash", passed: false, value: (+pf.available_cash).toFixed(2), limit: stake.toFixed(2), message: reason });
+  }
+  const rate = checks.find((c) => c.name === "order_rate")!;
+  if (!rate.passed && !p.kill_switch) engageKill(s, a, p, rate.message, true);
+  const side = dir === "HIGHER" ? "CALL" : "PUT";
+  if (reason) {
+    s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: null, proposal_id: null, source: "binary", symbol: i.symbol, side, approved: false, reason, checks, created_at: now() });
+    await audit(s, user.id, "binary.open", { type: "trading_account", id: a.id, details: { symbol: i.symbol, direction: dir, stake: stakeStr, expiry_seconds: expiry, status: "REJECTED", reason: `risk: ${reason}` } });
+    save();
+    throw new HttpError(422, "risk_rejected", `risk: ${reason}`, { checks });
+  }
+  const S = Number(stake).toFixed(2);
+  post(s, a, "BINARY_OPEN", [["INVESTMENTS", "DEBIT", S], ["CASH", "CREDIT", S]], user.id, `Binary ${dir} ${i.symbol} ${expiry}s, stake ${S}`);
+  const b: DBinary = { id: uuid(), account_id: a.id, user_id: user.id, symbol: i.symbol, direction: dir, stake: S, currency: a.base_currency, payout_rate: BINARY_PAYOUT,
+    strike: String(+midOf(q).toFixed(i.price_decimals + 2)), expiry_seconds: expiry, opened_at: new Date(nowMs).toISOString(), expires_at: new Date(expMs).toISOString(),
+    status: "OPEN", settle_price: null, settle_price_at: null, settled_at: null, returned: null, pnl: null, void_reason: null, client_id: cid };
+  s.binaries.push(b);
+  s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: b.id, proposal_id: null, source: "binary", symbol: i.symbol, side, approved: true, reason: null, checks, created_at: now() });
+  snapshot(s, a, "binary");
+  await audit(s, user.id, "binary.open", { type: "binary_contract", id: b.id, details: { symbol: b.symbol, direction: dir, stake: S, expiry_seconds: expiry, strike: b.strike, status: "OPEN" } });
+  return { b, replay: false };
+}
+
+const binaryRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/binary\/config$/, (c) => { authUser(c); return json(200, { ...binaryConfig(), notice: BINARY_NOTICE }); }],
+  ["POST", /^\/binary\/contracts$/, async (c) => {
+    const { user } = authUser(c);
+    const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const { b, replay } = await openBinary(c.s, user, a, c.body);
+    return replay ? json(200, binaryRead(b), { "Idempotent-Replay": "true" }) : json(201, binaryRead(b));
+  }],
+  ["GET", /^\/binary\/contracts$/, (c) => {
+    const { user } = authUser(c); const ids = accountIds(c, user); processOpen(c.s); save();
+    const st = c.query.get("status");
+    return json(200, page(c, (c.s.binaries ?? []).filter((b) => ids.includes(b.account_id) && (!st || b.status === st.toUpperCase())).reverse().map(binaryRead)));
+  }],
+  ["GET", /^\/binary\/contracts\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c); processOpen(c.s); save();
+    const b = (c.s.binaries ?? []).find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!b) throw new HttpError(404, "not_found", "Binary contract not found");
+    return json(200, binaryRead(b));
+  }],
+  ["GET", /^\/binary\/stats$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? ""); processOpen(c.s); save();
+    return json(200, binaryStats(c.s, a));
+  }],
+];
 
 const tradingRoutes: [string, RegExp, Handler][] = [
   ["POST", /^\/trading\/orders$/, async (c) => {
@@ -831,12 +981,15 @@ const tradingRoutes: [string, RegExp, Handler][] = [
   ["PUT", /^\/risk\/accounts\/([\w-]+)\/limits$/, async (c) => {
     const { user, a } = ownedAccount(c, c.params[0]!);
     const p = profile(c.s, a.id);
-    const diff: Record<string, { from: number; to: number }> = {};
+    const diff: Record<string, { from: number | boolean; to: number | boolean }> = {};
+    if (typeof c.body.binary_enabled === "boolean" && c.body.binary_enabled !== (p.binary_enabled ?? true)) {
+      diff.binary_enabled = { from: p.binary_enabled ?? true, to: c.body.binary_enabled }; p.binary_enabled = c.body.binary_enabled;
+    }
     for (const k of Object.keys(risk.DEFAULTS) as (keyof risk.Limits)[]) {
       const v = c.body[k];
       if (v == null) continue;
       const n = Number(v);
-      if (!Number.isFinite(n) || n <= 0 || n > risk.CEILINGS[k] || ((k === "max_open_positions" || k === "max_orders_per_minute") && !Number.isInteger(n)))
+      if (!Number.isFinite(n) || n <= 0 || n > risk.CEILINGS[k] || ((k === "max_open_positions" || k === "max_orders_per_minute" || k === "binary_max_open") && !Number.isInteger(n)))
         throw bad(`${k} must be greater than 0 and at most ${risk.CEILINGS[k]}`, k);
       if (p[k] !== n) { diff[k] = { from: p[k], to: n }; p[k] = n; }
     }
@@ -1239,6 +1392,7 @@ const opsRoutes: [string, RegExp, Handler][] = [
 
 const routes: [string, RegExp, Handler][] = [
   ...tradingRoutes,
+  ...binaryRoutes,
   ...opsRoutes,
   ...analyticsRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],

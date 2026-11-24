@@ -47,6 +47,8 @@ class RiskProfile(Timestamps, Base):
         CheckConstraint("max_orders_per_minute BETWEEN 1 AND 60", name="velocity_range"),
         CheckConstraint("price_collar_pct > 0 AND price_collar_pct <= 20", name="collar_range"),
         CheckConstraint("autopilot_status IN ('STOPPED','RUNNING','PAUSED')", name="autopilot_valid"),
+        CheckConstraint("binary_max_stake_pct > 0 AND binary_max_stake_pct <= 5", name="binary_stake_range"),
+        CheckConstraint("binary_max_open BETWEEN 1 AND 10", name="binary_open_range"),
     )
 
     account_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trading_accounts.id", ondelete="CASCADE"),
@@ -60,6 +62,10 @@ class RiskProfile(Timestamps, Base):
     max_drawdown_pct: Mapped[float] = mapped_column(Float, nullable=False, default=10.0)
     max_orders_per_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     price_collar_pct: Mapped[float] = mapped_column(Float, nullable=False, default=5.0)
+    # binary options (paper): stake per contract as % of equity, concurrent contracts, on/off
+    binary_max_stake_pct: Mapped[float] = mapped_column(Float, nullable=False, default=2.0, server_default="2.0")
+    binary_max_open: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    binary_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     # kill switch and breakers
     kill_switch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     kill_reason: Mapped[str | None] = mapped_column(Text)
@@ -87,6 +93,7 @@ class RiskDecision(UUIDPk, Base):
                                                   nullable=False, index=True)
     order_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("orders.id", ondelete="RESTRICT"), index=True)
     proposal_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    binary_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)
     source: Mapped[str] = mapped_column(String(12), nullable=False)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(4), nullable=False)

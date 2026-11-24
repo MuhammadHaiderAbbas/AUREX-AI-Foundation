@@ -17,6 +17,9 @@ class RiskLimits(BaseModel):
     max_drawdown_pct: float
     max_orders_per_minute: int
     price_collar_pct: float
+    binary_max_stake_pct: float
+    binary_max_open: int
+    binary_enabled: bool = True
 
 
 class RiskLimitsUpdate(BaseModel):
@@ -28,6 +31,9 @@ class RiskLimitsUpdate(BaseModel):
     max_drawdown_pct: float | None = Field(default=None, gt=0, le=25)
     max_orders_per_minute: int | None = Field(default=None, ge=1, le=60)
     price_collar_pct: float | None = Field(default=None, gt=0, le=20)
+    binary_max_stake_pct: float | None = Field(default=None, gt=0, le=5)
+    binary_max_open: int | None = Field(default=None, ge=1, le=10)
+    binary_enabled: bool | None = None
 
 
 class RiskState(BaseModel):

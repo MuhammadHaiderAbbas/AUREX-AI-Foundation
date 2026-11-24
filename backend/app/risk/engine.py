@@ -18,11 +18,13 @@ CEILINGS = {
     "risk_per_trade_pct": 2.0, "max_position_pct": 50.0, "max_gross_exposure_pct": 100.0,
     "max_open_positions": 10, "daily_loss_limit_pct": 5.0, "max_drawdown_pct": 25.0,
     "max_orders_per_minute": 60, "price_collar_pct": 20.0,
+    "binary_max_stake_pct": 5.0, "binary_max_open": 10,
 }
 DEFAULTS = {
     "risk_per_trade_pct": 0.5, "max_position_pct": 20.0, "max_gross_exposure_pct": 50.0,
     "max_open_positions": 5, "daily_loss_limit_pct": 2.0, "max_drawdown_pct": 10.0,
     "max_orders_per_minute": 20, "price_collar_pct": 5.0,
+    "binary_max_stake_pct": 2.0, "binary_max_open": 3,
 }
 
 
@@ -36,6 +38,8 @@ class Limits:
     max_drawdown_pct: float
     max_orders_per_minute: int
     price_collar_pct: float
+    binary_max_stake_pct: float = DEFAULTS["binary_max_stake_pct"]
+    binary_max_open: int = DEFAULTS["binary_max_open"]
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,53 @@ def evaluate(p: PreTrade, lim: Limits) -> list[Check]:
         f"{lim.max_gross_exposure_pct:g}%", f"gross exposure would be {ep:.1f}% of equity (limit {lim.max_gross_exposure_pct:g}%)")
     add("open_positions", "Open positions", p.open_positions_after <= lim.max_open_positions,
         str(p.open_positions_after), str(lim.max_open_positions), f"maximum of {lim.max_open_positions} open positions reached")
+    return checks
+
+
+@dataclass(frozen=True)
+class BinaryPreTrade:
+    system_halt: str | None
+    kill_switch: str | None
+    daily_halted: bool
+    drawdown_halted: bool
+    enabled: bool                    # binary trading switched on for this account
+    equity: Decimal                  # account currency
+    stake: Decimal                   # account currency; the whole stake is the maximum loss
+    minimum_stake: Decimal
+    open_after: int                  # open binary contracts including this one
+    orders_last_minute: int          # orders and binary contracts in the last 60 s
+
+
+def evaluate_binary(p: BinaryPreTrade, lim: Limits) -> list[Check]:
+    """Binary contracts only ever add risk (the stake is lost in full on a miss), so no exemptions."""
+    checks: list[Check] = []
+
+    def add(name: str, label: str, ok: bool, value: str, limit: str, message: str) -> None:
+        checks.append(Check(name, label, ok, value, limit, "" if ok else message))
+
+    add("binary_enabled", "Binary trading enabled", p.enabled, "on" if p.enabled else "off", "on",
+        "binary trading is switched off for this account (Risk Centre)")
+    add("system_halt", "Platform trading halt", p.system_halt is None, "halted" if p.system_halt else "trading", "trading",
+        f"platform trading is halted: {p.system_halt}")
+    add("kill_switch", "Account kill switch", p.kill_switch is None, "engaged" if p.kill_switch else "off", "off",
+        f"account kill switch is engaged: {p.kill_switch}")
+    add("daily_loss", "Daily loss breaker", not p.daily_halted, "tripped" if p.daily_halted else "ok",
+        f"{lim.daily_loss_limit_pct:g}% of day-start equity",
+        f"daily loss limit of {lim.daily_loss_limit_pct:g}% reached; new exposure is blocked until 00:00 UTC")
+    add("drawdown", "Drawdown breaker", not p.drawdown_halted, "tripped" if p.drawdown_halted else "ok",
+        f"{lim.max_drawdown_pct:g}% from peak",
+        f"maximum drawdown of {lim.max_drawdown_pct:g}% reached; new exposure is blocked until the breaker is reset")
+    n = p.orders_last_minute + 1
+    add("order_rate", "Order rate", n <= lim.max_orders_per_minute, f"{n} in 60s", f"{lim.max_orders_per_minute} per minute",
+        f"abnormal activity: {n} orders in 60 seconds (limit {lim.max_orders_per_minute})")
+    add("minimum_stake", "Minimum stake", p.stake >= p.minimum_stake, f"{p.stake:,.2f}", f"{p.minimum_stake:,.2f}",
+        f"stake {p.stake:,.2f} is below the minimum of {p.minimum_stake:,.2f}")
+    sp = _pct(p.stake, p.equity)
+    add("binary_stake", "Stake (maximum loss)", sp <= lim.binary_max_stake_pct + 1e-9, f"{sp:.2f}% of equity",
+        f"{lim.binary_max_stake_pct:g}%",
+        f"stake is {sp:.2f}% of equity (binary limit {lim.binary_max_stake_pct:g}%); the whole stake is lost on a miss")
+    add("binary_open", "Open binary contracts", p.open_after <= lim.binary_max_open, str(p.open_after),
+        str(lim.binary_max_open), f"maximum of {lim.binary_max_open} open binary contracts reached")
     return checks
 
 

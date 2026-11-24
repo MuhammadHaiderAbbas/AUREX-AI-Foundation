@@ -10,7 +10,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   await page.goto("login");
   await expect(page.getByText("Public demo.")).toBeVisible();
-  await page.getByRole("button", { name: "Launch demo" }).click();
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Demo Trader" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Demo paper account" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();
@@ -97,6 +97,14 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await tradeFlow(page);
   await riskFlow(page);
   await analyticsFlow(page);
+
+  // A £100 GBP account alongside the $100k demo account, then paper binary options on it
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.getByLabel("Account name").fill("Small paper");
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("link", { name: "Small paper" })).toBeVisible();
+  await binaryFlow(page, "Small paper · GBP");
   // Platform kill switch (demo user is the administrator)
   await page.getByRole("link", { name: "Administration" }).click();
   await page.getByLabel("Halt reason").fill("demo drill");
@@ -107,7 +115,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Two-factor authentication in the browser (Launch demo then asks for a code)
   await mfaFlow(page, "Demo-Account-2026!", async () => {
-    await page.getByRole("button", { name: "Launch demo" }).click();
+    await page.getByRole("button", { name: "Launch demo", exact: true }).click();
   });
 
   // Deep link + reload survives (SPA fallback + persisted session)
@@ -280,4 +288,35 @@ async function mfaFlow(page: import("@playwright/test").Page, password: string, 
   await page.getByLabel("Authentication code").fill(totpCode(secret, Math.floor(Date.now() / 30_000) + 1));
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
+}
+
+// Shared with the static demo spec (kept in sync manually).
+async function binaryFlow(page: import("@playwright/test").Page, account?: string) {
+  await page.getByRole("link", { name: "Binary Options", exact: true }).click();
+  if (account) await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
+  await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
+  await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
+  await page.getByLabel("Instrument").selectOption("BTC-USD");
+  await expect(page.getByTestId("binary-price")).toContainText("Market open");
+  // 2.50 is 2.5% of £100: above the 2% binary stake cap
+  await page.getByLabel("Stake (GBP)").fill("2.50");
+  await page.getByRole("button", { name: "Open Higher contract" }).click();
+  await expect(page.getByText(/binary limit 2%/).first()).toBeVisible();
+  await expect(page.getByTestId("risk-checks")).toContainText("Stake (maximum loss)");
+  await page.getByLabel("Stake (GBP)").fill("1.00");
+  await page.getByRole("button", { name: "Lower", exact: true }).click();
+  await page.getByRole("button", { name: "Open Lower contract" }).click();
+  await expect(page.getByRole("status")).toContainText("Opened LOWER BTC-USD");
+  await expect(page.getByTestId("binary-open-row")).toHaveCount(1);
+  await expect(page.getByTestId("binary-stats")).toContainText("£1.00");          // at risk now
+  // Switch binaries off in the Risk Centre; new contracts are then refused
+  const acct = new URL(page.url()).searchParams.get("account");
+  await page.goto(`risk?account=${acct}`);
+  await page.getByLabel("Allow binary options").click();
+  await expect(page.getByLabel("Allow binary options")).not.toBeChecked();
+  await page.goto(`binary?account=${acct}`);
+  await page.getByRole("button", { name: "Open Higher contract" }).click();
+  await expect(page.getByText(/binary trading is switched off/).first()).toBeVisible();
+  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
 }

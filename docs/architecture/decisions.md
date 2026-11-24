@@ -263,3 +263,26 @@ hard-disabled in code even when every gate is met.
 **Why.** Moving real money is a different risk class. It should take a deliberate, reviewed code
 change made after the gates are green, not a configuration flag that could be flipped by
 accident or by an attacker.
+
+## ADR-036 Small accounts: fractional lots and a minimum order value
+**Decision.** Stocks and ETFs trade in 0.0001-share lots and FX in 1-unit lots (migration 0012),
+so a £100 account can hold real positions within the 20% position cap. Entry orders below
+`AUREX_MIN_ORDER_VALUE` (default 1 in the account currency) are rejected with a reason; exits
+are never blocked by it. The account dialog defaults to £100 GBP with presets up to $100,000.
+**Why.** Whole shares and 1,000-unit FX lots made a small account unusable without leverage,
+which Stage 1 does not allow. The minimum stops dust orders whose fees and rounding dominate.
+
+## ADR-037 Binary options as a paper-only simulator with the house edge on show
+**Decision.** Fixed-payout HIGHER/LOWER contracts (default 80% payout; expiries 1 minute to 1
+day) are simulated on live mid prices. The stake is posted to INVESTMENTS on open and settled
+through REALISED_PNL, so the ledger, equity, breakers and analytics see binaries like any other
+exposure. Every contract passes a binary risk gate (halts, kill switch, breakers, order rate,
+stake ≤ 2% of equity by default and ≤ 5% ever, at most 3 open, a per-account off switch).
+Settlement uses the first fresh quote at or after expiry; with no usable price for 10 minutes
+the contract is voided and refunded. There is no autopilot or AI execution for binaries.
+**Why.** The user asked for binary trading. Binary options are banned for retail customers in
+the UK (FCA, April 2019) and restricted across the EU/EEA because the payout below even money
+gives the seller a structural edge: at 80% you must win 55.6% just to break even. A simulator
+that shows the break-even rate and the observed edge before and after every contract is useful
+for learning that lesson; a real-money version would not be lawful to offer here, and is not
+built.
