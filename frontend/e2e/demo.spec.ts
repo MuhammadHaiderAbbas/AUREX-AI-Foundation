@@ -14,6 +14,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await expect(page.getByRole("heading", { name: "Demo Trader" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Demo paper account" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();
+  await expect(page.getByTestId("live-status")).toContainText(/Live · polling/i);
 
   // Markets: synthetic data clearly labelled, chart renders, indicators toggle
   await page.getByRole("link", { name: "Markets", exact: true }).click();
@@ -296,6 +297,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   if (account) await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
   await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
   await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
+  await expect(page.getByTestId("live-tick-chart")).toBeVisible();
   await page.getByLabel("Instrument").selectOption("BTC-USD");
   await expect(page.getByTestId("binary-price")).toContainText("Market open");
   // 2.50 is 2.5% of £100: above the 2% binary stake cap

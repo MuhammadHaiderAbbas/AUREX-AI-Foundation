@@ -25,6 +25,9 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Alpha paper" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();
+  // Live account stream (WebSocket) is connected and the equity chart is fed by it
+  await expect(page.getByTestId("live-status")).toHaveText(/^\s*Live\s*$/i);
+  await expect(page.getByTestId("portfolio-chart")).toBeVisible({ timeout: 15_000 });
 
   // Wallet: deposit then attempt an overdraw
   await page.getByRole("link", { name: "Wallet", exact: true }).click();
@@ -392,6 +395,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   if (account) await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
   await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
   await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
+  await expect(page.getByTestId("live-tick-chart")).toBeVisible();
   await page.getByLabel("Instrument").selectOption("BTC-USD");
   await expect(page.getByTestId("binary-price")).toContainText("Market open");
   // 2.50 is 2.5% of £100: above the 2% binary stake cap

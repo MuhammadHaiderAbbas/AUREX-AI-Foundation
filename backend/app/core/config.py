@@ -97,7 +97,10 @@ class Settings(BaseSettings):
     coinbase_base_url: str = "https://api.exchange.coinbase.com"
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     quote_cache_seconds: float = 1.0
-    stream_interval_seconds: float = 2.0
+    stream_interval_seconds: float = 1.0
+    # Live account stream: change detection every N seconds, mark-to-market valuation every M seconds.
+    account_stream_interval_seconds: float = 1.0
+    account_valuation_interval_seconds: float = 2.0
     max_stream_symbols: int = 50
 
     # Research engine (Phase 4). "extractive" is offline and deterministic; "claude" uses the
@@ -119,7 +122,7 @@ class Settings(BaseSettings):
     binary_void_after_seconds: int = 600
 
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
-    order_matcher_interval_seconds: float = 5.0
+    order_matcher_interval_seconds: float = 1.0
     # Autopilot: minimum seconds between cycles for an account whose autopilot is RUNNING.
     autopilot_interval_seconds: float = 900.0
 

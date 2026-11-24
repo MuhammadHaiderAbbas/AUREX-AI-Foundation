@@ -79,6 +79,7 @@ export function MarketsPage() {
   const selected = all.find((r) => r.instrument.slug === selectedSlug) ?? all[0];
   const candles = useCandles(selected?.instrument.slug, timeframe, indicators);
   const sq = selected ? quoteOf(selected) : null;
+  const liveTick = useMemo(() => (sq && sq.market_open ? { price: Number(sq.last), at: sq.as_of } : null), [sq?.last, sq?.as_of, sq?.market_open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (overview.isLoading) return <Spinner className="mx-auto mt-16" />;
   return (
@@ -191,7 +192,7 @@ export function MarketsPage() {
             </div>
             <div className="px-2 pb-3">
               {candles.data && candles.data.candles.length > 0 ? (
-                <PriceChart data={candles.data} decimals={selected.instrument.price_decimals} />
+                <PriceChart data={candles.data} decimals={selected.instrument.price_decimals} live={liveTick} />
               ) : candles.isLoading ? <div className="flex h-[420px] items-center justify-center"><Spinner /></div> : (
                 <EmptyState title="No candles for this timeframe" />
               )}

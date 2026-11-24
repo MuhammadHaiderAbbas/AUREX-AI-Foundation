@@ -286,3 +286,18 @@ gives the seller a structural edge: at 80% you must win 55.6% just to break even
 that shows the break-even rate and the observed edge before and after every contract is useful
 for learning that lesson; a real-money version would not be lawful to offer here, and is not
 built.
+
+## ADR-038 Live account stream from database fingerprints
+**Decision.** `/api/v1/stream/account` is a WebSocket (same in-band token auth as the quote
+stream). Every second it compares, per owned account, a cheap fingerprint (row counts and
+latest update times of orders, executions, ledger transactions, positions, binary contracts and
+risk state) and pushes the topics that changed; every two seconds it pushes a mark-to-market
+valuation. The browser invalidates exactly the affected queries, merges valuations into the
+cached portfolio, appends them to the equity chart, and ticks the last candle of the price chart
+from the quote stream. The order matcher and quote stream now run every second. Without a
+socket (and in the static demo) the client polls every two seconds.
+**Why.** Fills, settlements and breaker trips happen in the background worker, possibly on
+another replica. Fingerprints see them with no pub/sub infrastructure and cannot miss an event
+the way a dropped message can; the cost is one small indexed query per connected user per
+second. Model Lab and backtest charts stay as they are: they show the results of finished runs,
+not live state.

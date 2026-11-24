@@ -10,7 +10,9 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
 import { useLiveQuotes, useWatchlist } from "@/features/markets/hooks";
-import { usePortfolio } from "@/features/trading/hooks";
+import { PortfolioChart } from "@/charts/PortfolioChart";
+import { useLiveEquity } from "@/features/live/stream";
+import { usePortfolio, usePortfolioHistory } from "@/features/trading/hooks";
 import { useRiskOverview } from "@/features/risk/hooks";
 import { Change, QuoteState, SourceBadge } from "@/pages/MarketsPage";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -63,6 +65,8 @@ export function OverviewPage() {
   const primary = totals[0];
   const portfolio = usePortfolio(list[0]?.id);
   const pf = portfolio.data;
+  const history = usePortfolioHistory(list[0]?.id);
+  const liveEquity = useLiveEquity(list[0]?.id);
   const risk = useRiskOverview(list[0]?.id).data;
   const pnl = pf ? Number(pf.unrealised_pnl) + Number(pf.realised_pnl) : 0;
 
@@ -94,6 +98,15 @@ export function OverviewPage() {
         <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone={risk?.autopilot.status === "RUNNING" ? "positive" : "accent"} /> {risk?.autopilot.status === "RUNNING" ? "Autopilot on" : "Advisory"}</span>}
           sub={risk?.autopilot.status === "RUNNING" ? `${risk.autopilot.symbols.join(", ")} · via risk gate` : "Proposals go through the risk gate"} />
       </div>
+
+      {pf && (history.data?.length ?? 0) + liveEquity.length >= 2 && (
+        <Card>
+          <CardHeader title={`Live equity · ${pf.account_name}`}
+            description={`${formatMoney(pf.equity, pf.currency)} marked to market on live prices, updated every 2 seconds`}
+            action={<Link to={`/portfolio?account=${pf.account_id}`} className="text-xs text-accent hover:underline">Portfolio</Link>} />
+          <div className="px-2 pb-3"><PortfolioChart snapshots={history.data ?? []} live={liveEquity} height={180} /></div>
+        </Card>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <Card>

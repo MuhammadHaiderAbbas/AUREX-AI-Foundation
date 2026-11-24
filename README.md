@@ -6,6 +6,8 @@ Autonomous multi-market research and **paper-trading** platform covering crypto,
 > and live trading is disabled in both the code and the database.
 
 **Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/ (click **Launch demo**).
+**Video walkthrough:** see [docs/video/walkthrough.md](docs/video/walkthrough.md) for the scene-by-scene
+script; `frontend/scripts/record-walkthrough.cjs` records a fresh captioned video of the demo.
 The demo is a static build that runs entirely in your browser with simulated data
 (see ADR-008). The real system runs the FastAPI backend below.
 
@@ -67,6 +69,10 @@ Delivered so far:
     double-entry ledger, a dedicated risk gate, automatic settlement, and win-rate statistics
     against the break-even rate. Binary options are banned for UK retail customers (FCA); this
     is a paper simulator only.
+- **Live everywhere:** a WebSocket account stream pushes fills, orders, ledger, position,
+  binary and risk changes the moment they happen, plus a mark-to-market valuation every two
+  seconds. Price candles tick with each quote, the equity chart grows live, and the Binary page
+  has a live price chart with your strikes drawn on it. A Live badge shows the connection.
 
 ## Quick start (Docker)
 
