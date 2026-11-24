@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { useSystemInfo } from "@/features/accounts/hooks";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useAccountStream, useLiveMode } from "@/features/live/stream";
 import { useSystemHalt } from "@/features/risk/hooks";
 import { isDemo } from "@/services/api";
 import { cn } from "@/lib/utils";
@@ -51,8 +52,22 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function LiveBadge() {
+  const { mode } = useLiveMode();
+  const label = mode === "live" ? "Live" : mode === "polling" ? "Live · polling" : mode === "connecting" ? "Connecting" : "Offline";
+  const tone = mode === "live" || mode === "polling" ? "positive" : mode === "connecting" ? "warning" : "neutral";
+  return (
+    <Badge tone={tone} data-testid="live-status" title={mode === "live" ? "Trades, fills, balances and valuations stream over a WebSocket"
+      : mode === "polling" ? "Refreshing every 2 seconds" : "Live updates are not connected"}>
+      <StatusDot tone={tone} /> <span className={cn(mode === "live" && "animate-pulse")}>{label}</span>
+    </Badge>
+  );
+}
+
 export function AppShell() {
   const halt = useSystemHalt();
+  const auth = useAuth();
+  useAccountStream(!!auth.user);
   const { user, logout } = useAuth();
   const info = useSystemInfo();
   const [open, setOpen] = useState(false);
@@ -92,6 +107,7 @@ export function AppShell() {
             <h1 className="truncate text-sm font-semibold">{current?.label ?? "AUREX AI"}</h1>
             <p className="hidden truncate text-xs text-muted sm:block">{current?.description}</p>
           </div>
+          <LiveBadge />
           {isDemo && <Badge tone="info" title="Static demo: runs entirely in your browser with simulated data">Demo</Badge>}
           <Badge tone="accent" title="Virtual capital only. No real money is traded.">
             <StatusDot tone="accent" /> Paper mode

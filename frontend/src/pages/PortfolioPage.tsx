@@ -11,12 +11,13 @@ import { Stat } from "@/components/ui/stat";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { OrderTicket } from "@/features/trading/OrderTicket";
+import { useLiveEquity } from "@/features/live/stream";
 import { useClosedPositions, usePortfolio, usePortfolioHistory } from "@/features/trading/hooks";
 import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
 import type { Position } from "@/services/api";
 
-const CLASS_LABEL: Record<string, string> = { CRYPTO: "Crypto", FX: "Forex", STOCK: "Stocks", ETF: "ETFs" };
+const CLASS_LABEL: Record<string, string> = { CRYPTO: "Crypto", FX: "Forex", STOCK: "Stocks", ETF: "ETFs", BINARY: "Binary options (at stake)", CASH: "Cash" };
 const tone = (v: string | number) => (Number(v) > 0 ? "positive" : Number(v) < 0 ? "negative" : "muted") as "positive" | "negative" | "muted";
 const signed = (v: string, ccy: string) => `${Number(v) > 0 ? "+" : ""}${formatMoney(v, ccy)}`;
 
@@ -25,6 +26,7 @@ export function PortfolioPage() {
   const summary = usePortfolio(account?.id);
   const history = usePortfolioHistory(account?.id);
   const closed = useClosedPositions(account?.id);
+  const liveEquity = useLiveEquity(account?.id);
   const [ticket, setTicket] = useState<{ symbol: string; side: "BUY" | "SELL"; quantity: string } | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -87,7 +89,7 @@ export function PortfolioPage() {
           <CardBody className="space-y-3">
             {s && [...Object.entries(s.allocation), ["CASH", Number(s.equity) ? Number(s.cash) / Number(s.equity) : 1] as [string, number]].map(([k, v]) => (
               <div key={k}>
-                <div className="flex justify-between text-xs"><span>{CLASS_LABEL[k] ?? "Cash"}</span><span className="num">{(v * 100).toFixed(1)}%</span></div>
+                <div className="flex justify-between text-xs"><span>{CLASS_LABEL[k] ?? k}</span><span className="num">{(v * 100).toFixed(1)}%</span></div>
                 <div className="mt-1 h-1.5 rounded bg-surface-3"><div className={cn("h-full rounded", k === "CASH" ? "bg-subtle" : "bg-accent")} style={{ width: `${Math.max(0, Math.min(100, v * 100))}%` }} /></div>
               </div>
             ))}
@@ -96,9 +98,11 @@ export function PortfolioPage() {
       </div>
 
       <Card>
-        <CardHeader title="Equity history" description="Snapshot on every fill, plus hourly while you use the platform" />
+        <CardHeader title="Equity" description="Snapshots on every fill and hourly, then live mark-to-market every 2 seconds" />
         <div className="px-2 pb-3">
-          {(history.data?.length ?? 0) >= 2 ? <PortfolioChart snapshots={history.data!} /> : <EmptyState title="Not enough history yet">The curve appears after your first trades.</EmptyState>}
+          {(history.data?.length ?? 0) + liveEquity.length >= 2
+            ? <PortfolioChart snapshots={history.data ?? []} live={liveEquity} />
+            : <EmptyState title="Waiting for live valuations">The curve starts within a few seconds.</EmptyState>}
         </div>
       </Card>
 

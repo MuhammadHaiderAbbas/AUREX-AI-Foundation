@@ -9,7 +9,8 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { Stat } from "@/components/ui/stat";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { useBinaryConfig, useBinaryContracts, useBinaryStats, useOpenBinary } from "@/features/binary/hooks";
-import { useMarketOverview } from "@/features/markets/hooks";
+import { LiveTickChart } from "@/charts/LiveTickChart";
+import { useCandles, useMarketOverview } from "@/features/markets/hooks";
 import { usePortfolio } from "@/features/trading/hooks";
 import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
@@ -69,13 +70,16 @@ export function BinaryPage() {
   const now = useNow(openItems.length > 0);
 
   const quote = useQuery({
-    queryKey: ["instrument", symbol], refetchInterval: 2000,
+    queryKey: ["instrument", symbol], refetchInterval: 1000,
     queryFn: () => api<InstrumentWithQuote>(`/markets/instruments/${encodeURIComponent(slug(symbol))}`),
   });
   const symbols = useMemo(() => Object.values(overview.data?.groups ?? {}).flat(), [overview.data]);
   const prices = useMemo(() => Object.fromEntries(symbols.map((s) => [s.instrument.symbol, s.quote])), [symbols]);
   const q = quote.data?.quote, inst = quote.data?.instrument;
   const mid = q ? (Number(q.bid) + Number(q.ask)) / 2 : null;
+  const minute = useCandles(slug(symbol), "1m", []);
+  const seed = useMemo(() => (minute.data?.candles ?? []).slice(-90).map((c) => ({ t: Math.floor(Date.parse(c.open_time) / 1000) + 59, v: Number(c.close) })), [minute.data]);
+  const tick = useMemo(() => (q && mid != null ? { t: Math.floor(Date.parse(q.as_of) / 1000), v: mid } : null), [q?.as_of, mid]); // eslint-disable-line react-hooks/exhaustive-deps
   const ccy = account?.base_currency ?? "GBP";
   const payout = cfg.data?.payout_rate ?? 0.8;
   const breakEven = cfg.data?.break_even_win_rate ?? 1 / (1 + payout);
@@ -154,6 +158,15 @@ export function BinaryPage() {
         </Card>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader title={`${symbol} · live`} description="Mid price, one point per streamed quote. Dashed lines are your open strikes." />
+            <div className="px-2 pb-3">
+              {seed.length > 0
+                ? <LiveTickChart symbol={symbol} seed={seed} tick={tick} decimals={(inst?.price_decimals ?? 2) + 1}
+                    strikes={openItems.filter((c) => c.symbol === symbol).map((c) => ({ id: c.id, price: Number(c.strike), direction: c.direction }))} />
+                : <div className="flex h-[220px] items-center justify-center"><Spinner /></div>}
+            </div>
+          </Card>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="binary-stats">
             <Stat label="Win rate" value={pct(stats.data?.win_rate)} sub={`break-even ${pct(breakEven)}`}
               tone={stats.data?.win_rate == null ? "muted" : stats.data.win_rate >= breakEven ? "positive" : "negative"} />

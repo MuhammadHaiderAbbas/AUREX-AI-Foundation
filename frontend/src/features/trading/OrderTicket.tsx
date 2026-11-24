@@ -22,7 +22,7 @@ export function OrderTicket({ open, onClose, symbol, side: initialSide = "BUY", 
   const accounts = useAccounts();
   const place = usePlaceOrder();
   const inst = useQuery({
-    queryKey: ["instrument", symbol], enabled: open && !!symbol, refetchInterval: open ? 5000 : false,
+    queryKey: ["instrument", symbol], enabled: open && !!symbol, refetchInterval: open ? 2000 : false,
     queryFn: () => api<InstrumentWithQuote>(`/markets/instruments/${encodeURIComponent(slug(symbol))}`),
   });
   const [account, setAccount] = useState(accountId ?? "");

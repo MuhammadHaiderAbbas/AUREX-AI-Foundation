@@ -55,7 +55,7 @@ export function useLiveQuotes(symbols: string[]): { quotes: Record<string, Quote
         setQuotes((prev) => ({ ...prev, ...next }));
       };
       run();
-      pollTimer = setInterval(run, 5000);
+      pollTimer = setInterval(run, 2000);
     };
 
     if (isDemo || typeof WebSocket === "undefined") {
