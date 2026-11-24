@@ -429,7 +429,7 @@ export interface ClosedPosition { id: string; symbol: string; avg_price: string;
 export interface PortfolioSummary {
   account_id: string; account_name: string; currency: string; cash: string; available_cash: string;
   investments_at_cost: string; market_value: string; equity: string; unrealised_pnl: string; realised_pnl: string;
-  fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[];
+  fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[]; binary_at_risk?: string;
 }
 export interface PortfolioSnapshot { taken_at: string; cash: string; market_value: string; equity: string; reason: string }
 
@@ -437,6 +437,7 @@ export interface PortfolioSnapshot { taken_at: string; cash: string; market_valu
 export interface RiskLimits {
   risk_per_trade_pct: number; max_position_pct: number; max_gross_exposure_pct: number; max_open_positions: number;
   daily_loss_limit_pct: number; max_drawdown_pct: number; max_orders_per_minute: number; price_collar_pct: number;
+  binary_max_stake_pct: number; binary_max_open: number; binary_enabled?: boolean;
 }
 export interface SystemHalt { halted: boolean; reason: string | null; since: string | null }
 export type AutopilotState = "STOPPED" | "RUNNING" | "PAUSED";
@@ -525,3 +526,25 @@ export interface OpsStatus {
   users: { total: number; admins: number };
 }
 export interface IntegrityResult { ok: boolean; checks: { name: string; ok: boolean; detail: string }[] }
+
+// --- binary options (paper) -----------------------------------------------------------------
+export type BinaryDirection = "HIGHER" | "LOWER";
+export type BinaryStatus = "OPEN" | "WON" | "LOST" | "TIE" | "VOID";
+export interface BinaryConfig {
+  payout_rate: number; expiries: number[]; break_even_win_rate: number; coin_flip_expected_return: number;
+  minimum_stake: string; void_after_seconds: number; notice: string;
+}
+export interface BinaryContract {
+  id: string; account_id: string; symbol: string; direction: BinaryDirection; stake: string; currency: string;
+  payout_rate: number; potential_return: string; strike: string; expiry_seconds: number; opened_at: string; expires_at: string;
+  status: BinaryStatus; settle_price: string | null; settle_price_at: string | null; settled_at: string | null;
+  returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null;
+}
+export interface BinaryGroupStats {
+  contracts: number; open: number; won: number; lost: number; ties: number; void: number; staked: string; net_pnl: string;
+  win_rate: number | null; return_on_stake: number | null;
+}
+export interface BinaryStats extends BinaryGroupStats, Omit<BinaryConfig, "notice"> {
+  account_id: string; currency: string; expected_return_at_win_rate: number | null; edge_vs_break_even: number | null;
+  by_expiry: Record<string, BinaryGroupStats>; by_symbol: Record<string, BinaryGroupStats>; by_direction: Record<string, BinaryGroupStats>;
+}

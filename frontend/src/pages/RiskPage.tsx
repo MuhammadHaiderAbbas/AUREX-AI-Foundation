@@ -14,7 +14,8 @@ import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 import type { RiskCheck, RiskLimits, RiskOverview } from "@/services/api";
 
-const LIMIT_META: { key: keyof RiskLimits; label: string; unit: string }[] = [
+type NumericLimit = Exclude<keyof RiskLimits, "binary_enabled">;
+const LIMIT_META: { key: NumericLimit; label: string; unit: string }[] = [
   { key: "risk_per_trade_pct", label: "Risk per trade", unit: "% equity" },
   { key: "max_position_pct", label: "Max position size", unit: "% equity" },
   { key: "max_gross_exposure_pct", label: "Max gross exposure", unit: "% equity" },
@@ -23,6 +24,8 @@ const LIMIT_META: { key: keyof RiskLimits; label: string; unit: string }[] = [
   { key: "max_drawdown_pct", label: "Max drawdown", unit: "% from peak" },
   { key: "max_orders_per_minute", label: "Max order rate", unit: "per minute" },
   { key: "price_collar_pct", label: "Price collar", unit: "% through market" },
+  { key: "binary_max_stake_pct", label: "Binary stake cap", unit: "% equity per contract" },
+  { key: "binary_max_open", label: "Max open binaries", unit: "contracts" },
 ];
 
 function Meter({ label, value, limit, display, testid }: { label: string; value: number; limit: number; display: string; testid: string }) {
@@ -101,6 +104,13 @@ function LimitsForm({ ov }: { ov: RiskOverview }) {
               </Field>
             ))}
           </div>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+            <span><span className="font-medium">Binary options</span>
+              <span className="block text-xs text-muted">Paper HIGHER/LOWER contracts. The whole stake is lost on a miss.</span></span>
+            <input type="checkbox" className="size-4 accent-[var(--color-accent)]" aria-label="Allow binary options"
+              checked={ov.limits.binary_enabled ?? true} disabled={update.isPending}
+              onChange={(e) => update.mutate({ binary_enabled: e.target.checked })} />
+          </label>
           <div className="flex items-center gap-3">
             <Button type="submit" size="sm" disabled={update.isPending || Object.keys(draft).length === 0}>Save limits</Button>
             {saved && <span className="flex items-center gap-1 text-xs text-positive"><CheckCircle2 className="size-3.5" />Saved</span>}

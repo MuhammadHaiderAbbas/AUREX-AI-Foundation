@@ -18,8 +18,9 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await expect(page.getByText("Paper mode")).toBeVisible();
   await expect(page.getByText("No paper accounts yet")).toBeVisible();
 
-  // Create a paper account with the default virtual balance
+  // Create a paper account with the $100,000 preset (the default is £100)
   await page.getByRole("button", { name: "New paper account" }).click();
+  await page.locator("dialog").getByRole("button", { name: "$100,000" }).click();
   await page.getByLabel("Account name").fill("Alpha paper");
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Alpha paper" })).toBeVisible();
@@ -149,6 +150,7 @@ test("agent desk: run analysis, explained decision, evidence", async ({ page }) 
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("button", { name: "New paper account" }).click();
+  await page.locator("dialog").getByRole("button", { name: "$100,000" }).click();
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Main paper account" })).toBeVisible();
 
@@ -220,6 +222,7 @@ test("paper execution: market buy, limit order, cancel, close position, history"
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Paper Trader" })).toBeVisible();
   await page.getByRole("button", { name: "New paper account" }).click();
+  await page.locator("dialog").getByRole("button", { name: "$100,000" }).click();
   await page.getByLabel("Account name").fill("Trading paper");
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Trading paper" })).toBeVisible();
@@ -285,6 +288,7 @@ test("risk engine: limits, rejection with checks, brackets, kill switch, autopil
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Risk Manager" })).toBeVisible();
   await page.getByRole("button", { name: "New paper account" }).click();
+  await page.locator("dialog").getByRole("button", { name: "$100,000" }).click();
   await page.getByLabel("Account name").fill("Risk paper");
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Risk paper" })).toBeVisible();
@@ -365,6 +369,52 @@ async function analyticsFlow(page: import("@playwright/test").Page) {
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Round trips (CSV)" }).click();
   expect((await download).suggestedFilename()).toMatch(/^aurex-trades-all-\d{8}\.csv$/);
+}
+
+test("£100 account and paper binary options: disclosure, risk gate, open contract, switch off", async ({ page }) => {
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Small Saver");
+  await page.getByLabel("Email").fill(`e2e-binary-${Date.now()}@example.com`);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Small Saver" })).toBeVisible();
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.getByLabel("Account name").fill("Hundred pounds");
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();   // default preset: £100 GBP
+  await expect(page.getByRole("link", { name: "Hundred pounds" })).toBeVisible();
+  await expect(page.getByText("£100.00").first()).toBeVisible();
+  await binaryFlow(page);
+});
+
+// Shared with the static demo spec (kept in sync manually).
+async function binaryFlow(page: import("@playwright/test").Page, account?: string) {
+  await page.getByRole("link", { name: "Binary Options", exact: true }).click();
+  if (account) await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
+  await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
+  await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
+  await page.getByLabel("Instrument").selectOption("BTC-USD");
+  await expect(page.getByTestId("binary-price")).toContainText("Market open");
+  // 2.50 is 2.5% of £100: above the 2% binary stake cap
+  await page.getByLabel("Stake (GBP)").fill("2.50");
+  await page.getByRole("button", { name: "Open Higher contract" }).click();
+  await expect(page.getByText(/binary limit 2%/).first()).toBeVisible();
+  await expect(page.getByTestId("risk-checks")).toContainText("Stake (maximum loss)");
+  await page.getByLabel("Stake (GBP)").fill("1.00");
+  await page.getByRole("button", { name: "Lower", exact: true }).click();
+  await page.getByRole("button", { name: "Open Lower contract" }).click();
+  await expect(page.getByRole("status")).toContainText("Opened LOWER BTC-USD");
+  await expect(page.getByTestId("binary-open-row")).toHaveCount(1);
+  await expect(page.getByTestId("binary-stats")).toContainText("£1.00");          // at risk now
+  // Switch binaries off in the Risk Centre; new contracts are then refused
+  const acct = new URL(page.url()).searchParams.get("account");
+  await page.goto(`risk?account=${acct}`);
+  await page.getByLabel("Allow binary options").click();
+  await expect(page.getByLabel("Allow binary options")).not.toBeChecked();
+  await page.goto(`binary?account=${acct}`);
+  await page.getByRole("button", { name: "Open Higher contract" }).click();
+  await expect(page.getByText(/binary trading is switched off/).first()).toBeVisible();
+  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
 }
 
 test("two-factor authentication: enrol, then sign in with a code", async ({ page }) => {
