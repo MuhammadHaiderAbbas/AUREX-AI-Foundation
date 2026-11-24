@@ -23,7 +23,7 @@ export const NAV: NavItem[] = [
   { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert },
   { to: "/wallet", label: "Wallet", description: "Virtual account and ledger", icon: Wallet },
   { to: "/history", label: "Trade History", description: "Orders, executions and decisions", icon: History },
-  { to: "/analytics", label: "Analytics", description: "Performance and reports", icon: BarChart3, phase: 10 },
+  { to: "/analytics", label: "Analytics", description: "Performance and reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", description: "Accounts and configurations", icon: Settings },
   { to: "/admin", label: "Administration", description: "Users and audit trail", icon: ShieldCheck, adminOnly: true },
 ];

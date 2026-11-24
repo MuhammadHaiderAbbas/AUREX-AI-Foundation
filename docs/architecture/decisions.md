@@ -174,3 +174,31 @@ could hide a real drawdown.
 fairly wide distance away (crypto 5%, FX 1%, stocks 3%, ETFs 2%).
 **Why.** "No stop" must not mean "no risk". The assumption rewards attaching a real
 protective stop, which also becomes a working order once the entry fills.
+
+## ADR-024 Time-weighted, flow-neutral returns
+**Decision.** Performance uses daily time-weighted returns, with virtual deposits and
+withdrawals removed on the day they happen.
+**Why.** Money-weighted or raw equity changes would count a deposit as profit and a
+withdrawal as loss. Time-weighted returns measure the trading, not the account holder's cash
+movements, and are what the industry reports.
+
+## ADR-025 No ratios from short histories
+**Decision.** Sharpe, Sortino, volatility, CAGR and Calmar are `null` until there are at
+least 20 daily returns, and the UI explains why.
+**Why.** An annualised Sharpe from five days is noise presented as precision. Refusing to
+compute it is more honest than showing a confident-looking number.
+
+## ADR-026 Evaluate signals, not just trades
+**Decision.** AI quality is measured on every agent run, including NO TRADE decisions and
+proposals that were never executed, by comparing forward prices, as well as on executed
+trades.
+**Why.** Judging the agents only on trades that passed the risk gate and were executed is a
+selection bias: those trades depend on the gate, the user and luck. Scoring all decisions
+against what happened next shows whether the signal itself has an edge.
+
+## ADR-027 Hashed, audited reports
+**Decision.** Each full report carries a SHA-256 of its canonical content, and generating or
+exporting is written to the audit log with that hash.
+**Why.** The blueprint calls for exportable audit reports. A hash lets anyone holding a copy
+check that it has not been edited since generation, and the audit entry ties it to who
+produced it and when.

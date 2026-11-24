@@ -4,8 +4,6 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { NavItem } from "@/components/layout/nav";
 
 const PLANS: Record<string, { summary: string; items: string[] }> = {
-  "/analytics": { summary: "Objective performance evaluation.", items: [
-    "Equity curve and drawdown", "Sharpe, Sortino, profit factor, turnover", "Model calibration and drift response"] },
 };
 
 export function ModulePage({ item }: { item: NavItem }) {

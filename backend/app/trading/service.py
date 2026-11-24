@@ -63,6 +63,11 @@ class OrderRequest:
     proposal_id: uuid.UUID | None = None
 
 
+def _fmt(v: Decimal) -> str:
+    """Plain decimal text: Decimal("10").normalize() would print as 1E+1."""
+    return format(Decimal(v).normalize(), "f")
+
+
 def _q8(v: Decimal) -> Decimal:
     return v.quantize(Q8)
 
@@ -170,10 +175,10 @@ class TradingService:
         else:
             entry = self._estimate(order, q.ask if q else (order.limit_price or order.stop_price), slip)
         if order.stop_loss is not None and order.stop_loss >= entry:
-            await self._reject(order, f"stop_loss {order.stop_loss.normalize()} must be below the entry price (≈{entry:.{inst.price_decimals}f})")
+            await self._reject(order, f"stop_loss {_fmt(order.stop_loss)} must be below the entry price (≈{entry:.{inst.price_decimals}f})")
             return order, True
         if order.take_profit is not None and order.take_profit <= entry:
-            await self._reject(order, f"take_profit {order.take_profit.normalize()} must be above the entry price (≈{entry:.{inst.price_decimals}f})")
+            await self._reject(order, f"take_profit {_fmt(order.take_profit)} must be above the entry price (≈{entry:.{inst.price_decimals}f})")
             return order, True
 
         approved, checks, why = await self._risk_gate(acct, inst, order, entry, q)
@@ -205,7 +210,7 @@ class TradingService:
         if req.quantity <= 0:
             raise BusinessRuleViolation("Quantity must be positive")
         if (req.quantity / inst.lot_size) % 1 != 0:
-            raise BusinessRuleViolation(f"Quantity must be a multiple of the lot size {inst.lot_size.normalize()}")
+            raise BusinessRuleViolation(f"Quantity must be a multiple of the lot size {_fmt(inst.lot_size)}")
         tick = Decimal(1).scaleb(-inst.price_decimals)
         for name, v in (("limit_price", req.limit_price), ("stop_price", req.stop_price)):
             if v is not None and (v <= 0 or v.quantize(tick) != v):
@@ -236,7 +241,7 @@ class TradingService:
                 Order.status == OrderStatus.OPEN, Order.id != order.id, Order.source != "protective"))
             held = pos.quantity if pos else Decimal(0)
             if order.quantity > held - Decimal(pending):
-                return f"insufficient position: holding {held.normalize()}, {Decimal(pending).normalize()} already in open sell orders (short selling is disabled)"
+                return f"insufficient position: holding {_fmt(held)}, {_fmt(Decimal(pending))} already in open sell orders (short selling is disabled)"
             return None
         fx = await fx_rate(self.market, inst.quote_currency, acct.base_currency)
         if fx is None:
@@ -292,7 +297,7 @@ class TradingService:
             if fee > 0:
                 postings += [Posting(LedgerCode.FEES, Direction.DEBIT, fee), Posting(LedgerCode.CASH, Direction.CREDIT, fee)]
             txn = await self.ledger.post(acct, TransactionType.TRADE_BUY, postings, created_by=order.user_id,
-                                         description=f"Buy {qty.normalize()} {inst.symbol} @ {px.quantize(Q8).normalize()}")
+                                         description=f"Buy {_fmt(qty)} {inst.symbol} @ {_fmt(px.quantize(Q8))}")
             if pos is None:
                 pos = Position(account_id=acct.id, instrument_id=inst.id, symbol=inst.symbol, quantity=qty,
                                avg_price=px, cost_basis=notional, fees=fee, opened_at=now)
@@ -316,7 +321,7 @@ class TradingService:
             if fee > 0:
                 postings += [Posting(LedgerCode.FEES, Direction.DEBIT, fee), Posting(LedgerCode.CASH, Direction.CREDIT, fee)]
             txn = await self.ledger.post(acct, TransactionType.TRADE_SELL, postings, created_by=order.user_id,
-                                         description=f"Sell {qty.normalize()} {inst.symbol} @ {px.quantize(Q8).normalize()}")
+                                         description=f"Sell {_fmt(qty)} {inst.symbol} @ {_fmt(px.quantize(Q8))}")
             pos.quantity -= qty
             pos.cost_basis -= cost
             pos.realised_pnl += realised
@@ -454,7 +459,8 @@ class TradingService:
         ids = list(await self.db.scalars(select(Position.account_id).where(Position.status == "OPEN").distinct()))
         for aid in ids:
             acct = await self._account(None, aid, lock=True)
-            await self.risk.metrics(acct, await self.summary(acct, take_snapshot=False))
+            # summary() also takes an hourly snapshot, which feeds the analytics equity series
+            await self.risk.metrics(acct, await self.summary(acct, take_snapshot=True))
         await self.db.flush()
         return len(ids)
 

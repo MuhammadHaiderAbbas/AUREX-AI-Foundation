@@ -43,9 +43,9 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await page.goto("/");
   await expect(page.getByText("Virtual deposit").first()).toBeVisible();
 
-  // Placeholder modules are clearly labelled
+  // Analytics is available from day one (with honest "not enough history" states)
   await page.getByRole("link", { name: /Analytics/ }).click();
-  await expect(page.getByText("scheduled for Phase 10")).toBeVisible();
+  await expect(page.getByTestId("perf-metrics")).toBeVisible();
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -206,6 +206,7 @@ test("paper execution: market buy, limit order, cancel, close position, history"
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Trading paper" })).toBeVisible();
   await tradeFlow(page);
+  await analyticsFlow(page);
 });
 
 // Shared with the static demo spec (kept in sync manually: Playwright specs don't share imports here).
@@ -322,4 +323,28 @@ async function riskFlow(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("risk-status")).toContainText("kill switch is engaged");
   await expect(ap.getByText("stopped")).toBeVisible();
   await page.getByRole("button", { name: "Release" }).click();
+}
+
+// Shared with the static demo spec (kept in sync manually). Expects tradeFlow to have run first.
+async function analyticsFlow(page: import("@playwright/test").Page) {
+  await page.goto("analytics?period=all");
+  await expect(page.getByTestId("perf-metrics")).toContainText("Return (TWR)");
+  await expect(page.getByText(/need at least 20/)).toBeVisible();
+  await page.getByRole("tab", { name: "Trades" }).click();
+  await expect(page.getByTestId("trade-stats")).toContainText("Closed trades");
+  await expect(page.getByRole("cell", { name: "BTC-USD" }).first()).toBeVisible();
+  await page.getByRole("tab", { name: "Execution" }).click();
+  await expect(page.getByTestId("execution-stats")).toContainText("All-in cost");
+  await expect(page.getByTestId("rejections")).toContainText("Insufficient cash");
+  await page.getByRole("tab", { name: "Risk" }).click();
+  await expect(page.getByText("Gate decisions")).toBeVisible();
+  await page.getByRole("tab", { name: "AI quality" }).click();
+  await expect(page.getByTestId("ai-stats")).toContainText("Signal edge");
+  await page.getByRole("tab", { name: "Report" }).click();
+  await page.getByRole("button", { name: "Generate" }).click();
+  await expect(page.getByTestId("report-hash")).toHaveText(/^[0-9a-f]{64}$/);
+  await expect(page.getByTestId("report")).toContainText("Ledger balanced");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Round trips (CSV)" }).click();
+  expect((await download).suggestedFilename()).toMatch(/^aurex-trades-all-\d{8}\.csv$/);
 }

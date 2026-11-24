@@ -62,6 +62,11 @@ Interactive docs: `/api/v1/docs` (Swagger) and `/api/v1/redoc`. Schema: `/api/v1
 | POST | `/risk/accounts/{id}/emergency-stop` | bearer | `{flatten?}`: stop the autopilot, engage the kill switch, cancel entries, optionally sell everything |
 | GET | `/risk/decisions?account_id=&approved=` · `/risk/events?account_id=` | bearer | Pre-trade decision log with every check; risk events |
 | POST | `/admin/risk/halt` | admin | Platform kill switch `{halted, reason}` |
+| GET | `/analytics/accounts/{id}/performance?period=&benchmark=` | bearer | Time-weighted returns, Sharpe/Sortino/volatility/CAGR (≥20 days), drawdown, daily series, benchmark. `period` ∈ 7d, 30d, 90d, 365d, all |
+| GET | `/analytics/accounts/{id}/trades` · `/execution` · `/risk` | bearer | Round trips with attribution and stats; execution costs (bp), fill rate, rejection reasons; gate decisions and breaker trips |
+| GET | `/analytics/accounts/{id}/ai?horizon_hours=` | bearer | Signal forward returns (BUY vs NO TRADE), calibration, proposal outcomes, champion drift |
+| GET | `/analytics/accounts/{id}/report?download=` | bearer | Full report with SHA-256 of its content (audited) |
+| GET | `/analytics/accounts/{id}/export/{kind}.csv` | bearer | `kind` ∈ trades, executions, orders, ledger, decisions, equity (audited) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | admin | User management |
 | GET | `/admin/audit` · `/admin/audit/verify` | admin | Audit log + chain verification |
 

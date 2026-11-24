@@ -23,6 +23,7 @@ from app.api.v1 import research as research_api  # noqa: E402
 from app.api.v1 import risk as risk_api  # noqa: E402
 from app.api.v1 import trading as trading_api  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
+from app.core.errors import Conflict  # noqa: E402
 from app.core.rate_limit import login_limiter  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
@@ -105,8 +106,11 @@ async def auth_headers(client, email="trader@example.com") -> dict:
 
 async def admin_headers(client, email="admin@example.com") -> dict:
     async with SessionLocal() as db:
-        await AuthService(db).create_user(email, "Admin", PASSWORD, RoleName.ADMIN)
-        await db.commit()
+        try:
+            await AuthService(db).create_user(email, "Admin", PASSWORD, RoleName.ADMIN)
+            await db.commit()
+        except Conflict:   # already created earlier in this test
+            await db.rollback()
     r = await login(client, email=email)
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
