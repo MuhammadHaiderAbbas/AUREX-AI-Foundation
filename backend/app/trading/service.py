@@ -23,10 +23,13 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.errors import BusinessRuleViolation, NotFound
 from app.market.service import MarketService, ProviderUnavailable, fx_rate
 from app.models import (
     AccountStatus,
+    BinaryContract,
+    BinaryStatus,
     Execution,
     Instrument,
     Order,
@@ -252,6 +255,10 @@ class TradingService:
         except ProviderUnavailable:
             ask = order.limit_price or order.stop_price or Decimal(0)
         est = order.quantity * self._estimate(order, ask, ex.slippage(inst.asset_class)) * fx
+        minimum = Decimal(get_settings().min_order_value)
+        if 0 < est < minimum:   # entries only (exits of small leftovers are always allowed); 0 = no price yet
+            return (f"order value ≈{est:,.2f} {acct.base_currency} is below the minimum order of "
+                    f"{minimum:,.2f} {acct.base_currency}")
         est *= 1 + ex.fee_rate(inst.asset_class)
         available = await self._cash(acct) - await self._reserved(acct.id, exclude=order.id)
         if est > available:
@@ -492,6 +499,12 @@ class TradingService:
                 "realised_pnl": p.realised_pnl, "fees": p.fees, "opened_at": p.opened_at,
                 "price_as_of": as_of, "stale": stale, "price_decimals": inst.price_decimals,
             })
+        # open binary contracts are carried at their stake (cost) until they settle
+        binary_at_risk = Decimal(await self.db.scalar(select(func.coalesce(func.sum(BinaryContract.stake), 0)).where(
+            BinaryContract.account_id == acct.id, BinaryContract.status == BinaryStatus.OPEN)))
+        if binary_at_risk:
+            mv_total += binary_at_risk
+            by_class["BINARY"] = binary_at_risk
         cash = led.get(LedgerCode.CASH, Decimal(0))
         equity = cash + mv_total
         out = {
@@ -501,7 +514,7 @@ class TradingService:
             "realised_pnl": led.get(LedgerCode.REALISED_PNL, Decimal(0)), "fees": led.get(LedgerCode.FEES, Decimal(0)),
             "exposure": float(mv_total / equity) if equity else 0.0, "open_positions": len(rows),
             "allocation": {k: float(v / equity) if equity else 0.0 for k, v in by_class.items()},
-            "positions": rows,
+            "positions": rows, "binary_at_risk": binary_at_risk,
             "available_cash": cash - await self._reserved(acct.id),
         }
         if take_snapshot:

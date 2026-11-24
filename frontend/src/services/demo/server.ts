@@ -20,6 +20,7 @@ import * as totp from "./totp";
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
 const MAX_BALANCE = toUnits("10000000");
+const MIN_ORDER_VALUE = 1;   // account currency; entry orders only (mirrors AUREX_MIN_ORDER_VALUE)
 const MONEY_RE = /^\d+(\.\d{1,8})?$/;
 const CURRENCIES = ["USD", "GBP", "EUR"];
 const CHART: [string, string, string][] = [
@@ -391,7 +392,9 @@ function businessCheck(s: State, a: DAccount, o: DOrder): string | null {
   }
   const fx = fxRate(i.quote_currency, a.base_currency);
   if (fx == null) return `no FX rate from ${i.quote_currency} to ${a.base_currency}`;
-  const est = u8(+o.quantity * estimate(o, +mkt.quote(i).ask, SLIP_BPS[i.asset_class]! / 1e4) * fx * (1 + FEE_BPS[i.asset_class]! / 1e4));
+  const gross = +o.quantity * estimate(o, +mkt.quote(i).ask, SLIP_BPS[i.asset_class]! / 1e4) * fx;
+  if (gross < MIN_ORDER_VALUE) return `order value ≈${gross.toFixed(2)} ${a.base_currency} is below the minimum order of ${MIN_ORDER_VALUE.toFixed(2)} ${a.base_currency}`;
+  const est = u8(gross * (1 + FEE_BPS[i.asset_class]! / 1e4));
   const avail = toUnits(balances(s, a).cash) - reservedUnits(s, a, o.id);
   if (est > avail) return `insufficient cash: needs ≈${(Number(est) / 1e8).toFixed(2)} ${a.base_currency}, available ${(Number(avail) / 1e8).toFixed(2)} (no leverage)`;
   return null;

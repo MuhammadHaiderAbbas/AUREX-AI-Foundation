@@ -42,7 +42,7 @@ async def _overview(db: AsyncSession, user: User, account_id: uuid.UUID) -> Risk
     prof = await risk.profile(acct.id, lock=True)
     metrics = await risk.metrics(acct, await ts.summary(acct), prof)
     return RiskOverview(
-        account_id=acct.id, currency=acct.base_currency, limits=limits_of(prof).__dict__,
+        account_id=acct.id, currency=acct.base_currency, limits={**limits_of(prof).__dict__, "binary_enabled": prof.binary_enabled},
         defaults=engine.DEFAULTS, ceilings=engine.CEILINGS,
         state={"kill_switch": prof.kill_switch, "kill_reason": prof.kill_reason, "kill_engaged_at": prof.kill_engaged_at,
                "daily_halted": risk.is_daily_halted(prof), "drawdown_halted": prof.drawdown_halted,

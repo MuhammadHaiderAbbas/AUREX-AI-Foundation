@@ -49,7 +49,7 @@ class RiskService:
             stmt = stmt.with_for_update()
         p = await self.db.scalar(stmt)
         if p is None:
-            p = RiskProfile(account_id=account_id, **engine.DEFAULTS, kill_switch=False, drawdown_halted=False,
+            p = RiskProfile(account_id=account_id, **engine.DEFAULTS, kill_switch=False, drawdown_halted=False, binary_enabled=True,
                             autopilot_status=AutopilotStatus.STOPPED, autopilot_symbols=list(DEFAULT_AUTOPILOT_SYMBOLS))
             self.db.add(p)
             await self.db.flush()
@@ -231,6 +231,10 @@ class RiskService:
 
     async def update_limits(self, acct: TradingAccount, prof: RiskProfile, changes: dict[str, Any], actor: uuid.UUID) -> dict:
         diff = {}
+        enabled = changes.get("binary_enabled")
+        if enabled is not None and enabled != prof.binary_enabled:
+            diff["binary_enabled"] = {"from": prof.binary_enabled, "to": enabled}
+            prof.binary_enabled = enabled
         for k, v in changes.items():
             if v is None or k not in LIMIT_FIELDS:
                 continue
@@ -241,7 +245,7 @@ class RiskService:
                 diff[k] = {"from": old, "to": v}
                 setattr(prof, k, v)
         if diff:
-            loosened = [k for k, d in diff.items() if d["to"] > d["from"]]
+            loosened = [k for k, d in diff.items() if d["to"] > d["from"]]   # True > False: enabling binaries loosens
             self.event(acct.id, "LIMITS_CHANGED", "Risk limits changed" + (f" (loosened: {', '.join(loosened)})" if loosened else ""),
                        actor=actor, changes=diff)
         await self.db.flush()

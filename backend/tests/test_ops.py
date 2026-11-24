@@ -94,7 +94,7 @@ async def test_readiness_tracks_schema_and_worker(monkeypatch, client):
     assert (await client.get(f"{API}/system/ready")).json()["checks"]["worker"] == "starting"
     out = await worker.one_pass()
     await worker.heartbeat()
-    assert set(out) == {"matcher", "anchored"}
+    assert set(out) == {"matcher", "binary", "anchored"}
     r = await client.get(f"{API}/system/ready")
     assert r.status_code == 200 and r.json()["checks"]["worker"] == "ok"
 

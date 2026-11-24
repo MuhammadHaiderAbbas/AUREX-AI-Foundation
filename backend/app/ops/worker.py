@@ -66,6 +66,7 @@ state = {"passes": 0, "last_error": None, "leader": False}
 
 async def one_pass() -> dict:
     """A single leader pass. Separated from the loop so it can be tested directly."""
+    from app.binary.service import BinaryService
     from app.risk.autopilot import due_accounts, run_cycle
     from app.risk.service import RiskService
     from app.trading.service import TradingService
@@ -74,6 +75,9 @@ async def one_pass() -> dict:
     async with SessionLocal() as db:
         stats = await TradingService(db).process_open()
         await TradingService(db).monitor()
+        await db.commit()
+    async with SessionLocal() as db:
+        binaries = await BinaryService(db).settle_due()
         await db.commit()
     async with SessionLocal() as db:
         for acct in await due_accounts(db, s.autopilot_interval_seconds):
@@ -88,7 +92,7 @@ async def one_pass() -> dict:
                 await anchoring.anchor_now(db)
                 await db.commit()
                 anchored = True
-    return {"matcher": stats, "anchored": anchored}
+    return {"matcher": stats, "binary": binaries, "anchored": anchored}
 
 
 async def heartbeat(error: str | None = None) -> None:

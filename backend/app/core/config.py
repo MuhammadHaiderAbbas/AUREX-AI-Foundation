@@ -82,6 +82,8 @@ class Settings(BaseSettings):
 
     # Paper-trading guard rails (Stage 1: virtual capital only).
     default_starting_balance: str = "100000"
+    # Smallest entry order, in the account's currency (fractional-share brokers use about 1).
+    min_order_value: str = "1"
     max_starting_balance: str = "10000000"
     max_paper_accounts_per_user: int = 10
     supported_currencies: Annotated[list[str], NoDecode] = Field(
@@ -109,13 +111,20 @@ class Settings(BaseSettings):
     # Hosts that admins may ingest from by URL/RSS. Empty = URL ingestion disabled.
     research_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # Binary options simulator (paper only). A win returns the stake plus payout_rate x stake;
+    # a loss forfeits the stake; an exact tie refunds it. Break-even win rate = 1 / (1 + rate).
+    binary_payout_rate: float = 0.80
+    binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [60, 300, 900, 3600, 86400])
+    # Contracts whose settlement price cannot be observed this long after expiry are voided (refunded).
+    binary_void_after_seconds: int = 600
+
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
     order_matcher_interval_seconds: float = 5.0
     # Autopilot: minimum seconds between cycles for an account whose autopilot is RUNNING.
     autopilot_interval_seconds: float = 900.0
 
     @field_validator("cors_origins", "supported_currencies", "research_allowed_hosts", "jwt_previous_secrets",
-                     mode="before")
+                     "binary_expiries", mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:
         if isinstance(v, str):

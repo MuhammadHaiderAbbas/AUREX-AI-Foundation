@@ -10,7 +10,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   await page.goto("login");
   await expect(page.getByText("Public demo.")).toBeVisible();
-  await page.getByRole("button", { name: "Launch demo" }).click();
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Demo Trader" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Demo paper account" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();
@@ -107,7 +107,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Two-factor authentication in the browser (Launch demo then asks for a code)
   await mfaFlow(page, "Demo-Account-2026!", async () => {
-    await page.getByRole("button", { name: "Launch demo" }).click();
+    await page.getByRole("button", { name: "Launch demo", exact: true }).click();
   });
 
   // Deep link + reload survives (SPA fallback + persisted session)

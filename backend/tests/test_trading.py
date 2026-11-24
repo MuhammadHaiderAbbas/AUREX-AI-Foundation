@@ -274,9 +274,28 @@ async def test_business_rejections_are_persisted_with_reasons(client):
     assert audit["total"] == 14
 
 
+async def test_small_gbp_account_can_trade_fractional_shares_and_fx(client):
+    """A £100 account: fractional US shares (converted to GBP), 1-unit FX lots, and a £1 minimum order."""
+    h = await auth_headers(client, email="small@example.com")
+    acct = (await client.post(f"{API}/accounts", headers=h,
+                              json={"name": "£100", "base_currency": "GBP", "starting_balance": "100"})).json()
+    aid = acct["id"]
+    r = (await order(client, h, aid, qty="0.05")).json()                   # 0.05 AAPL ≈ $10 ≈ £8
+    assert r["status"] == "FILLED", r.get("reject_reason")
+    r = (await order(client, h, aid, symbol="GBP/USD", qty="10")).json()   # £10 of cable
+    assert r["status"] == "FILLED", r.get("reject_reason")
+    r = (await order(client, h, aid, qty="0.0001")).json()                 # ≈ 2p: below the £1 minimum
+    assert r["status"] == "REJECTED" and "below the minimum order of 1.00 GBP" in r["reject_reason"]
+    r = (await order(client, h, aid, qty="2")).json()                      # ≈ £315: no leverage
+    assert r["status"] == "REJECTED" and "insufficient cash" in r["reject_reason"]
+    sell = (await order(client, h, aid, side="SELL", qty="0.0001")).json()  # tiny exits are always allowed
+    assert sell["status"] == "FILLED", sell.get("reject_reason")
+    await ledger(client, h, aid)
+
+
 async def test_order_shape_validation(client):
     h, aid = await setup(client)
-    assert (await order(client, h, aid, qty="1.5")).status_code == 422                       # lot size 1
+    assert (await order(client, h, aid, qty="1.00005")).status_code == 422                   # lot size 0.0001
     assert (await order(client, h, aid, type="LIMIT")).status_code == 422                    # no limit price
     assert (await order(client, h, aid, type="LIMIT", limit_price="1.234")).status_code == 422  # tick
     assert (await order(client, h, aid, limit_price="200.00")).status_code == 422            # market + limit
@@ -284,7 +303,8 @@ async def test_order_shape_validation(client):
     assert (await order(client, h, aid, qty="0")).status_code == 422
     assert (await order(client, h, aid, symbol="NOPE")).status_code == 404
     assert (await order(client, h, aid, client_order_id="bad id!")).status_code == 422
-    assert (await order(client, h, aid, symbol="BTC-USD", qty="0.00000001")).json()["status"] == "FILLED"
+    assert (await order(client, h, aid, symbol="BTC-USD", qty="0.00012345")).json()["status"] == "FILLED"   # 8-dp lot, ≈ $6
+    assert "below the minimum" in (await order(client, h, aid, symbol="BTC-USD", qty="0.00000001")).json()["reject_reason"]
 
 
 async def test_privacy_between_users(client):

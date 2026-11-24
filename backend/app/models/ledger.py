@@ -70,6 +70,8 @@ class TransactionType:
     VIRTUAL_WITHDRAWAL = "VIRTUAL_WITHDRAWAL"
     TRADE_BUY = "TRADE_BUY"
     TRADE_SELL = "TRADE_SELL"
+    BINARY_OPEN = "BINARY_OPEN"
+    BINARY_SETTLE = "BINARY_SETTLE"
 
 
 class LedgerAccount(UUIDPk, Base):
