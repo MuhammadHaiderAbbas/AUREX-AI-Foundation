@@ -14,6 +14,7 @@ import * as ag from "./agents";
 import * as ml from "./ml";
 import * as bt from "./backtest";
 import * as risk from "./risk";
+import * as an from "./analytics";
 
 const KEY = "aurex-demo-v1";
 const REFRESH_KEY = "aurex-demo-refresh";
@@ -931,8 +932,220 @@ const tradingRoutes: [string, RegExp, Handler][] = [
   }],
 ];
 
+// ---- analytics (mirror of backend app/analytics) ------------------------------------------
+const PERIOD_DAYS: Record<string, number | null> = { "7d": 7, "30d": 30, "90d": 90, "365d": 365, all: null };
+function periodStart(period: string, created: string) {
+  if (!(period in PERIOD_DAYS)) throw bad("period must be one of 7d, 30d, 90d, 365d, all", "period");
+  const d = PERIOD_DAYS[period];
+  const start = d ? new Date(Date.now() - d * 864e5).toISOString() : created;
+  return start > created ? start : created;
+}
+const cashLeg = (t: DTxn) => +(t.entries.find((e) => e.ledger_code === "CASH")?.amount ?? 0);
+function anPerformance(s: State, a: DAccount, period: string, bench: string | null) {
+  const since = periodStart(period, a.created_at);
+  const flows: Record<string, number> = {};
+  let opening = 0;
+  for (const t of s.txns.filter((x) => x.account_id === a.id)) {
+    if (t.type === "INITIAL_FUNDING") opening += cashLeg(t);
+    else if (t.type === "VIRTUAL_DEPOSIT" || t.type === "VIRTUAL_WITHDRAWAL") {
+      const d = t.created_at.slice(0, 10);
+      flows[d] = (flows[d] ?? 0) + (t.type === "VIRTUAL_DEPOSIT" ? 1 : -1) * cashLeg(t);
+    }
+  }
+  const points: [string, number][] = [[a.created_at, opening], ...s.snapshots.filter((x) => x.account_id === a.id).map((x) => [x.taken_at, +x.equity] as [string, number]), [now(), +portfolio(s, a).equity]];
+  const rets = an.dailyReturns(an.dailyPoints(points), flows).filter(([d]) => d > since.slice(0, 10));
+  const perf = an.performance(rets.map(([, r]) => r));
+  let g = 1;
+  const daily = rets.map(([d, r]) => { g *= 1 + r; return { date: d, return: r, growth: g, flow: flows[d] ?? 0, drawdown: 0 }; });
+  an.drawdowns([1, ...daily.map((x) => x.growth)]).slice(1).forEach((v, i) => { daily[i]!.drawdown = v; });
+  const notes = [];
+  if (perf.periods < an.MIN_PERIODS) notes.push(`Only ${perf.periods} daily returns in this period: Sharpe, Sortino, volatility and CAGR need at least ${an.MIN_PERIODS}.`);
+  notes.push("Returns are time-weighted and exclude virtual deposits and withdrawals. Days without a valuation carry the last known equity.");
+  let benchmark = null;
+  if (bench) {
+    const inst = findInst(bench);
+    const days = Math.max(2, Math.min(1000, Math.ceil((Date.now() - Date.parse(since)) / 864e5) + 3));
+    const rows = mkt.candles(inst, "1d", days).filter((c) => c.open_time.slice(0, 10) >= since.slice(0, 10)).map((c) => [c.open_time.slice(0, 10), +c.close] as [string, number]);
+    benchmark = rows.length < 2 ? { symbol: inst.symbol, available: false }
+      : { symbol: inst.symbol, available: true, return: rows.at(-1)![1] / rows[0]![1] - 1, curve: rows.map(([d, v]) => ({ date: d, growth: v / rows[0]![1] })) };
+  }
+  return { period, since, currency: a.base_currency, metrics: perf, curve: points.filter(([t]) => t >= since).map(([t, e]) => ({ t, equity: e })), daily, benchmark, notes };
+}
+function anRoundTrips(s: State, a: DAccount, since: string) {
+  return s.positions.filter((p) => p.account_id === a.id && p.status === "CLOSED" && p.closed_at! >= since).sort((x, y) => x.closed_at!.localeCompare(y.closed_at!)).map((p) => {
+    const lo = Date.parse(p.opened_at) - 1000, hi = Date.parse(p.closed_at!) + 1000;
+    const exes = s.executions.filter((x) => x.account_id === a.id && x.symbol === p.symbol && Date.parse(x.executed_at) >= lo && Date.parse(x.executed_at) <= hi);
+    const buys = exes.filter((x) => x.side === "BUY"), sells = exes.filter((x) => x.side === "SELL");
+    const entry = buys[0] ? s.orders.find((o) => o.id === buys[0]!.order_id) : undefined;
+    const ex = sells.length ? s.orders.find((o) => o.id === sells.at(-1)!.order_id) : undefined;
+    const how = !ex ? "manual" : ex.source === "protective" ? ({ STOP: "stop", LIMIT: "target" } as Record<string, string>)[ex.type] ?? "protective" : ex.source;
+    return { symbol: p.symbol, asset_class: instOf(p.symbol).asset_class, source: entry?.source ?? "manual", exit: how, opened_at: p.opened_at, closed_at: p.closed_at!,
+      pnl: +p.realised_pnl - +p.fees, gross_pnl: +p.realised_pnl, fees: +p.fees,
+      cost: buys.reduce((acc, x) => acc + +x.quantity * +x.price * +x.fx_rate, 0), proposal_id: entry?.proposal_id ?? null };
+  });
+}
+function anTrades(s: State, a: DAccount, period: string) {
+  const since = periodStart(period, a.created_at);
+  const rows = anRoundTrips(s, a, since);
+  const pf = portfolio(s, a);
+  return { period, since, currency: a.base_currency, stats: an.tradeStats(rows),
+    by_symbol: an.groupStats(rows, "symbol"), by_asset_class: an.groupStats(rows, "asset_class"), by_source: an.groupStats(rows, "source"), by_exit: an.groupStats(rows, "exit"),
+    trades: [...rows].reverse().map(({ proposal_id: _p, ...r }) => ({ ...r, hold_hours: (Date.parse(r.closed_at) - Date.parse(r.opened_at)) / 3600e3 })),
+    open: { positions: pf.positions.length, unrealised_pnl: pf.positions.reduce((acc, p) => acc + +p.unrealised_pnl, 0) } };
+}
+const BUSINESS_REASONS: [string, string][] = [["insufficient cash", "Insufficient cash"], ["insufficient position", "No position / short"], ["market is closed", "Market closed"],
+  ["stale", "Stale quote"], ["no market data", "No market data"], ["FX", "No FX rate"], ["stop_loss", "Invalid bracket"], ["take_profit", "Invalid bracket"]];
+function anExecution(s: State, a: DAccount, period: string) {
+  const since = periodStart(period, a.created_at);
+  const blank = () => ({ fills: 0, notional: 0, fees: 0, spread: 0, slippage: 0 });
+  const total = blank(), groups: Record<string, ReturnType<typeof blank>> = {};
+  for (const x of s.executions.filter((e) => e.account_id === a.id && e.executed_at >= since)) {
+    const n = +x.quantity * +x.price * +x.fx_rate;
+    for (const g of [total, (groups[instOf(x.symbol).asset_class] ??= blank())]) { g.fills++; g.notional += n; g.fees += +x.fee; g.spread += +x.spread_cost; g.slippage += +x.slippage_cost; }
+  }
+  const bps = (g: ReturnType<typeof blank>) => { const c = g.fees + g.spread + g.slippage, n = g.notional;
+    return { ...g, total_cost: c, cost_bps: n ? (c / n) * 1e4 : null, fee_bps: n ? (g.fees / n) * 1e4 : null, spread_bps: n ? (g.spread / n) * 1e4 : null, slippage_bps: n ? (g.slippage / n) * 1e4 : null }; };
+  const orders = s.orders.filter((o) => o.account_id === a.id && o.created_at >= since);
+  const outcomes: Record<string, Record<string, number>> = {};
+  for (const o of orders) { const r = (outcomes[o.source] ??= {}); r[o.status] = (r[o.status] ?? 0) + 1; }
+  const reasons: Record<string, number> = {};
+  for (const o of orders.filter((x) => x.status === "REJECTED")) {
+    const label = (o.reject_reason ?? "").startsWith("risk:")
+      ? `Risk: ${s.riskDecisions.find((d) => d.order_id === o.id)?.checks.find((c) => !c.passed)?.label ?? "gate"}`
+      : BUSINESS_REASONS.find(([k]) => (o.reject_reason ?? "").includes(k))?.[1] ?? "Other";
+    reasons[label] = (reasons[label] ?? 0) + 1;
+  }
+  const decided = orders.filter((o) => ["FILLED", "REJECTED", "CANCELLED", "EXPIRED"].includes(o.status));
+  return { period, since, currency: a.base_currency, total: bps(total), by_asset_class: Object.entries(groups).sort().map(([k, v]) => ({ key: k, ...bps(v) })),
+    orders: { total: orders.length, fill_rate: decided.length ? decided.filter((o) => o.status === "FILLED").length / decided.length : null,
+      by_source: Object.entries(outcomes).sort().map(([k, v]) => ({ source: k, ...v })) },
+    rejections: Object.entries(reasons).map(([reason, count]) => ({ reason, count })).sort((x, y) => y.count - x.count),
+    notes: ["Spread cost is the distance from mid to the bid/ask paid; slippage is the extra beyond the bid/ask. Both use the cost model shared with the backtester."] };
+}
+function anRisk(s: State, a: DAccount, period: string) {
+  const since = periodStart(period, a.created_at);
+  const ds = s.riskDecisions.filter((d) => d.account_id === a.id && d.created_at >= since);
+  const failing: Record<string, number> = {}, bySource: Record<string, { approved: number; rejected: number }> = {};
+  for (const d of ds) {
+    const r = (bySource[d.source] ??= { approved: 0, rejected: 0 }); r[d.approved ? "approved" : "rejected"]++;
+    for (const c of d.checks) if (!c.passed) failing[c.label] = (failing[c.label] ?? 0) + 1;
+  }
+  const evs = s.riskEvents.filter((e) => e.account_id === a.id && e.created_at >= since);
+  const counts: Record<string, number> = {};
+  for (const e of evs) counts[e.type] = (counts[e.type] ?? 0) + 1;
+  return { period, since, decisions: ds.length, approved: ds.filter((d) => d.approved).length, rejected: ds.filter((d) => !d.approved).length,
+    by_source: Object.entries(bySource).sort().map(([k, v]) => ({ source: k, ...v })),
+    failed_checks: Object.entries(failing).map(([check, count]) => ({ check, count })).sort((x, y) => y.count - x.count), events: counts,
+    breaker_trips: evs.filter((e) => (e.type.startsWith("BREAKER_") && e.type !== "BREAKER_RESET") || e.type === "ABNORMAL_ACTIVITY" || e.type === "EMERGENCY_STOP")
+      .map((e) => ({ type: e.type, message: e.message, at: e.created_at })) };
+}
+function anAI(s: State, a: DAccount, period: string, horizon: number) {
+  if (!(horizon >= 1 && horizon <= 168)) throw bad("horizon_hours must be between 1 and 168", "horizon_hours");
+  const since = periodStart(period, a.created_at);
+  const runs = s.aiRuns.filter((r) => r.account_id === a.id && r.created_at >= since);
+  const props = runs.filter((r) => r.proposal).map((r) => r.proposal);
+  const status: Record<string, number> = {};
+  for (const p of props) { const k = p.status === "PENDING_RISK_REVIEW" && Date.parse(p.expires_at) <= Date.now() ? "EXPIRED" : p.status; status[k] = (status[k] ?? 0) + 1; }
+  const conf = new Map<string, number>(props.map((p) => [p.id, p.confidence]));
+  const trips = anRoundTrips(s, a, since).filter((t) => t.proposal_id && conf.has(t.proposal_id));
+  const h = horizon * 3600e3;
+  const ev: Record<string, [number, number][]> = { BUY: [], NO_TRADE: [] };
+  let pending = 0;
+  const closes = new Map<string, { t: number[]; c: number[] }>();
+  for (const r of runs) {
+    const last = r.context?.quote?.last;
+    if (!last) continue;
+    if (Date.parse(r.created_at) + h > Date.now()) { pending++; continue; }
+    if (!closes.has(r.symbol)) { const cs = mkt.candles(instOf(r.symbol), "1h", 1000); closes.set(r.symbol, { t: cs.map((x) => Date.parse(x.open_time)), c: cs.map((x) => +x.close) }); }
+    const { t, c } = closes.get(r.symbol)!;
+    const target = Date.parse(r.created_at) + h;
+    let i = -1; for (let k = 0; k < t.length && t[k]! <= target; k++) i = k;
+    if (i < 0 || t[i]! < Date.parse(r.created_at)) continue;
+    (ev[r.decision] ??= []).push([r.confidence, c[i]! / last - 1]);
+  }
+  const sum = (rows: [number, number][]) => ({ n: rows.length, avg_forward_return: rows.length ? rows.reduce((acc, [, x]) => acc + x, 0) / rows.length : null,
+    hit_rate: rows.length ? rows.filter(([, x]) => x > 0).length / rows.length : null });
+  const buy = sum(ev.BUY!), flat = sum(ev.NO_TRADE!);
+  const models = s.mlVersions.filter((v) => v.status === "champion").map((v) => {
+    const d = [...s.mlEvals].reverse().find((e) => e.version_id === v.id && e.kind === "drift_check");
+    return { symbol: v.symbol, version: v.version, eligible: v.eligible, note: v.eligibility_note, last_drift_check: d?.created_at ?? null, drift_status: d?.status ?? null,
+      max_psi: (d?.metrics as { max_psi?: number } | undefined)?.max_psi ?? null };
+  });
+  return { period, since, horizon_hours: horizon,
+    proposals: { total: props.length, by_status: status, execution_rate: props.length ? (status.EXECUTED ?? 0) / props.length : null },
+    realised: { closed_trades: trips.length, net_pnl: trips.reduce((acc, t) => acc + t.pnl, 0), calibration: an.calibration(trips.map((t) => [conf.get(t.proposal_id!)!, t.pnl > 0])) },
+    signals: { runs: runs.length, pending, buy, no_trade: flat, edge: buy.n && flat.n ? buy.avg_forward_return! - flat.avg_forward_return! : null,
+      buy_calibration: an.calibration(ev.BUY!.map(([c, x]) => [c, x > 0])) },
+    models,
+    notes: [`Forward returns compare the price ${horizon}h after each run with the price the agents saw. Agent confidence is a heuristic score, not a calibrated probability: these tables show how far it is from one.`] };
+}
+async function anReport(s: State, a: DAccount, period: string, email: string) {
+  const pf = portfolio(s, a), b = balances(s, a);
+  const { curve: _c, ...perf } = anPerformance(s, a, period, "SPY");
+  const body = {
+    report: "AUREX paper trading report", version: 1, generated_at: now(),
+    account: { id: a.id, name: a.name, currency: a.base_currency, mode: a.mode, created_at: a.created_at, owner: email }, period,
+    snapshot: { cash: +pf.cash, market_value: +pf.market_value, equity: +pf.equity, unrealised_pnl: +pf.unrealised_pnl, realised_pnl: +pf.realised_pnl, fees: +pf.fees, exposure: pf.exposure, open_positions: pf.open_positions },
+    integrity: { ledger_balanced: b.balanced, ledger_lines: Object.fromEntries(b.lines.map((l) => [l.code, l.balance])) },
+    performance: perf, trades: anTrades(s, a, period), execution: anExecution(s, a, period), risk: anRisk(s, a, period), ai: anAI(s, a, period, 24),
+    disclaimer: "Simulated paper trading with virtual capital. Past simulated performance does not predict future results.",
+  };
+  return { ...body, sha256: await sha256(canonical(body)) };
+}
+const csvCell = (v: unknown) => {
+  let x = v == null ? "" : String(v);
+  if (/^[=+\-@]/.test(x) && Number.isNaN(Number(x))) x = `'${x}`;
+  return /[",\n]/.test(x) ? `"${x.replaceAll('"', '""')}"` : x;
+};
+const toCsv = (header: string[], rows: unknown[][]) => [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+function anExport(s: State, a: DAccount, kind: string, period: string): [string[], unknown[][]] {
+  const since = periodStart(period, a.created_at);
+  switch (kind) {
+    case "executions": return [["executed_at", "order_id", "symbol", "side", "quantity", "price", "reference_price", "fx_rate", "fee", "spread_cost", "slippage_cost", "realised_pnl", "ledger_transaction_id"],
+      s.executions.filter((x) => x.account_id === a.id && x.executed_at >= since).map((x) => [x.executed_at, x.order_id, x.symbol, x.side, x.quantity, x.price, x.reference_price, x.fx_rate, x.fee, x.spread_cost, x.slippage_cost, x.realised_pnl, x.ledger_transaction_id])];
+    case "orders": return [["created_at", "id", "source", "symbol", "side", "type", "quantity", "limit_price", "stop_price", "stop_loss", "take_profit", "status", "avg_fill_price", "reject_reason", "parent_order_id", "proposal_id"],
+      s.orders.filter((o) => o.account_id === a.id && o.created_at >= since).map((o) => [o.created_at, o.id, o.source, o.symbol, o.side, o.type, o.quantity, o.limit_price, o.stop_price, o.stop_loss, o.take_profit, o.status, o.avg_fill_price, o.reject_reason, o.parent_order_id, o.proposal_id])];
+    case "ledger": return [["created_at", "transaction_id", "type", "description", "ledger_account", "direction", "amount", "currency"],
+      s.txns.filter((t) => t.account_id === a.id && t.created_at >= since).flatMap((t) => txnRead(t).entries.map((e) => [t.created_at, t.id, t.type, t.description, e.ledger_code, e.direction, e.amount, e.currency]))];
+    case "trades": return [["opened_at", "closed_at", "symbol", "asset_class", "opened_by", "exit", "cost", "gross_pnl", "fees", "net_pnl"],
+      anRoundTrips(s, a, since).map((t) => [t.opened_at, t.closed_at, t.symbol, t.asset_class, t.source, t.exit, t.cost.toFixed(8), t.gross_pnl.toFixed(8), t.fees.toFixed(8), t.pnl.toFixed(8)])];
+    case "decisions": return [["created_at", "order_id", "proposal_id", "source", "symbol", "side", "approved", "reason", "failed_checks"],
+      s.riskDecisions.filter((d) => d.account_id === a.id && d.created_at >= since).map((d) => [d.created_at, d.order_id, d.proposal_id, d.source, d.symbol, d.side, d.approved, d.reason, d.checks.filter((c) => !c.passed).map((c) => c.name).join(";")])];
+    case "equity": return [["taken_at", "cash", "market_value", "equity", "reason"],
+      s.snapshots.filter((x) => x.account_id === a.id && x.taken_at >= since).map((x) => [x.taken_at, x.cash, x.market_value, x.equity, x.reason])];
+    default: throw new HttpError(404, "not_found", `Unknown export ${kind}`);
+  }
+}
+const analyticsRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/performance$/, (c) => { const { a } = ownedAccount(c, c.params[0]!); processOpen(c.s); return json(200, anPerformance(c.s, a, c.query.get("period") ?? "30d", c.query.get("benchmark") || null)); }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/trades$/, (c) => { const { a } = ownedAccount(c, c.params[0]!); return json(200, anTrades(c.s, a, c.query.get("period") ?? "30d")); }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/execution$/, (c) => { const { a } = ownedAccount(c, c.params[0]!); return json(200, anExecution(c.s, a, c.query.get("period") ?? "30d")); }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/risk$/, (c) => { const { a } = ownedAccount(c, c.params[0]!); return json(200, anRisk(c.s, a, c.query.get("period") ?? "30d")); }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/ai$/, (c) => { const { a } = ownedAccount(c, c.params[0]!); return json(200, anAI(c.s, a, c.query.get("period") ?? "30d", Number(c.query.get("horizon_hours") ?? 24))); }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/report$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const period = c.query.get("period") ?? "30d";
+    const out = await anReport(c.s, a, period, user.email);
+    await audit(c.s, user.id, "analytics.report", { type: "trading_account", id: a.id, details: { period, sha256: out.sha256 } });
+    save();
+    if (c.query.get("download") !== "true") return json(200, out);
+    return new Response(JSON.stringify(out, null, 2), { status: 200, headers: { "Content-Type": "application/json",
+      "Content-Disposition": `attachment; filename="aurex-report-${a.name.replaceAll(" ", "_").slice(0, 30)}-${period}-${today().replaceAll("-", "")}.json"` } });
+  }],
+  ["GET", /^\/analytics\/accounts\/([\w-]+)\/export\/(\w+)\.csv$/, async (c) => {
+    const { user, a } = ownedAccount(c, c.params[0]!);
+    const period = c.query.get("period") ?? "30d", kind = c.params[1]!;
+    const [header, rows] = anExport(c.s, a, kind, period);
+    await audit(c.s, user.id, "analytics.export", { type: "trading_account", id: a.id, details: { kind, period, rows: rows.length } });
+    save();
+    return new Response(toCsv(header, rows), { status: 200, headers: { "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="aurex-${kind}-${period}-${today().replaceAll("-", "")}.csv"` } });
+  }],
+];
+
 const routes: [string, RegExp, Handler][] = [
   ...tradingRoutes,
+  ...analyticsRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
   ["GET", /^\/system\/info$/, () => json(200, { name: "AUREX AI", version: "0.2.0-demo", environment: "demo", trading_mode: "PAPER", live_trading_enabled: false, registration_open: true, supported_currencies: CURRENCIES })],
 

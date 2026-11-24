@@ -63,6 +63,23 @@ export function refreshSession(): Promise<TokenResponse | null> {
   return refreshInFlight;
 }
 
+/** Authenticated file download (CSV / JSON exports). Works against the demo server too. */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers();
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  let res = await transport(`${API_BASE}${path}`, { headers, credentials: "same-origin" });
+  if (res.status === 401 && (await refreshSession())) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+    res = await transport(`${API_BASE}${path}`, { headers, credentials: "same-origin" });
+  }
+  if (!res.ok) await parse(res);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function api<T>(
   path: string,
   init: RequestInit & { json?: unknown; idempotencyKey?: string } = {},
@@ -437,4 +454,58 @@ export interface RiskEvent { id: string; account_id: string | null; type: string
 export interface AutopilotCycle {
   at: string; skipped?: string;
   results: { symbol: string; outcome: "executed" | "risk_rejected" | "no_trade" | "skipped" | "error"; detail?: string; run_id?: string; order_id?: string }[];
+}
+
+// ---- Analytics (Phase 10) ----------------------------------------------------------
+export type AnalyticsPeriod = "7d" | "30d" | "90d" | "365d" | "all";
+export interface PerfMetrics {
+  periods: number; total_return: number; cagr: number | null; volatility: number | null; sharpe: number | null; sortino: number | null;
+  max_drawdown: number; max_drawdown_days: number; calmar: number | null; best_day: number | null; worst_day: number | null; positive_days: number | null;
+}
+export interface Performance {
+  period: AnalyticsPeriod; since: string; currency: string; metrics: PerfMetrics;
+  curve: { t: string; equity: number }[];
+  daily: { date: string; return: number; growth: number; flow: number; drawdown: number }[];
+  benchmark: { symbol: string; available: boolean; return?: number; curve?: { date: string; growth: number }[] } | null;
+  notes: string[];
+}
+export interface TradeStats {
+  trades: number; wins: number; losses: number; win_rate: number | null; net_pnl: number; fees: number; profit_factor: number | null;
+  avg_win: number; avg_loss: number; payoff_ratio: number | null; expectancy: number | null; best: number | null; worst: number | null;
+  avg_hold_hours: number | null; return_on_cost: number | null; no_losses: boolean;
+}
+export interface GroupRow { key: string; trades: number; win_rate: number | null; net_pnl: number; profit_factor: number | null; expectancy: number | null }
+export interface TradesReport {
+  period: AnalyticsPeriod; since: string; currency: string; stats: TradeStats;
+  by_symbol: GroupRow[]; by_asset_class: GroupRow[]; by_source: GroupRow[]; by_exit: GroupRow[];
+  trades: { symbol: string; asset_class: string; source: string; exit: string; opened_at: string; closed_at: string; pnl: number; gross_pnl: number; fees: number; cost: number; hold_hours: number }[];
+  open: { positions: number; unrealised_pnl: number };
+}
+export interface CostRow { key?: string; fills: number; notional: number; fees: number; spread: number; slippage: number; total_cost: number; cost_bps: number | null; fee_bps: number | null; spread_bps: number | null; slippage_bps: number | null }
+export interface ExecutionReport {
+  period: AnalyticsPeriod; currency: string; total: CostRow; by_asset_class: CostRow[];
+  orders: { total: number; fill_rate: number | null; by_source: ({ source: string } & Record<string, number | string>)[] };
+  rejections: { reason: string; count: number }[]; notes: string[];
+}
+export interface RiskReport {
+  period: AnalyticsPeriod; decisions: number; approved: number; rejected: number;
+  by_source: { source: string; approved: number; rejected: number }[]; failed_checks: { check: string; count: number }[];
+  events: Record<string, number>; breaker_trips: { type: string; message: string; at: string }[];
+}
+export interface Calibration { n: number; brier: number | null; ece: number | null; bins: { lo: number; hi: number; n: number; confidence: number; hit_rate: number }[] }
+export interface SignalStats { n: number; avg_forward_return: number | null; hit_rate: number | null }
+export interface AIReport {
+  period: AnalyticsPeriod; horizon_hours: number;
+  proposals: { total: number; by_status: Record<string, number>; execution_rate: number | null };
+  realised: { closed_trades: number; net_pnl: number; calibration: Calibration };
+  signals: { runs: number; pending: number; buy: SignalStats; no_trade: SignalStats; edge: number | null; buy_calibration: Calibration };
+  models: { symbol: string; version: number; eligible: boolean; note: string; last_drift_check: string | null; drift_status: string | null; max_psi: number | null }[];
+  notes: string[];
+}
+export interface FullReport {
+  report: string; version: number; generated_at: string; sha256: string; period: AnalyticsPeriod; disclaimer: string;
+  account: { id: string; name: string; currency: string; mode: string; created_at: string; owner: string };
+  snapshot: { cash: number; market_value: number; equity: number; unrealised_pnl: number; realised_pnl: number; fees: number; exposure: number; open_positions: number };
+  integrity: { ledger_balanced: boolean; ledger_lines: Record<string, string> };
+  performance: Omit<Performance, "curve">; trades: TradesReport; execution: ExecutionReport; risk: RiskReport; ai: AIReport;
 }

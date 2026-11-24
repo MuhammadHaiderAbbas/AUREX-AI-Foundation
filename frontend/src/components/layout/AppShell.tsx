@@ -62,7 +62,7 @@ export function AppShell() {
   return (
     <div className="flex h-full">
       {/* Desktop sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface lg:flex">
+      <aside className="hidden w-60 print:hidden shrink-0 flex-col border-r border-border bg-surface lg:flex">
         <div className="border-b border-border px-5 py-4"><Logo /></div>
         <Sidebar />
         <div className="border-t border-border px-5 py-3 text-[11px] text-subtle">
@@ -86,7 +86,7 @@ export function AppShell() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur lg:px-6">
+        <header className="flex h-14 print:hidden shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur lg:px-6">
           <button className="text-muted lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu"><Menu className="size-5" /></button>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold">{current?.label ?? "AUREX AI"}</h1>
@@ -113,7 +113,7 @@ export function AppShell() {
             <LogOut className="size-4" />
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto print:overflow-visible">
           <div className="mx-auto max-w-[1400px] p-4 lg:p-6"><Outlet /></div>
         </main>
       </div>

@@ -156,7 +156,6 @@ export function OverviewPage() {
         <CardHeader title="Platform roadmap" description="Modules light up as each phase ships and passes its tests" />
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["Analytics", "Phase 10", "Performance and audit reports"],
             ["Security hardening", "Phase 11", "Threat model, secrets, pen-test fixes"],
             ["Production", "Phase 12", "Deployment, monitoring, live-trading gates"],
           ].map(([t, p, d]) => (

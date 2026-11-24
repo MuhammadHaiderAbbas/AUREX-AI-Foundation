@@ -85,6 +85,16 @@ breakers, account and platform kill switches, and bracket (OCO) protective order
 out. With the gate in place, agent proposals became executable, and there is an autopilot
 with an emergency stop. See `risk-engine.md`.
 
+**Phase 10** added read-only analytics, all derived from append-only records:
+- time-weighted performance with ratios and drawdown, against a benchmark;
+- round-trip statistics attributed by who opened each trade and how it closed;
+- execution costs in basis points;
+- a summary of the risk gate's decisions;
+- AI signal evaluation and calibration;
+- hashed, audited reports and CSV exports.
+
+See `analytics.md`.
+
 The remaining blueprint tables (`instruments`, `orders`, `positions`, `ai_runs`,
 `model_versions`, `risk_events`, …) are added by the migrations of the phase that
 first needs them, so the schema never contains unused, untested tables.
