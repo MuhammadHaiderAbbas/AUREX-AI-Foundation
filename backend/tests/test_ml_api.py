@@ -112,3 +112,29 @@ async def test_tampered_artifact_is_never_loaded(client):
     run = (await client.post(f"{API}/ai/run", headers=ah, json={"symbol": "BTC-USD"})).json()
     ml = next(f for f in run["findings"] if f["agent"] == "ml")
     assert ml["status"] == "abstain" and "integrity" in ml["summary"]
+
+
+async def test_artifact_swapped_with_matching_sha256_is_refused(client):
+    """A database writer can recompute a plain SHA-256, but not the server-keyed HMAC."""
+    import hashlib
+    import pickle
+
+    ah = await admin_headers(client)
+    v = (await client.post(f"{API}/ml/train", headers=ah, json=TRAIN)).json()
+    await force_eligible(v["id"])
+    await client.post(f"{API}/ml/versions/{v['id']}/promote", headers=ah)
+    evil = pickle.dumps({"not": "a model"})
+    async with SessionLocal() as db:
+        await db.execute(text("UPDATE model_versions SET artifact = :a, artifact_sha256 = :h WHERE id = :id"),
+                         {"a": evil, "h": hashlib.sha256(evil).hexdigest(), "id": v["id"]})
+        await db.commit()
+    run = (await client.post(f"{API}/ai/run", headers=ah, json={"symbol": "BTC-USD"})).json()
+    ml = next(f for f in run["findings"] if f["agent"] == "ml")
+    assert ml["status"] == "abstain" and "integrity" in ml["summary"]
+    async with SessionLocal() as db:   # unsigned legacy artifacts are refused too
+        await db.execute(text("UPDATE model_versions SET artifact_hmac = NULL WHERE id = :id"), {"id": v["id"]})
+        await db.commit()
+    from app.ml.service import _model_cache
+    _model_cache.clear()
+    run = (await client.post(f"{API}/ai/run", headers=ah, json={"symbol": "BTC-USD"})).json()
+    assert next(f for f in run["findings"] if f["agent"] == "ml")["status"] == "abstain"

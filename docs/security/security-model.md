@@ -2,7 +2,7 @@
 
 ## Implemented in Phase 1
 - Argon2id password hashing; 12+ char passwords with 3 character classes; transparent rehash.
-- Login rate limiting per IP+email (5/min) — in-process; moves to Redis in Phase 11.
+- Login rate limiting per IP+email (5/min). In-process; moves to Redis in Phase 12.
 - Constant-time-ish login for unknown users (dummy hash verification).
 - 15-minute access JWT in memory; rotating refresh token in `httpOnly`, `SameSite=Strict`,
   path-scoped cookie; reuse detection revokes the session family.
@@ -24,14 +24,38 @@
   claim is quote-checked, nothing a model produces reaches execution, and questions are
   rate-limited per user.
 
+## Implemented in Phase 11 (see `threat-model.md`)
+- TOTP two-factor authentication: RFC 6238 with a ±1 step window and replay protection.
+  Seeds are encrypted with AES-256-GCM; there are 10 single-use recovery codes; verification is
+  rate-limited; admins can reset 2FA; enabling it signs out one-factor sessions.
+- Password policy adds a block-list of common bases, keyboard runs and repeats (after stripping
+  decoration and l33t substitutions) and rejects the user's name or email. Changing to the same
+  password is refused.
+- Per-account lockout across IPs (default 20 failures / 15 min), per-IP registration limit, a
+  global per-IP API rate limit (600/min) and request body limits (1 MiB; 11 MiB for uploads,
+  enforced for chunked bodies too).
+- Session management: list sessions, revoke one, revoke all others.
+- Origin check on the cookie-authenticated endpoints.
+- JWT `kid` with rotation via `AUREX_JWT_PREVIOUS_SECRETS`. Secrets can come from files
+  (`*_FILE`), and production refuses weak or rotated-in secrets that are too short, CORS
+  wildcards or non-https origins, and the default DB password.
+- ML artifacts are HMAC-signed and verified before unpickling.
+- Audit chain export (JSON Lines) with offline verification (`app.cli audit-verify-file`),
+  plus `audit-verify` and `audit-export` CLIs.
+- API headers: CSP `default-src 'none'`, COOP/CORP, Permissions-Policy, and HSTS in
+  staging/production. OpenAPI docs are off in production.
+- Containers: proxy-only trust for forwarded headers, a read-only root filesystem,
+  `cap_drop: ALL`, `no-new-privileges` and a private network. The CSP is tightened
+  (`object-src 'none'`), and the static demo now ships a CSP meta tag.
+- CI: pip-audit, npm audit, Bandit, detect-secrets (reviewed baseline) and Trivy image scans
+  on every PR and weekly; Dependabot for pip, npm, actions and Docker.
+
 ## Planned
 | Control | Phase |
 |---|---|
-| TOTP MFA + recovery codes | 11 |
-| Redis-backed distributed rate limiting | 3/11 |
-| Secrets manager for broker credentials (never in DB/logs/frontend) | 12 |
+| Redis-backed distributed rate limiting (multi-replica) | 12 |
+| Automated off-site anchoring of the audit head hash | 12 |
+| Secrets manager for broker credentials (never in DB, logs or frontend) | 12 |
 | Broker keys without withdrawal permission, IP allow-listing | 12 |
-| Signed internal requests between OMS and risk gate | 8–9 |
-| External anchoring of audit head hash | 11 |
-| Backups + restore drills, monitoring (Prometheus/Grafana) | 11 |
-| Penetration test | 11 |
+| Backups and restore drills, monitoring and alerting (Prometheus/Grafana) | 12 |
+| External penetration test | before any live-trading stage |

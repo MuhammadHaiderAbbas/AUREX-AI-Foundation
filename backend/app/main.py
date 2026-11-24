@@ -9,7 +9,7 @@ from app import __version__
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import BodySizeLimitMiddleware, RateLimitMiddleware, RequestContextMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -62,19 +62,22 @@ def create_app() -> FastAPI:
             "AUREX AI — autonomous multi-market research & paper-trading platform.\n\n"
             "**Stage 1: paper trading only. Virtual capital; no real money is moved.**"
         ),
-        openapi_url=f"{s.api_prefix}/openapi.json",
-        docs_url=f"{s.api_prefix}/docs",
-        redoc_url=f"{s.api_prefix}/redoc",
+        openapi_url=f"{s.api_prefix}/openapi.json" if s.docs_enabled else None,
+        docs_url=f"{s.api_prefix}/docs" if s.docs_enabled else None,
+        redoc_url=f"{s.api_prefix}/redoc" if s.docs_enabled else None,
     )
+    # Starlette applies the last-added middleware outermost: rate limit -> body size -> CORS -> context.
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=s.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
         expose_headers=["X-Request-ID", "Idempotent-Replay"],
     )
+    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(RateLimitMiddleware)
     register_error_handlers(app)
     app.include_router(api_router, prefix=s.api_prefix)
     return app

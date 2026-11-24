@@ -19,4 +19,26 @@ def test_production_requires_strong_secret_and_secure_cookies(monkeypatch):
     with pytest.raises(ValidationError, match="COOKIE_SECURE"):
         Settings()
     monkeypatch.setenv("AUREX_COOKIE_SECURE", "true")
-    assert Settings().live_trading_enabled is False
+    with pytest.raises(ValidationError, match="explicit https:// origins"):
+        Settings()                                         # default localhost origin
+    monkeypatch.setenv("AUREX_CORS_ORIGINS", "*")
+    with pytest.raises(ValidationError, match="explicit https:// origins"):
+        Settings()
+    monkeypatch.setenv("AUREX_CORS_ORIGINS", "https://aurex.example")
+    with pytest.raises(ValidationError, match="default development password"):
+        Settings()
+    monkeypatch.setenv("AUREX_DATABASE_URL", "postgresql+asyncpg://aurex:s3cr3t-long@db:5432/aurex")
+    monkeypatch.setenv("AUREX_JWT_PREVIOUS_SECRETS", "short")
+    with pytest.raises(ValidationError, match="PREVIOUS_SECRETS"):
+        Settings()
+    monkeypatch.setenv("AUREX_JWT_PREVIOUS_SECRETS", "y" * 40)
+    s = Settings()
+    assert s.live_trading_enabled is False and s.docs_enabled is False and s.hsts_enabled is True
+
+
+def test_secrets_can_come_from_files(monkeypatch, tmp_path):
+    f = tmp_path / "jwt"
+    f.write_text("z" * 40 + "\n")
+    monkeypatch.setenv("AUREX_JWT_SECRET_FILE", str(f))
+    assert Settings().jwt_secret == "z" * 40
+    assert Settings().docs_enabled is True     # development default

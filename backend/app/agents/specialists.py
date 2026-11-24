@@ -39,7 +39,8 @@ def technical(ctx: AgentContext) -> Finding:
     hist = ind.macd(closes)["histogram"][-1]
     bb = ind.bollinger(closes, 20)
     up, lo = bb["upper"][-1], bb["lower"][-1]
-    assert sma20 is not None and sma50 is not None and rsi is not None
+    if sma20 is None or sma50 is None or rsi is None:   # explicit: asserts vanish under python -O
+        raise ValueError("indicator warm-up incomplete")
     trend = st.clip((sma20 - sma50) / a) if a else 0.0
     macd_c = st.clip((hist or 0.0) / a * 4) if a else 0.0
     rsi_c = st.clip((rsi - 50) / 20)

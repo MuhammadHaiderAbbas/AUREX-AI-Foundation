@@ -44,6 +44,14 @@ Delivered so far:
   against a benchmark; round-trip statistics attributed by source and exit; execution cost in
   basis points; risk-gate summaries; AI signal evaluation and calibration; hashed, audited
   reports and CSV exports.
+- **Phase 11, Security hardening:**
+  - a STRIDE threat model with 13 findings fixed, including spoofable proxy headers, a
+    vulnerable Starlette and unkeyed model artifacts;
+  - TOTP two-factor authentication, account lockout, a password block-list and session
+    management;
+  - JWT key rotation, request and rate limits, and stricter production guards;
+  - an audit export with offline verification;
+  - hardened containers, and dependency, SAST, secret and image scanning in CI.
 
 ## Quick start (Docker)
 
@@ -72,9 +80,9 @@ Instead of Postgres installed locally, you can run `docker compose up -d db redi
 
 | Suite | Command | Coverage |
 |---|---|---|
-| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 178 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints), risk engine (every check and its boundary, exits through halts, breakers incl. deposits/withdrawals, kill switches, abnormal activity, platform halt, brackets/OCO/resizing, proposal execution and refusal, autopilot, emergency stop), analytics (TWR with cash flows, ratio definitions and minimum history, drawdown duration, trade stats reconciled to the ledger, attribution, execution costs, rejection reasons, signal forward returns, calibration, report hash, CSV exports and formula-injection guard, privacy) |
+| Backend (pytest, real Postgres + pgvector) | `make backend-test` | 213 tests: auth, token rotation/reuse, RBAC, tenant isolation, ledger maths and DB invariants, concurrency, idempotency, audit tampering, session calendars (DST/holidays), indicators, synthetic determinism, provider adapters (mocked HTTP), staleness, outage handling, watchlists, WebSocket, research extraction (HTML/PDF/RSS/XXE), retrieval, quote verification, Claude-engine validation and fallbacks, agents (trend/flat/bear, gates, drift, disagreement, sizing, FX, failure isolation), proposals, ML (no look-ahead, purge, metrics, gates, PSI, registry lifecycle, drift, artifact integrity), backtesting (fill timing, costs, gaps, closures, sizing, breakers, causality, IS-only optimisation), paper execution (fill maths, ledger postings, realised P&L, FX conversion, limit/stop matching, expiry, cancel, idempotency, rejections, privacy, append-only executions, DB constraints), risk engine (every check and its boundary, exits through halts, breakers incl. deposits/withdrawals, kill switches, abnormal activity, platform halt, brackets/OCO/resizing, proposal execution and refusal, autopilot, emergency stop), analytics (TWR with cash flows, ratio definitions and minimum history, drawdown duration, trade stats reconciled to the ledger, attribution, execution costs, rejection reasons, signal forward returns, calibration, report hash, CSV exports and formula-injection guard, privacy), security (headers, docs exposure, body and rate limits, password policy, lockout, registration limit, origin checks, session management, JWT rotation and forgery, artifact HMAC, audit export tamper detection, filename sanitising, production guards), two-factor authentication (RFC 6238 vectors, replay, drift, encryption at rest and key rotation, enrolment, recovery codes, attempt limits, admin reset) |
 | Frontend | `make frontend-build` | strict TypeScript + production build |
-| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger); risk centre (limit change, rejection with checks, bracket order, kill switch, autopilot cycle, emergency stop; platform halt in the demo); analytics (every tab, report hash, CSV download) |
+| End-to-end (Playwright) | `make e2e` | register → paper account → deposit/withdraw → session restore → logout; admin audit verification; RBAC; live market streaming and charts; research corpus and grounded reports; agent desk; model lab; backtesting; paper trading (market buy, resting limit, rejection, cancel, close position, history, ledger); risk centre (limit change, rejection with checks, bracket order, kill switch, autopilot cycle, emergency stop; platform halt in the demo); analytics (every tab, report hash, CSV download); sessions panel; audit export; two-factor enrolment and sign-in |
 | Static demo | `npm run build:demo` then `AUREX_E2E_DEMO=1 AUREX_WEB_URL=… npx playwright test e2e/demo.spec.ts` | the GitHub Pages build, served under its sub-path |
 
 For the admin e2e test, set `AUREX_E2E_ADMIN_EMAIL` and `AUREX_E2E_ADMIN_PASSWORD`.
@@ -207,13 +215,27 @@ Set `AUREX_RESEARCH_ENGINE=claude` and provide `ANTHROPIC_API_KEY` to use Claude
 - [x] Hashed, audited full report (JSON and printable view) and audited CSV exports with formula-injection protection; periodic snapshots from the background monitor
 - [x] Analytics UI with six tabs, all working in the static demo
 
-**Next: Phase 11, security hardening:**
-- threat model review;
-- dependency and container scanning in CI;
-- secret management and key rotation;
-- session and rate-limit hardening;
-- security headers and CSP;
-- audit-log export and verification tooling;
-- fixes from a penetration-test style review.
+## Phase 11 deliverables
+
+- [x] STRIDE threat model and internal security review (`docs/security/threat-model.md`); 13 findings fixed, including:
+  - uvicorn trusting spoofed `X-Forwarded-For`;
+  - 7 Starlette advisories (FastAPI 0.115 → 0.165);
+  - pickle artifacts guarded only by a same-row hash (now HMAC);
+  - a CSP that would have blocked the deployed fonts.
+- [x] TOTP two-factor authentication: encrypted seeds, replay protection, recovery codes, rate-limited verification, admin reset; full UI and demo support
+- [x] Password block-list and personal-info check, per-account lockout, registration limit, session list and revocation, Origin check on cookie endpoints
+- [x] JWT key rotation (`kid`, previous secrets), `*_FILE` secrets, stricter production guards (CORS, DB password, docs off)
+- [x] Per-IP API rate limit and body-size limits (chunked included); full security headers on the API
+- [x] Audit export (JSON Lines) with offline verification; `audit-verify`, `audit-export`, `audit-verify-file`, `ml-sign-artifacts` CLIs
+- [x] Hardened compose (read-only, `cap_drop`, `no-new-privileges`, private network), tightened CSP, CSP for the static demo
+- [x] `security.yml`: pip-audit, npm audit, Bandit, detect-secrets, Trivy, run on every PR and weekly; Dependabot
+
+**Next: Phase 12, production:**
+- deployment (TLS, managed Postgres, backups and restore drills);
+- observability (metrics, dashboards, alerting);
+- Redis-backed rate limits;
+- automated audit-head anchoring;
+- secrets management;
+- the gated path to broker sandboxes. Live trading stays disabled.
 
 See `docs/architecture/overview.md` for the architecture and `docs/architecture/decisions.md` for the ADRs.

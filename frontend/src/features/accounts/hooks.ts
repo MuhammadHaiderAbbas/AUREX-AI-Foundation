@@ -53,3 +53,16 @@ export function useCashMovement(accountId: string | undefined) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); qc.invalidateQueries({ queryKey: ["activity"] }); },
   });
 }
+
+export interface SessionInfo { id: string; signed_in_at: string; last_active_at: string; expires_at: string; ip_address: string | null; user_agent: string | null; current: boolean }
+
+export const useSessions = () => useQuery({ queryKey: ["sessions"], queryFn: () => api<SessionInfo[]>("/auth/sessions") });
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string | "others") =>
+      api<null>(id === "others" ? "/auth/sessions/revoke-others" : `/auth/sessions/${id}/revoke`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); qc.invalidateQueries({ queryKey: ["activity"] }); },
+  });
+}

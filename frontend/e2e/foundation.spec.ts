@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 const PASSWORD = "Correct-Horse-42";
@@ -43,6 +44,10 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await page.goto("/");
   await expect(page.getByText("Virtual deposit").first()).toBeVisible();
 
+  // Active sessions are listed, with this one marked
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByTestId("sessions")).toContainText("This session");
+
   // Analytics is available from day one (with honest "not enough history" states)
   await page.getByRole("link", { name: /Analytics/ }).click();
   await expect(page.getByTestId("perf-metrics")).toBeVisible();
@@ -62,6 +67,9 @@ test("admin can verify the audit chain", async ({ page }) => {
   await page.getByRole("link", { name: "Administration" }).click();
   await page.getByRole("button", { name: "Verify chain" }).click();
   await expect(page.getByText(/Chain intact — \d+ records verified/)).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export" }).click();
+  expect((await download).suggestedFilename()).toMatch(/^aurex-audit-\d{8}T\d{6}Z\.jsonl$/);
 });
 
 test("non-admin users do not see administration", async ({ page }) => {
@@ -347,4 +355,57 @@ async function analyticsFlow(page: import("@playwright/test").Page) {
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Round trips (CSV)" }).click();
   expect((await download).suggestedFilename()).toMatch(/^aurex-trades-all-\d{8}\.csv$/);
+}
+
+test("two-factor authentication: enrol, then sign in with a code", async ({ page }) => {
+  const email = `e2e-mfa-${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill("Second Factor");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Second Factor" })).toBeVisible();
+  await mfaFlow(page, PASSWORD, async () => {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  });
+});
+
+// RFC 6238 code for a base32 secret (used to act as the user's authenticator app).
+function totpCode(secret: string, step = Math.floor(Date.now() / 30_000)): string {
+  const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of secret.replace(/\s/g, "").toUpperCase()) bits += alpha.indexOf(ch).toString(2).padStart(5, "0");
+  const key = Buffer.from(Array.from({ length: Math.floor(bits.length / 8) }, (_, i) => parseInt(bits.slice(i * 8, i * 8 + 8), 2)));
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(step));
+  const d = createHmac("sha1", key).update(msg).digest();
+  const o = d[d.length - 1]! & 0x0f;
+  return String((d.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+// Shared with the other spec (kept in sync manually). Enrols, signs out, signs back in with a code.
+async function mfaFlow(page: import("@playwright/test").Page, password: string, signIn: () => Promise<void>) {
+  await page.getByRole("link", { name: "Settings" }).click();
+  const card = page.getByTestId("two-factor");
+  await card.getByRole("button", { name: "Set up two-factor authentication" }).click();
+  await card.getByLabel("Confirm your password").fill(password);
+  await card.getByRole("button", { name: "Continue" }).click();
+  const secret = (await card.getByTestId("mfa-secret").textContent())!.replace(/\s/g, "");
+  await card.getByLabel("6-digit code").fill(totpCode(secret));
+  await card.getByRole("button", { name: "Turn on" }).click();
+  await expect(card.getByTestId("recovery-codes")).toContainText("will not be shown again");
+  await card.getByRole("button", { name: "I have saved them" }).click();
+  await expect(card.getByText("On", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await signIn();
+  await expect(page.getByRole("heading", { name: "Two-factor authentication" })).toBeVisible();
+  await page.getByLabel("Authentication code").fill("000000");
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByText("Invalid authentication code")).toBeVisible();
+  // the enrolment code's time step is spent (no replay): use the next one, within the drift window
+  await page.getByLabel("Authentication code").fill(totpCode(secret, Math.floor(Date.now() / 30_000) + 1));
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
 }

@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { useRevokeSession, useSessions } from "@/features/accounts/hooks";
+import { formatDateTime, relativeTime } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { api, type UserSettings } from "@/services/api";
+import { api, type User, type UserSettings } from "@/services/api";
 
 const TIMEZONES = ["Europe/London", "Europe/Paris", "America/New_York", "America/Chicago", "Asia/Tokyo", "Asia/Singapore", "UTC"];
 
@@ -72,6 +76,122 @@ function ChangePassword() {
   );
 }
 
+function TwoFactor() {
+  const qc = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: () => api<User>("/auth/me") });
+  const [stage, setStage] = useState<"idle" | "password" | "scan" | "codes" | "disable" | "regenerate">("idle");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null);
+  const [codes, setCodes] = useState<string[]>([]);
+  const reset = () => { setPassword(""); setCode(""); };
+  const done = () => { qc.invalidateQueries({ queryKey: ["me"] }); qc.invalidateQueries({ queryKey: ["sessions"] }); qc.invalidateQueries({ queryKey: ["activity"] }); };
+  const start = useMutation({ mutationFn: () => api<{ secret: string; otpauth_uri: string }>("/auth/mfa/setup", { method: "POST", json: { password } }),
+    onSuccess: (r) => { setSetup(r); reset(); setStage("scan"); } });
+  const enable = useMutation({ mutationFn: () => api<{ recovery_codes: string[] }>("/auth/mfa/enable", { method: "POST", json: { code } }),
+    onSuccess: (r) => { setCodes(r.recovery_codes); setSetup(null); reset(); setStage("codes"); done(); } });
+  const disable = useMutation({ mutationFn: () => api<null>("/auth/mfa/disable", { method: "POST", json: { password, code } }),
+    onSuccess: () => { reset(); setStage("idle"); done(); } });
+  const regenerate = useMutation({ mutationFn: () => api<{ recovery_codes: string[] }>("/auth/mfa/recovery-codes", { method: "POST", json: { password, code } }),
+    onSuccess: (r) => { setCodes(r.recovery_codes); reset(); setStage("codes"); done(); } });
+  const on = me.data?.mfa_enabled;
+  const err = start.error ?? enable.error ?? disable.error ?? regenerate.error;
+  const download = () => {
+    const blob = new Blob([`AUREX AI recovery codes for ${me.data?.email}\nEach code works once.\n\n${codes.join("\n")}\n`], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "aurex-recovery-codes.txt"; a.click(); URL.revokeObjectURL(a.href);
+  };
+  const pwCode = (label: string, run: () => void, pending: boolean, variant: "primary" | "danger") => (
+    <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); run(); }}>
+      <Field label="Password" htmlFor="tf-pw"><Input id="tf-pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+      <Field label="Authentication or recovery code" htmlFor="tf-code"><Input id="tf-code" autoComplete="one-time-code" required className="num" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+      <div className="flex gap-2"><Button type="submit" size="sm" variant={variant} disabled={pending}>{label}</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => { reset(); setStage("idle"); }}>Cancel</Button></div>
+    </form>
+  );
+  return (
+    <Card data-testid="two-factor">
+      <CardHeader title="Two-factor authentication" description="A code from an authenticator app is required at every sign-in."
+        action={<Badge tone={on ? "positive" : "warning"}>{on ? "On" : "Off"}</Badge>} />
+      <CardBody className="space-y-4 text-sm">
+        <ErrorBanner error={err} />
+        {stage === "idle" && (on ? (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setStage("regenerate")}>New recovery codes</Button>
+            <Button size="sm" variant="danger" onClick={() => setStage("disable")}>Turn off</Button>
+          </div>
+        ) : <Button size="sm" onClick={() => setStage("password")}>Set up two-factor authentication</Button>)}
+        {stage === "password" && (
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); start.mutate(); }}>
+            <Field label="Confirm your password" htmlFor="tf-pw0"><Input id="tf-pw0" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <div className="flex gap-2"><Button type="submit" size="sm" disabled={start.isPending}>Continue</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => { reset(); setStage("idle"); }}>Cancel</Button></div>
+          </form>
+        )}
+        {stage === "scan" && setup && (
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); enable.mutate(); }}>
+            <p className="text-muted">Add this key to your authenticator app (Google Authenticator, 1Password, Authy…), then enter the 6-digit code it shows.</p>
+            <div className="rounded-md border border-border bg-surface-2 p-3">
+              <div className="text-[11px] uppercase tracking-wider text-subtle">Setup key</div>
+              <div className="num mt-1 break-all text-base tracking-wider" data-testid="mfa-secret">{setup.secret.match(/.{1,4}/g)!.join(" ")}</div>
+              <a href={setup.otpauth_uri} className="mt-2 inline-block text-xs text-accent hover:underline">Open in an authenticator app on this device</a>
+            </div>
+            <Field label="6-digit code" htmlFor="tf-first"><Input id="tf-first" autoComplete="one-time-code" inputMode="numeric" required maxLength={6} className="num tracking-widest" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+            <div className="flex gap-2"><Button type="submit" size="sm" disabled={enable.isPending || code.length !== 6}>Turn on</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => { setSetup(null); reset(); setStage("idle"); }}>Cancel</Button></div>
+          </form>
+        )}
+        {stage === "codes" && (
+          <div className="space-y-3" data-testid="recovery-codes">
+            <p className="text-warning">Save these recovery codes somewhere safe. Each works once if you lose your device. They will not be shown again.</p>
+            <ul className="num grid grid-cols-2 gap-1 rounded-md border border-border bg-surface-2 p-3 text-sm">{codes.map((c) => <li key={c}>{c}</li>)}</ul>
+            <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={download}>Download</Button>
+              <Button size="sm" onClick={() => { setCodes([]); setStage("idle"); }}>I have saved them</Button></div>
+          </div>
+        )}
+        {stage === "disable" && pwCode("Turn off two-factor authentication", () => disable.mutate(), disable.isPending, "danger")}
+        {stage === "regenerate" && pwCode("Generate new codes", () => regenerate.mutate(), regenerate.isPending, "primary")}
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Coarse, human-readable device label from a user agent (display only). */
+function device(ua: string | null) {
+  if (!ua) return "Unknown device";
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS X/.test(ua) ? "macOS" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} on ${os}` : browser;
+}
+
+function Sessions() {
+  const sessions = useSessions();
+  const revoke = useRevokeSession();
+  const others = (sessions.data ?? []).filter((x) => !x.current).length;
+  return (
+    <Card className="lg:col-span-2" data-testid="sessions">
+      <CardHeader title="Signed-in sessions" description="Each browser or device you signed in from. Revoking one signs it out immediately."
+        action={others > 0 && <Button size="sm" variant="danger" onClick={() => revoke.mutate("others")} disabled={revoke.isPending}>Sign out {others} other{others === 1 ? "" : "s"}</Button>} />
+      <ErrorBanner error={sessions.error ?? revoke.error} className="m-4" />
+      {sessions.isLoading ? <div className="p-6"><Spinner className="mx-auto" /></div> : (
+        <Table>
+          <thead><tr><Th>Device</Th><Th>Address</Th><Th>Signed in</Th><Th>Last active</Th><Th /></tr></thead>
+          <tbody>
+            {sessions.data?.map((x) => (
+              <Tr key={x.id}>
+                <Td title={x.user_agent ?? undefined}>{device(x.user_agent)} {x.current && <Badge tone="positive" className="ml-1">This session</Badge>}</Td>
+                <Td className="num text-xs text-muted">{x.ip_address ?? "—"}</Td>
+                <Td className="num text-xs text-muted">{formatDateTime(x.signed_in_at)}</Td>
+                <Td className="text-xs text-muted">{relativeTime(x.last_active_at)}</Td>
+                <Td className="text-right">{!x.current && <Button size="sm" variant="ghost" onClick={() => revoke.mutate(x.id)} disabled={revoke.isPending} aria-label={`Revoke ${device(x.user_agent)} session`}>Revoke</Button>}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const { user } = useAuth();
   return (
@@ -86,6 +206,8 @@ export function SettingsPage() {
       </Card>
       <Preferences />
       <ChangePassword />
+      <TwoFactor />
+      <Sessions />
       <Card className="lg:col-span-2">
         <CardHeader title="Brokers & data providers" description="Integrations arrive in Phase 3 (data) and Phase 12 (broker sandboxes)" />
         <CardBody className="text-sm text-muted">

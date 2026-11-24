@@ -26,6 +26,17 @@ class SlidingWindowLimiter:
             q.append(now)
             return True
 
+    def count(self, key: str, window_seconds: int) -> int:
+        """Attempts within the window, without recording a new one."""
+        now = time.monotonic()
+        with self._lock:
+            q = self._hits.get(key)
+            if not q:
+                return 0
+            while q and now - q[0] > window_seconds:
+                q.popleft()
+            return len(q)
+
     def reset(self, key: str | None = None) -> None:
         with self._lock:
             if key is None:

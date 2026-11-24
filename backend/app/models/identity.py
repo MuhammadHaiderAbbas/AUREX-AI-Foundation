@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, Timestamps, UUIDPk
@@ -30,6 +30,13 @@ class User(UUIDPk, Timestamps, Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # TOTP two-factor authentication (Phase 11). Seeds are AES-GCM encrypted (app.core.crypto).
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    mfa_secret_enc: Mapped[str | None] = mapped_column(Text)
+    mfa_pending_secret_enc: Mapped[str | None] = mapped_column(Text)
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger)
+    mfa_recovery_hashes: Mapped[list[str] | None] = mapped_column(JSON)
+    mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     role: Mapped[Role] = relationship(lazy="joined")
     settings: Mapped["UserSettings"] = relationship(

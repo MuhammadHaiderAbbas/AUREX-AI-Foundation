@@ -115,7 +115,10 @@ export interface User {
   is_active: boolean;
   created_at: string;
   last_login_at: string | null;
+  mfa_enabled?: boolean;
 }
+
+export interface MfaChallenge { mfa_required: true; mfa_token: string; expires_in: number }
 
 export interface TokenResponse {
   access_token: string;

@@ -202,3 +202,32 @@ exporting is written to the audit log with that hash.
 **Why.** The blueprint calls for exportable audit reports. A hash lets anyone holding a copy
 check that it has not been edited since generation, and the audit entry ties it to who
 produced it and when.
+
+## ADR-028 Sign model artifacts with a server-held key
+**Decision.** Model artifacts are verified with HMAC-SHA256, using a key that is not stored in
+the database, before they are unpickled. Unsigned artifacts are refused until an operator
+signs them explicitly.
+**Why.** A hash stored next to the artifact only detects accidental corruption: anyone who can
+write the row can also write a matching hash. Unpickling attacker-controlled bytes is code
+execution, so loading has to require something a database write cannot forge.
+
+## ADR-029 TOTP as the second factor, with encrypted seeds
+**Decision.** Two-factor authentication uses RFC 6238 TOTP (authenticator apps) and
+single-use recovery codes. Seeds are AES-256-GCM encrypted with a key derived from the
+application secret, and decryption also accepts previous secrets.
+**Why.** TOTP needs no SMS provider or phone number and works offline. Encrypting the seeds
+means a database dump alone cannot mint codes, and accepting previous secrets lets the JWT
+secret rotate without locking users out.
+
+## ADR-030 Security limits that fail safe
+**Decision.** Rate limits, body limits and lockouts return 413/429 with explicit messages,
+health checks are exempt from rate limiting, and exits are never blocked by any of them.
+**Why.** Security controls that block legitimate exits or monitoring become availability
+incidents themselves. They should refuse the attack, not the operator.
+
+## ADR-031 Scan in CI, not just once
+**Decision.** Dependency (pip-audit, npm audit), static (Bandit), secret (detect-secrets) and
+image (Trivy) scans run on every PR and weekly, with Dependabot proposing updates.
+**Why.** Phase 11's audit found seven published Starlette advisories in a dependency pinned
+months earlier. Vulnerability data changes after code is written, so scanning has to be
+continuous.

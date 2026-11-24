@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 // Runs against the static GitHub Pages build (VITE_DEMO_MODE=true). Set AUREX_E2E_DEMO=1.
@@ -35,6 +36,11 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await page.getByRole("link", { name: "Administration" }).click();
   await page.getByRole("button", { name: "Verify chain" }).click();
   await expect(page.getByText(/Chain intact — \d+ records verified/)).toBeVisible();
+  const auditDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export" }).click();
+  expect((await auditDownload).suggestedFilename()).toMatch(/^aurex-audit-.*\.jsonl$/);
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByTestId("sessions")).toContainText("This session");
 
   // Research Lab: the demo user starts with the fictional sample corpus
   await page.getByRole("link", { name: "AI Research Lab" }).click();
@@ -92,6 +98,11 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await expect(page.getByText("Trading halted")).toBeVisible();
   await page.getByRole("button", { name: "Resume trading" }).click();
   await expect(page.getByText("Risk gate on")).toBeVisible();
+
+  // Two-factor authentication in the browser (Launch demo then asks for a code)
+  await mfaFlow(page, "Demo-Account-2026!", async () => {
+    await page.getByRole("button", { name: "Launch demo" }).click();
+  });
 
   // Deep link + reload survives (SPA fallback + persisted session)
   await page.goto("markets?symbol=AAPL");
@@ -225,4 +236,42 @@ async function analyticsFlow(page: import("@playwright/test").Page) {
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Round trips (CSV)" }).click();
   expect((await download).suggestedFilename()).toMatch(/^aurex-trades-all-\d{8}\.csv$/);
+}
+
+// RFC 6238 code for a base32 secret (used to act as the user's authenticator app).
+function totpCode(secret: string, step = Math.floor(Date.now() / 30_000)): string {
+  const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of secret.replace(/\s/g, "").toUpperCase()) bits += alpha.indexOf(ch).toString(2).padStart(5, "0");
+  const key = Buffer.from(Array.from({ length: Math.floor(bits.length / 8) }, (_, i) => parseInt(bits.slice(i * 8, i * 8 + 8), 2)));
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(step));
+  const d = createHmac("sha1", key).update(msg).digest();
+  const o = d[d.length - 1]! & 0x0f;
+  return String((d.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+// Shared with the other spec (kept in sync manually). Enrols, signs out, signs back in with a code.
+async function mfaFlow(page: import("@playwright/test").Page, password: string, signIn: () => Promise<void>) {
+  await page.getByRole("link", { name: "Settings" }).click();
+  const card = page.getByTestId("two-factor");
+  await card.getByRole("button", { name: "Set up two-factor authentication" }).click();
+  await card.getByLabel("Confirm your password").fill(password);
+  await card.getByRole("button", { name: "Continue" }).click();
+  const secret = (await card.getByTestId("mfa-secret").textContent())!.replace(/\s/g, "");
+  await card.getByLabel("6-digit code").fill(totpCode(secret));
+  await card.getByRole("button", { name: "Turn on" }).click();
+  await expect(card.getByTestId("recovery-codes")).toContainText("will not be shown again");
+  await card.getByRole("button", { name: "I have saved them" }).click();
+  await expect(card.getByText("On", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await signIn();
+  await expect(page.getByRole("heading", { name: "Two-factor authentication" })).toBeVisible();
+  await page.getByLabel("Authentication code").fill("000000");
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByText("Invalid authentication code")).toBeVisible();
+  // the enrolment code's time step is spent (no replay): use the next one, within the drift window
+  await page.getByLabel("Authentication code").fill(totpCode(secret, Math.floor(Date.now() / 30_000) + 1));
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
 }

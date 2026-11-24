@@ -65,7 +65,8 @@ def bollinger(values: list[float], period: int = 20, k: float = 2.0) -> dict[str
     for i in range(period - 1, len(values)):
         window = values[i - period + 1 : i + 1]
         m = mid[i]
-        assert m is not None
+        if m is None:   # cannot happen once the window is full; explicit rather than assert
+            continue
         sd = math.sqrt(sum((v - m) ** 2 for v in window) / period)
         upper[i], lower[i] = m + k * sd, m - k * sd
     return {"middle": mid, "upper": upper, "lower": lower}
