@@ -63,6 +63,8 @@ class BinaryRequest:
     stake: Decimal
     expiry_seconds: int
     client_id: str | None = None
+    source: str = "manual"                       # "bot" for the binary bot
+    signal: dict | None = None                   # the bot's evidence, stored on the contract
 
 
 def config() -> dict[str, Any]:
@@ -147,8 +149,9 @@ class BinaryService:
         if not rate.passed and not prof.kill_switch:
             await self.risk.engage_kill_switch(acct, prof, rate.message, actor=None, automatic=True)
         cdicts = [c.dict() for c in checks]
+        decision_source = "binary-bot" if req.source == "bot" else "binary"
         if reason:
-            self.db.add(RiskDecision(account_id=acct.id, source="binary", symbol=inst.symbol, side=SIDE[req.direction],
+            self.db.add(RiskDecision(account_id=acct.id, source=decision_source, symbol=inst.symbol, side=SIDE[req.direction],
                                      approved=False, reason=reason, checks=cdicts))
             await self.db.flush()
             raise BinaryRejected(f"risk: {reason}", cdicts)
@@ -162,10 +165,10 @@ class BinaryService:
                            direction=req.direction, stake=req.stake, currency=acct.base_currency,
                            payout_rate=cfg["payout_rate"], strike=strike, expiry_seconds=req.expiry_seconds,
                            opened_at=now, expires_at=expires, status=BinaryStatus.OPEN, open_txn_id=txn.id,
-                           client_id=req.client_id)
+                           client_id=req.client_id, source=req.source, signal=req.signal)
         self.db.add(c)
         await self.db.flush()
-        self.db.add(RiskDecision(account_id=acct.id, binary_id=c.id, source="binary", symbol=inst.symbol,
+        self.db.add(RiskDecision(account_id=acct.id, binary_id=c.id, source=decision_source, symbol=inst.symbol,
                                  side=SIDE[req.direction], approved=True, reason=None, checks=cdicts))
         await self.trading.snapshot(acct, "binary")
         return c, True
