@@ -18,7 +18,7 @@ import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
 import { ChecksList } from "@/pages/RiskPage";
 import { api, ApiError, type BinaryContract, type BinaryDirection, type InstrumentWithQuote, type RiskCheck } from "@/services/api";
 
-const EXPIRY_LABEL: Record<number, string> = { 60: "1 minute", 300: "5 minutes", 900: "15 minutes", 3600: "1 hour", 86400: "1 day" };
+const EXPIRY_LABEL: Record<number, string> = { 30: "30 seconds", 60: "1 minute", 300: "5 minutes", 900: "15 minutes", 3600: "1 hour", 86400: "1 day" };
 const label = (s: number) => EXPIRY_LABEL[s] ?? `${s}s`;
 const pct = (v: number | null | undefined, dp = 1) => (v == null ? "—" : `${(v * 100).toFixed(dp)}%`);
 const slug = (s: string) => s.replace("/", "");
@@ -139,7 +139,7 @@ export function BinaryPage() {
                 </Field>
                 <Field label="Expiry" htmlFor="bin-expiry">
                   <Select id="bin-expiry" value={expiry} onChange={(e) => setExpiry(Number(e.target.value))}>
-                    {(cfg.data?.expiries ?? [60, 300, 900, 3600, 86400]).map((x) => <option key={x} value={x}>{label(x)}</option>)}
+                    {(cfg.data?.expiries ?? [30, 60, 300, 900, 3600, 86400]).map((x) => <option key={x} value={x}>{label(x)}</option>)}
                   </Select>
                 </Field>
               </div>

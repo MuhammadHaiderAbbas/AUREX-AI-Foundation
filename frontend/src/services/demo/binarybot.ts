@@ -1,8 +1,15 @@
 /** Browser port of backend/app/binary/bot.py compute_signal: fit, validate out of sample, predict. Keep in sync. */
 import { buildDataset, featureMatrix, fitLogit, predict, type Bar } from "./ml";
 
-export const EXPIRY_BARS: Record<number, [string, number]> = { 60: ["1m", 1], 300: ["5m", 1], 900: ["15m", 1], 3600: ["1h", 1], 86400: ["1h", 24] };
+export const EXPIRY_BARS: Record<number, [string, number]> = { 30: ["30s", 1], 60: ["1m", 1], 300: ["5m", 1], 900: ["15m", 1], 3600: ["1h", 1], 86400: ["1h", 24] };
 const MIN_HOLDOUT = 30;
+export const MIN_BARS = 280;     // 80 warm-up bars + 200 usable
+
+/** Live 30-second bars are recorded, not downloaded: say how long until there are enough. */
+export function collectingReason(have: number, where: string) {
+  const mins = Math.ceil(((MIN_BARS - have) * 30) / 60);
+  return `collecting live 30-second bars: ${have} of ${MIN_BARS} recorded (about ${mins} min more; ${where})`;
+}
 
 export interface Signal {
   trade: boolean; direction: "HIGHER" | "LOWER" | null; p_up: number | null; confidence: number | null;

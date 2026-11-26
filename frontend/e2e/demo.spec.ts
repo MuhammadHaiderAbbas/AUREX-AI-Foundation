@@ -303,6 +303,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await expect(page.getByTestId("live-tick-chart")).toBeVisible();
   await page.getByLabel("Instrument", { exact: true }).selectOption("BTC-USD");
   await expect(page.getByTestId("binary-price")).toContainText("Market open");
+  await expect(page.locator("#bin-expiry option[value='30']")).toHaveText("30 seconds");
   // 2.50 is 2.5% of £100: above the 2% binary stake cap
   await page.getByLabel("Stake (GBP)").fill("2.50");
   await page.getByRole("button", { name: "Open Higher contract" }).click();

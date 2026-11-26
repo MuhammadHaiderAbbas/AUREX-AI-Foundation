@@ -132,7 +132,7 @@ export interface DemoInstrument {
   market: MarketKey; base_currency: string; quote_currency: string; price_decimals: number;
   tick_size: string; lot_size: string; reference_price: number;
 }
-export const TIMEFRAMES: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
+export const TIMEFRAMES: Record<string, number> = { "30s": 30, "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
 
 function ohlc(i: DemoInstrument, s: number, e: number, k = 1) {
   const step = Math.max(60, (e - s) / 16);
@@ -146,6 +146,10 @@ const BASE_VOLUME: Record<AssetClassKey, number> = { CRYPTO: 40, FX: 2e6, STOCK:
 
 /** Real Coinbase candles for crypto when cached (see live.ensureCandles), otherwise the synthetic generator. */
 export function candles(i: DemoInstrument, timeframe: string, limit: number, nowMs = Date.now()) {
+  if (timeframe === "30s" && live30(i)) {
+    const d = i.price_decimals;          // real bars only, however few: never pad live crypto with simulated ones
+    return live.bars30Sync(i.symbol, limit).map((r) => ({ open_time: r.open_time, open: r.open.toFixed(d), high: r.high.toFixed(d), low: r.low.toFixed(d), close: r.close.toFixed(d), volume: "0" }));
+  }
   if (live.isLiveSymbol(i.symbol) && Math.abs(nowMs - Date.now()) < 5000) {
     const real = live.candlesSync(i.symbol, timeframe, limit);
     if (real && real.length >= Math.min(limit, 250) * 0.9) {
@@ -167,8 +171,11 @@ function fxScale(i: DemoInstrument): number {
   return t ? t.price / priceAt(i.symbol, i.asset_class, i.reference_price, Date.now() / 1000) : 1;
 }
 
+/** Live crypto gets 30-second bars recorded from the Coinbase stream (see live.bars30Sync). */
+const live30 = (i: DemoInstrument) => live.isLiveSymbol(i.symbol) && live.liveStatus() === "live";
+
 export const candleSource = (i: DemoInstrument, timeframe: string, limit: number) =>
-  live.isLiveSymbol(i.symbol) && (live.candlesSync(i.symbol, timeframe, limit)?.length ?? 0) >= Math.min(limit, 250) * 0.9 ? "coinbase"
+  timeframe === "30s" && live30(i) ? "coinbase" : live.isLiveSymbol(i.symbol) && (live.candlesSync(i.symbol, timeframe, limit)?.length ?? 0) >= Math.min(limit, 250) * 0.9 ? "coinbase"
     : live.isLiveFx(i.symbol) && timeframe === "1d" && (live.fxDailyCandles(i.symbol, limit)?.length ?? 0) >= Math.min(limit, 30) ? "ecb_reference" : "synthetic";
 
 function syntheticCandles(i: DemoInstrument, timeframe: string, limit: number, nowMs: number) {
