@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user, get_audit_context
 from app.api.v1.trading import ORDERS_PER_MINUTE, _owned_account_ids, order_limiter
-from app.binary.bot import EXPIRY_BARS, bot_stats, get_bot, recent_cycles, run_bot_cycle, signal_for
+from app.binary.bot import EXPIRY_BARS, bot_stats, cycle_interval, get_bot, recent_cycles, run_bot_cycle, signal_for
 from app.binary.service import BinaryRejected, BinaryRequest, BinaryService, config
 from app.core.config import get_settings
 from app.core.errors import BusinessRuleViolation, RateLimited
@@ -107,7 +107,7 @@ async def _bot_read(db: AsyncSession, account_id: uuid.UUID) -> BotRead:
         account_id=bot.account_id, status=bot.status, symbols=bot.symbols, expiry_seconds=bot.expiry_seconds,
         stake_pct=bot.stake_pct, min_confidence=bot.min_confidence, edge_margin=bot.edge_margin,
         guard_min_contracts=bot.guard_min_contracts, started_at=bot.started_at, last_cycle_at=bot.last_cycle_at,
-        paused_reason=bot.paused_reason, interval_seconds=get_settings().binary_bot_interval_seconds,
+        paused_reason=bot.paused_reason, interval_seconds=cycle_interval(bot),
         data_mode=get_settings().market_data_mode, break_even_win_rate=cfg["break_even_win_rate"],
         payout_rate=cfg["payout_rate"], stats=await bot_stats(db, bot), recent=await recent_cycles(db, account_id))
 

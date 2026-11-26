@@ -793,7 +793,7 @@ async function runAnalysis(s: State, user: DUser, symbol: string, accountId: str
 }
 
 // ---- binary options (mirror of backend app/binary) ---------------------------------------
-const BINARY_PAYOUT = 0.8, BINARY_EXPIRIES = [60, 300, 900, 3600, 86400], BINARY_VOID_AFTER_S = 600;
+const BINARY_PAYOUT = 0.8, BINARY_EXPIRIES = [30, 60, 300, 900, 3600, 86400], BINARY_VOID_AFTER_S = 600;
 const BINARY_NOTICE = "Paper simulation only. Binary options are banned for retail customers in the UK (FCA, since April 2019) and restricted across the EU/EEA. The payout is below even money, so a forecaster who is right half the time loses money; you need to win more often than the break-even rate just to stand still.";
 const binaryConfig = () => ({ payout_rate: BINARY_PAYOUT, expiries: BINARY_EXPIRIES, break_even_win_rate: 1 / (1 + BINARY_PAYOUT),
   coin_flip_expected_return: 0.5 * BINARY_PAYOUT - 0.5, minimum_stake: MIN_ORDER_VALUE.toFixed(2), void_after_seconds: BINARY_VOID_AFTER_S });
@@ -913,9 +913,11 @@ async function openBinary(s: State, user: DUser, a: DAccount, body: Record<strin
 
 // ---- binary bot (mirror of backend app/binary/bot.py) -------------------------------------
 const BOT_INTERVAL_S = 60, BOT_DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD", "EUR/USD"];
+/** Short contracts need frequent cycles or the bot sits idle between them (mirrors bot.py cycle_interval). */
+const botInterval = (bot: DBot) => Math.min(BOT_INTERVAL_S, Math.max(10, bot.expiry_seconds / 3));
 function getBot(s: State, accountId: string): DBot {
   s.binaryBots ??= {};
-  return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 300, stake_pct: 1,
+  return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 60, stake_pct: 1,
     min_confidence: 0.6, edge_margin: 0.02, guard_min_contracts: 20, started_at: null, last_cycle_at: null, paused_reason: null });
 }
 async function botSignal(symbol: string, expiry: number, bot?: DBot) {
@@ -924,6 +926,7 @@ async function botSignal(symbol: string, expiry: number, bot?: DBot) {
   await live.ensureCandles(inst.symbol, tf, 600);
   const bars = mkt.candles(inst, tf, 600).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
   const sig = bbot.computeSignal(bars, horizon, BINARY_PAYOUT, bot?.min_confidence ?? 0.6, bot?.edge_margin ?? 0.02);
+  if (!sig.trade && tf === "30s" && bars.length < bbot.MIN_BARS) sig.reason = bbot.collectingReason(bars.length, "keep this page open; bars are saved in this browser");
   return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: mkt.candleSource(inst, tf, 600) };
 }
 function botStats(s: State, bot: DBot) {
@@ -969,14 +972,14 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
 }
 async function dueBots(s: State) {
   for (const bot of Object.values(s.binaryBots ?? {})) {
-    if (bot.status !== "RUNNING" || (bot.last_cycle_at && Date.now() - Date.parse(bot.last_cycle_at) < BOT_INTERVAL_S * 1000)) continue;
+    if (bot.status !== "RUNNING" || (bot.last_cycle_at && Date.now() - Date.parse(bot.last_cycle_at) < botInterval(bot) * 1000)) continue;
     const a = s.accounts.find((x) => x.id === bot.account_id);
     if (a) await botCycle(s, a, bot);
   }
 }
 function botRead(s: State, bot: DBot) {
   const allReal = live.liveStatus() === "live" && bot.symbols.every(live.isLiveSymbol);
-  return { ...bot, interval_seconds: BOT_INTERVAL_S, data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
+  return { ...bot, interval_seconds: botInterval(bot), data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
     stats: botStats(s, bot), recent: s.riskEvents.filter((e) => e.account_id === bot.account_id && ["BINARY_BOT_CYCLE", "BINARY_BOT_PAUSED", "BINARY_BOT_CONTROL"].includes(e.type))
       .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] })) };
 }

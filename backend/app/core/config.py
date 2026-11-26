@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     # a licensed equity feed is configured).
     market_data_mode: Literal["synthetic", "live"] = "synthetic"
     coinbase_base_url: str = "https://api.exchange.coinbase.com"
+    # Public ticker feed the worker leader records into 30-second bars (live mode only).
+    coinbase_ws_url: str = "wss://ws-feed.exchange.coinbase.com"
+    tick_bars_enabled: bool = True
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     # Alpaca market data (real US stocks/ETFs). Without a key these instruments stay simulated.
     alpaca_data_url: str = "https://data.alpaca.markets"
@@ -124,10 +127,10 @@ class Settings(BaseSettings):
     # Binary options simulator (paper only). A win returns the stake plus payout_rate x stake;
     # a loss forfeits the stake; an exact tie refunds it. Break-even win rate = 1 / (1 + rate).
     binary_payout_rate: float = 0.80
-    binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [60, 300, 900, 3600, 86400])
+    binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [30, 60, 300, 900, 3600, 86400])
     # Contracts whose settlement price cannot be observed this long after expiry are voided (refunded).
     binary_void_after_seconds: int = 600
-    # Binary bot: seconds between cycles for each RUNNING bot.
+    # Binary bot: longest gap between cycles for each RUNNING bot (short expiries cycle faster: expiry / 3).
     binary_bot_interval_seconds: float = 60.0
 
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).

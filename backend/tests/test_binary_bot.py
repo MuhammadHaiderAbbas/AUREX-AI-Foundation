@@ -139,3 +139,34 @@ async def test_signal_endpoint_and_worker(client, monkeypatch):
     assert out["binary"]["settled"] == 1
     b = (await client.get(f"{API}/binary/bot?account_id={aid}", headers=h)).json()
     assert b["stats"]["contracts"] == 2           # the worker ran the next cycle and opened another
+
+
+async def test_thirty_second_expiry_signal_and_contract(client):
+    h, aid = await small_account(client)
+    cfg = (await client.get(f"{API}/binary/config", headers=h)).json()
+    assert 30 in cfg["expiries"]
+    sig = (await client.get(f"{API}/binary/signal?symbol=BTC-USD&expiry_seconds=30", headers=h)).json()
+    assert sig["timeframe"] == "30s" and sig["bars"] >= 280      # synthetic mode generates 30-second bars directly
+    r = await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "stop", "expiry_seconds": 30})
+    assert r.status_code == 200, r.text
+    assert r.json()["expiry_seconds"] == 30 and r.json()["interval_seconds"] == 10   # cycles every 10s for 30s contracts
+    set_price("BTC-USD", "50000", spread="0")
+    c = await client.post(f"{API}/binary/contracts", headers=h, json={"account_id": aid, "symbol": "BTC-USD", "direction": "HIGHER",
+                                                                      "stake": "1", "expiry_seconds": 30, "client_id": "thirty-1"})
+    assert c.status_code == 201, c.text
+    assert c.json()["expiry_seconds"] == 30
+
+
+def test_cycle_interval_tracks_expiry():
+    mk = lambda e: botmod.BinaryBot(expiry_seconds=e)  # noqa: E731
+    assert botmod.cycle_interval(mk(30)) == 10 and botmod.cycle_interval(mk(60)) == 20
+    assert botmod.cycle_interval(mk(300)) == 60 and botmod.cycle_interval(mk(86400)) == 60
+
+
+def test_latest_unbroken_drops_bars_before_a_gap():
+    class B:
+        def __init__(self, s):
+            self.open_time = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=s)
+    bars = [B(s) for s in (0, 30, 60, 600, 630, 660, 690)]
+    assert [b.open_time.second for b in botmod.latest_unbroken(bars, "30s")] == [0, 30, 0, 30]
+    assert len(botmod.latest_unbroken(bars, "1m")) == 7          # provider bars are served as they come

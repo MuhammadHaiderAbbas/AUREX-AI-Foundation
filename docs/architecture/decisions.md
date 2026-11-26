@@ -355,3 +355,20 @@ gains an optional `local-db` profile (pgvector Postgres on the same server) and
 **Why.** The user chose to run their own server. Alpaca's free plan covers the instruments in
 their watchlist with real-time prices and history, keeps the key server-side, and needs no
 payment. UK listings and index levels need a paid feed and remain simulated (labelled).
+
+## ADR-043 30-second binary expiry from recorded live bars; bot cycles scale with expiry
+**Decision.** Binary contracts and the bot gain a 30-second expiry (with a `30s` timeframe), and
+the bot now defaults to 1 minute. Coinbase has no 30-second candles and its trade history is too
+dense to backfill (BTC-USD prints about 1,000 trades every 20 seconds), so the worker leader keeps
+one WebSocket open to Coinbase's public ticker channel and records 30-second OHLC bars into
+`market_candles` (`app/market/tickbars.py`, source `coinbase_ws`). The demo does the same in the
+browser from the stream it already has and saves the bars locally. The first bucket after
+connecting is partial and is dropped. A gap (restart, dropped connection, closed page) breaks the
+series, and the bot uses only the newest unbroken run. Until 280 bars exist (80 warm-up + 200
+usable, about 2 h 20 min) the bot reports "collecting live 30-second bars" instead of trading.
+Simulated instruments generate 30-second bars directly. Bots cycle every
+`min(60 s, max(10 s, expiry / 3))`, so 30-second contracts are checked every 10 seconds.
+**Why.** The user asked for shorter expiries. Padding real crypto history with simulated bars
+would let the bot "validate" an edge on data that never happened, so it waits for real bars.
+Shorter expiries are noisier: the same out-of-sample gate (hit rate above 55.6% plus a margin)
+still decides whether any contract is opened.

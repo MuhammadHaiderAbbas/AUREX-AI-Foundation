@@ -24,9 +24,14 @@ async def lifespan(app: FastAPI):
 
     s = get_settings()
     interval = s.order_matcher_interval_seconds
-    task = asyncio.create_task(worker.run(interval)) if interval > 0 and s.background_worker else None
+    tasks = []
+    if interval > 0 and s.background_worker:
+        tasks.append(asyncio.create_task(worker.run(interval)))
+        if s.tick_bars_enabled:
+            from app.market import tickbars
+            tasks.append(asyncio.create_task(tickbars.run(lambda: worker.state["leader"])))
     yield
-    if task:
+    for task in tasks:
         task.cancel()
         try:
             await task
