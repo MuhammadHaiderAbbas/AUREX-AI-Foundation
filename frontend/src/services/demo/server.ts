@@ -19,7 +19,10 @@ import * as live from "./live";
 import * as an from "./analytics";
 import * as totp from "./totp";
 
-const KEY = "aurex-demo-v1";
+// v2: demo accounts default to £100 GBP. Bumping the key starts every browser afresh (all saved demo
+// users, accounts and trades from v1 are removed on the next visit).
+const KEY = "aurex-demo-v2";
+const OLD_KEYS = ["aurex-demo-v1"];
 const REFRESH_KEY = "aurex-demo-refresh";
 const MAX_BALANCE = toUnits("10000000");
 const MIN_ORDER_VALUE = 1;   // account currency; entry orders only (mirrors AUREX_MIN_ORDER_VALUE)
@@ -73,6 +76,7 @@ let memory: State | null = null;
 function load(): State {
   if (memory) return memory;
   try {
+    for (const k of OLD_KEYS) if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); localStorage.removeItem(REFRESH_KEY); }
     const raw = localStorage.getItem(KEY);
     if (raw) {
       memory = JSON.parse(raw) as State;
