@@ -170,3 +170,24 @@ def test_latest_unbroken_drops_bars_before_a_gap():
     bars = [B(s) for s in (0, 30, 60, 600, 630, 660, 690)]
     assert [b.open_time.second for b in botmod.latest_unbroken(bars, "30s")] == [0, 30, 0, 30]
     assert len(botmod.latest_unbroken(bars, "1m")) == 7          # provider bars are served as they come
+
+
+async def test_new_bot_defaults_to_btc_and_eth_at_one_minute(client):
+    h, aid = await small_account(client)
+    b = (await client.get(f"{API}/binary/bot?account_id={aid}", headers=h)).json()
+    assert b["symbols"] == ["BTC-USD", "ETH-USD"] and b["expiry_seconds"] == 60 and b["status"] == "STOPPED"
+
+
+MIGRATION_0016 = (__import__("pathlib").Path(__file__).parent.parent / "alembic/versions/0016_bot_defaults_btc_eth_1m.py").read_text()
+
+
+async def test_migration_moves_bots_on_old_defaults(client):
+    h, aid = await small_account(client)
+    await client.get(f"{API}/binary/bot?account_id={aid}", headers=h)          # creates the bot row
+    async with SessionLocal() as db:
+        await db.execute(text("""UPDATE binary_bots SET symbols = '["BTC-USD", "ETH-USD", "EUR/USD"]', expiry_seconds = 300"""))
+        sql = MIGRATION_0016.split('op.execute("""')[1].split('""")')[0]
+        await db.execute(text(sql))
+        rows = (await db.execute(text("SELECT symbols::text, expiry_seconds, status FROM binary_bots"))).all()
+        await db.rollback()
+    assert rows and all(r[0] == '["BTC-USD", "ETH-USD"]' and r[1] == 60 for r in rows if r[2] != "RUNNING")
