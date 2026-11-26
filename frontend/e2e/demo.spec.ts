@@ -18,7 +18,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Markets: synthetic data clearly labelled, chart renders, indicators toggle
   await page.getByRole("link", { name: "Markets", exact: true }).click();
-  await expect(page.getByText("Synthetic data")).toBeVisible();
+  await expect(page.getByText(/^(Synthetic data|Crypto live · others simulated)$/)).toBeVisible();
   await expect(page.getByTestId("price-chart").locator("canvas").first()).toBeVisible();
   await page.getByRole("tab", { name: "Forex" }).click();
   await page.getByRole("button", { name: /^GBP\/USD British/ }).click();
@@ -75,6 +75,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Model Lab in the browser: logistic regression with walk-forward validation
   await page.getByRole("link", { name: "Model Lab" }).click();
+  await expect(page.getByText("Train a candidate")).toBeVisible();     // wait for the route: the AI page also has an Instrument field
   await page.getByLabel("Instrument").selectOption("EUR/USD");
   await page.getByLabel("Algorithm").selectOption("logistic");
   await page.getByLabel("History").selectOption("60");
@@ -87,6 +88,7 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Backtesting in the browser
   await page.getByRole("link", { name: "Backtesting" }).click();
+  await expect(page.getByText("Configure backtest")).toBeVisible();
   await page.getByLabel("Strategy").selectOption("donchian_breakout");
   await page.getByLabel("Instrument").selectOption("BTC-USD");
   await page.getByLabel("Period").selectOption("90");

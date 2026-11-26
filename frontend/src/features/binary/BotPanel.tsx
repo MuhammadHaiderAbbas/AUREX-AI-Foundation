@@ -43,10 +43,11 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
         action={<Badge tone={running ? "positive" : b.status === "PAUSED" ? "warning" : "neutral"} data-testid="bot-status">{b.status}</Badge>} />
       <CardBody className="space-y-4">
         <ErrorBanner error={control.error ?? run.error} />
-        {b.data_mode === "synthetic" && (
+        {b.data_mode !== "coinbase" && b.data_mode !== "live" && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs" role="note" aria-label="Synthetic data warning">
-            <b>Synthetic prices.</b> This feed is generated from smooth cycles, so the bot finds patterns that real markets do not have.
-            Wins here are <b>not</b> evidence that it would make money. On real prices most signals fail its edge test and it simply does not trade.
+            <b>{b.data_mode === "mixed" ? "Some instruments use simulated prices." : "Simulated prices."}</b> Crypto streams live from Coinbase; forex here is generated
+            from smooth cycles, so the bot finds patterns there that real markets do not have. Wins on simulated prices are <b>not</b> evidence
+            that it would make money. On real prices most signals fail its edge test and it simply does not trade.
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">

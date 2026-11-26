@@ -13,7 +13,7 @@ from app.core.errors import BusinessRuleViolation, Conflict, NotFound
 from app.core.security import decode_access_token
 from app.database.session import SessionLocal, get_db
 from app.market import indicators as ind
-from app.market.service import MarketService, Quote, market_statuses
+from app.market.service import MarketService, ProviderUnavailable, Quote, market_statuses
 from app.market.types import TIMEFRAMES, AssetClass
 from app.models import Instrument, User, UserSession, Watchlist, WatchlistItem
 from app.schemas.market import (
@@ -201,6 +201,27 @@ async def _authenticate_ws(token: str) -> uuid.UUID | None:
     if row is None or not row[0] or row[1] is not None:
         return None
     return user_id
+
+
+@router.get("/instruments/{symbol}/ticks")
+async def ticks(symbol: str, seconds: int = Query(1800, ge=60, le=7200), _: User = Depends(current_user),
+                db: AsyncSession = Depends(get_db)):
+    """Recent price path for live charts: one point per 1-minute close, then the latest mid.
+    Lets a chart rebuild without gaps after the browser tab was hidden."""
+    svc = MarketService(db)
+    inst = await svc.get(symbol)
+    rows = await svc.candles(inst, "1m", seconds // 60 + 2)
+    since = datetime.now(UTC).timestamp() - seconds
+    pts = [{"t": int(r.open_time.timestamp()) + 59, "price": float(r.close)}
+           for r in rows if r.open_time.timestamp() >= since]
+    try:
+        q = await svc.quote(inst)
+        pts.append({"t": int(q.as_of.timestamp()), "price": float((q.bid + q.ask) / 2)})
+    except ProviderUnavailable:
+        pass
+    pts.sort(key=lambda p: p["t"])
+    return {"symbol": inst.symbol, "source": get_settings().market_data_mode,
+            "points": [p for i, p in enumerate(pts) if i == 0 or p["t"] > pts[i - 1]["t"]]}
 
 
 @router.websocket("/stream")

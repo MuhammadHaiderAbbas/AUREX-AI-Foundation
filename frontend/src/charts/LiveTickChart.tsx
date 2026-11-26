@@ -4,19 +4,38 @@ import { useEffect, useRef } from "react";
 const token = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
 
 export interface StrikeLine { id: string; price: number; direction: "HIGHER" | "LOWER" }
+export interface TickPoint { t: number; v: number }
+
+const GAP_S = 20;   // longer than this without data: draw a break, not a straight line
+
+/** Merge history and live ticks, de-duplicated by second, with whitespace where data is missing. */
+function series(history: TickPoint[], live: TickPoint[]) {
+  const byT = new Map<number, number>();
+  for (const p of history) byT.set(p.t, p.v);
+  for (const p of live) byT.set(p.t, p.v);
+  const pts = [...byT].sort((a, b) => a[0] - b[0]);
+  const out: ({ time: UTCTimestamp; value: number } | { time: UTCTimestamp })[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const [t, v] = pts[i]!;
+    if (i && t - pts[i - 1]![0] > GAP_S * 4) out.push({ time: (pts[i - 1]![0] + 1) as UTCTimestamp });
+    out.push({ time: t as UTCTimestamp, value: v });
+  }
+  return out;
+}
 
 /**
- * A live price line: seeded with recent 1-minute closes, then one point per streamed quote.
- * Open binary contracts on the same instrument are drawn as strike lines (green HIGHER, red LOWER).
+ * A live price line. `history` comes from the server's tick history (refetched when the tab
+ * regains focus, so time spent away is filled in); `tick` is every streamed quote. The chart is
+ * created once per symbol and updated in place, so zoom and scroll survive refreshes.
  */
-export function LiveTickChart({ symbol, seed, tick, decimals, strikes = [], height = 220 }: {
-  symbol: string; seed: { t: number; v: number }[]; tick: { t: number; v: number } | null; decimals: number; strikes?: StrikeLine[]; height?: number;
+export function LiveTickChart({ symbol, history, tick, decimals, strikes = [], height = 220 }: {
+  symbol: string; history: TickPoint[]; tick: TickPoint | null; decimals: number; strikes?: StrikeLine[]; height?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const series = useRef<ISeriesApi<"Line"> | null>(null);
+  const s = useRef<ISeriesApi<"Line"> | null>(null);
+  const liveTicks = useRef<TickPoint[]>([]);
   const lastT = useRef(0);
   const lines = useRef<IPriceLine[]>([]);
-  const seedKey = `${symbol}|${seed.length > 0}`;   // build once per symbol; live ticks extend it
 
   useEffect(() => {
     if (!ref.current) return;
@@ -28,37 +47,44 @@ export function LiveTickChart({ symbol, seed, tick, decimals, strikes = [], heig
       rightPriceScale: { borderColor: grid }, timeScale: { borderColor: grid, timeVisible: true, secondsVisible: true },
       localization: { priceFormatter: (p: number) => p.toFixed(decimals) },
     });
-    const s = chart.addSeries(LineSeries, { color: token("--color-accent"), lineWidth: 2, priceLineVisible: true, lastValueVisible: true });
-    const dedup = new Map<number, number>();
-    for (const p of seed) dedup.set(p.t, p.v);
-    const data = [...dedup].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ time: t as UTCTimestamp, value: v }));
-    s.setData(data);
-    lastT.current = data.length ? (data[data.length - 1]!.time as number) : 0;
-    series.current = s;
+    s.current = chart.addSeries(LineSeries, { color: token("--color-accent"), lineWidth: 2, priceLineVisible: true, lastValueVisible: true });
+    liveTicks.current = [];
+    lastT.current = 0;
     lines.current = [];
-    chart.timeScale().fitContent();
-    return () => { chart.remove(); series.current = null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedKey, decimals, height]);
+    return () => { chart.remove(); s.current = null; };
+  }, [symbol, decimals, height]);
+
+  // (re)load history in place whenever it is refetched
+  useEffect(() => {
+    const ser = s.current;
+    if (!ser) return;
+    const cut = (history[history.length - 1]?.t ?? 0) - 1;
+    liveTicks.current = liveTicks.current.filter((p) => p.t > cut);
+    const data = series(history, liveTicks.current);
+    ser.setData(data);
+    lastT.current = (data[data.length - 1]?.time as number | undefined) ?? 0;
+  }, [history]);
 
   useEffect(() => {
-    const s = series.current;
-    if (!s || !tick || tick.t < lastT.current) return;
-    s.update({ time: tick.t as UTCTimestamp, value: tick.v });
+    const ser = s.current;
+    if (!ser || !tick || tick.t < lastT.current) return;
+    if (lastT.current && tick.t - lastT.current > GAP_S * 4) ser.update({ time: (lastT.current + 1) as UTCTimestamp });
+    ser.update({ time: tick.t as UTCTimestamp, value: tick.v });
+    liveTicks.current.push(tick);
     lastT.current = tick.t;
   }, [tick]);
 
   const strikeKey = strikes.map((x) => `${x.id}:${x.price}`).join(",");
   useEffect(() => {
-    const s = series.current;
-    if (!s) return;
-    for (const l of lines.current) s.removePriceLine(l);
-    lines.current = strikes.map((x) => s.createPriceLine({
+    const ser = s.current;
+    if (!ser) return;
+    for (const l of lines.current) ser.removePriceLine(l);
+    lines.current = strikes.map((x) => ser.createPriceLine({
       price: x.price, color: token(x.direction === "HIGHER" ? "--color-positive" : "--color-negative"),
       lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: x.direction === "HIGHER" ? "▲ strike" : "▼ strike",
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strikeKey, seedKey]);
+  }, [strikeKey, symbol]);
 
   return <div ref={ref} style={{ height }} className="w-full" data-testid="live-tick-chart" />;
 }

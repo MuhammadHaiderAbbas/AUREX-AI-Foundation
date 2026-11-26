@@ -11,7 +11,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { BotPanel } from "@/features/binary/BotPanel";
 import { useBinaryConfig, useBinaryContracts, useBinaryStats, useOpenBinary } from "@/features/binary/hooks";
 import { LiveTickChart } from "@/charts/LiveTickChart";
-import { useCandles, useMarketOverview } from "@/features/markets/hooks";
+import { useMarketOverview, useTickHistory } from "@/features/markets/hooks";
 import { usePortfolio } from "@/features/trading/hooks";
 import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
@@ -78,8 +78,8 @@ export function BinaryPage() {
   const prices = useMemo(() => Object.fromEntries(symbols.map((s) => [s.instrument.symbol, s.quote])), [symbols]);
   const q = quote.data?.quote, inst = quote.data?.instrument;
   const mid = q ? (Number(q.bid) + Number(q.ask)) / 2 : null;
-  const minute = useCandles(slug(symbol), "1m", []);
-  const seed = useMemo(() => (minute.data?.candles ?? []).slice(-90).map((c) => ({ t: Math.floor(Date.parse(c.open_time) / 1000) + 59, v: Number(c.close) })), [minute.data]);
+  const history = useTickHistory(slug(symbol));
+  const seed = useMemo(() => (history.data?.points ?? []).map((p) => ({ t: p.t, v: p.price })), [history.data]);
   const tick = useMemo(() => (q && mid != null ? { t: Math.floor(Date.parse(q.as_of) / 1000), v: mid } : null), [q?.as_of, mid]); // eslint-disable-line react-hooks/exhaustive-deps
   const ccy = account?.base_currency ?? "GBP";
   const payout = cfg.data?.payout_rate ?? 0.8;
@@ -161,10 +161,11 @@ export function BinaryPage() {
 
         <div className="space-y-6">
           <Card>
-            <CardHeader title={`${symbol} · live`} description="Mid price, one point per streamed quote. Dashed lines are your open strikes." />
+            <CardHeader title={`${symbol} · live`}
+              description={`${history.data?.source === "coinbase" ? "Real Coinbase prices" : history.data?.source === "synthetic" ? "Simulated prices" : "Live prices"} · mid price, one point per quote. Dashed lines are your open strikes.`} />
             <div className="px-2 pb-3">
               {seed.length > 0
-                ? <LiveTickChart symbol={symbol} seed={seed} tick={tick} decimals={(inst?.price_decimals ?? 2) + 1}
+                ? <LiveTickChart symbol={symbol} history={seed} tick={tick} decimals={(inst?.price_decimals ?? 2) + 1}
                     strikes={openItems.filter((c) => c.symbol === symbol).map((c) => ({ id: c.id, price: Number(c.strike), direction: c.direction }))} />
                 : <div className="flex h-[220px] items-center justify-center"><Spinner /></div>}
             </div>

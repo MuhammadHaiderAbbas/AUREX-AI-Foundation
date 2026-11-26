@@ -1,3 +1,4 @@
+import * as live from "./live";
 /**
  * Browser port of backend/app/market/{calendar,providers/synthetic,indicators}.py
  * used by the static GitHub Pages demo. Keep the hashing and price model in sync
@@ -111,6 +112,7 @@ export function rnd(seed: number, k: number) {
   h = (h ^ (h >>> 16)) >>> 0;
   return h / 4294967296;
 }
+/** Synthetic price: slow cycles + minute noise interpolated between anchors + per-second jitter, so lines move continuously. */
 export function priceAt(symbol: string, cls: AssetClassKey, base: number, tSec: number) {
   const seed = fnv1a(symbol);
   const vol = VOL[cls];
@@ -118,7 +120,10 @@ export function priceAt(symbol: string, cls: AssetClassKey, base: number, tSec: 
   CYCLES.forEach(([period, w], j) => {
     x += vol * Math.sqrt(period / YEAR) * AMP * w * Math.sin((2 * Math.PI * tSec) / period + rnd(seed, 1000 + j) * 2 * Math.PI);
   });
-  x += vol * Math.sqrt(60 / YEAR) * 2.5 * (rnd(seed, Math.floor(tSec / 60)) - 0.5);
+  const m = Math.floor(tSec / 60), f = tSec / 60 - m;
+  x += vol * Math.sqrt(60 / YEAR) * 2.5 * ((1 - f) * (rnd(seed, m) - 0.5) + f * (rnd(seed, m + 1) - 0.5));
+  const k = Math.floor(tSec / 5), g = tSec / 5 - k;
+  x += vol * Math.sqrt(5 / YEAR) * 2 * ((1 - g) * (rnd(seed ^ 0x5bd1e995, k) - 0.5) + g * (rnd(seed ^ 0x5bd1e995, k + 1) - 0.5));
   return base * Math.exp(x);
 }
 
@@ -139,7 +144,22 @@ function ohlc(i: DemoInstrument, s: number, e: number) {
 
 const BASE_VOLUME: Record<AssetClassKey, number> = { CRYPTO: 40, FX: 2e6, STOCK: 1.5e5, ETF: 3e5 };
 
+/** Real Coinbase candles for crypto when cached (see live.ensureCandles), otherwise the synthetic generator. */
 export function candles(i: DemoInstrument, timeframe: string, limit: number, nowMs = Date.now()) {
+  if (live.isLiveSymbol(i.symbol) && Math.abs(nowMs - Date.now()) < 5000) {
+    const real = live.candlesSync(i.symbol, timeframe, limit);
+    if (real && real.length >= Math.min(limit, 250) * 0.9) {
+      const d = i.price_decimals;
+      return real.map((r) => ({ open_time: r.open_time, open: r.open.toFixed(d), high: r.high.toFixed(d), low: r.low.toFixed(d), close: r.close.toFixed(d), volume: r.volume.toFixed(4) }));
+    }
+  }
+  return syntheticCandles(i, timeframe, limit, nowMs);
+}
+
+export const candleSource = (i: DemoInstrument, timeframe: string, limit: number) =>
+  live.isLiveSymbol(i.symbol) && (live.candlesSync(i.symbol, timeframe, limit)?.length ?? 0) >= Math.min(limit, 250) * 0.9 ? "coinbase" : "synthetic";
+
+function syntheticCandles(i: DemoInstrument, timeframe: string, limit: number, nowMs: number) {
   const tf = TIMEFRAMES[timeframe]!;
   const seed2 = fnv1a(i.symbol + ":vol");
   const d = i.price_decimals;
@@ -168,6 +188,17 @@ export function candles(i: DemoInstrument, timeframe: string, limit: number, now
 }
 
 export function quote(i: DemoInstrument, nowMs = Date.now()) {
+  if (live.isLiveSymbol(i.symbol) && Math.abs(nowMs - Date.now()) < 5000) {
+    const t = live.latest(i.symbol);
+    if (t) {
+      const d = i.price_decimals, prev = t.open24h ?? t.price, change = t.price - prev;
+      return {
+        symbol: i.symbol, last: t.price.toFixed(d), bid: t.bid.toFixed(d), ask: Math.max(t.ask, t.bid).toFixed(d), prev_close: prev.toFixed(d),
+        change: change.toFixed(d), change_pct: ((change / prev) * 100).toFixed(2), as_of: new Date(Math.min(t.t, Date.now())).toISOString(),
+        source: "coinbase", market_open: true, stale: false, tradable: true, age_seconds: Math.max(0, Math.floor((Date.now() - t.t) / 1000)),
+      };
+    }
+  }
   const open = isOpen(i.market, nowMs);
   const asOf = open ? nowMs : lastClose(i.market, nowMs) ?? nowMs;
   const p = (ms: number) => priceAt(i.symbol, i.asset_class, i.reference_price, ms / 1000);

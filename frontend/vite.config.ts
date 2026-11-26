@@ -10,7 +10,7 @@ import { defineConfig, type Plugin } from "vite";
  */
 const DEMO_CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
-  "font-src 'self'", "connect-src 'self'", "worker-src 'self' blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
+  "font-src 'self'", "connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com", "worker-src 'self' blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
 ].join("; ");
 const demoCsp = (): Plugin => ({
   name: "aurex-demo-csp",

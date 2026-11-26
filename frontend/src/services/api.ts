@@ -228,7 +228,7 @@ export interface MarketStatus { market: string; label: string; is_open: boolean;
 export interface MarketOverview {
   markets: MarketStatus[];
   groups: Record<AssetClass, InstrumentWithQuote[]>;
-  data_mode: "synthetic" | "live";
+  data_mode: "synthetic" | "live" | "mixed";
 }
 
 export interface Candle { open_time: string; open: string; high: string; low: string; close: string; volume: string }

@@ -113,7 +113,14 @@ function startPolling(qc: QueryClient): () => void {
   };
   run();
   const timer = setInterval(run, POLL_MS);
-  return () => { stopped = true; clearInterval(timer); };
+  // In the static demo, real Coinbase ticks arrive over a WebSocket that browsers do not throttle in
+  // background tabs: revalue on them too, at most every 2 s, so equity keeps moving while hidden.
+  let unsub: (() => void) | undefined, lastRun = 0;
+  if (isDemo) import("@/services/demo/live").then((m) => {
+    if (stopped) return;
+    unsub = m.onTick(() => { const t = Date.now(); if (t - lastRun >= POLL_MS) { lastRun = t; run(); } }) as () => void;
+  });
+  return () => { stopped = true; clearInterval(timer); unsub?.(); };
 }
 
 /** Mount once inside the authenticated shell. */

@@ -315,3 +315,19 @@ stops it. Every cycle's reasoning is stored and shown.
 the house edge by construction. Requiring measured evidence, and stopping on live evidence of
 no edge, is the most honest automation possible. This revises ADR-037 ("no autopilot for
 binaries"): the bot is paper-only and, like everything else, cannot reach real money.
+
+## ADR-040 Real crypto prices in the public demo; continuous simulated prices elsewhere
+**Decision.** The static demo streams BTC, ETH and SOL from Coinbase's public, keyless,
+CORS-enabled endpoints: a WebSocket ticker for every trade and REST candles for history. Quotes,
+charts, fills, binary strikes and settlement, the AI desk, the binary bot, Model Lab and
+backtests use them, and say so ("source Coinbase", "Crypto live · others simulated"). If
+Coinbase is unreachable the demo falls back to the synthetic generator. Forex, stocks and ETFs
+stay simulated because real-time feeds for them need a keyed, usually paid, vendor whose key
+cannot be shipped in a public static site. The synthetic model (browser and Python) now
+interpolates its minute noise and adds 5-second noise, so simulated prices move continuously
+instead of drawing straight lines with a step every minute. Live charts rebuild from a tick
+history endpoint when a tab regains focus, and draw a break rather than a straight line across
+time without data.
+**Why.** The user saw charts go flat. The cause was the synthetic model, not the streaming.
+Real prices where they are free, and honest labels where they are not, fix the problem without
+exposing credentials.

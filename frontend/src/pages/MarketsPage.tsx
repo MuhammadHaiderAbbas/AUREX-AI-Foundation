@@ -91,6 +91,7 @@ export function MarketsPage() {
           <Radio className={cn("size-3.5", live ? "text-positive" : "text-subtle")} />
           {live ? "Streaming" : "Polling"}
           {overview.data?.data_mode === "synthetic" && <Badge tone="warning" title="Prices are generated deterministically for development. They are not real market data.">Synthetic data</Badge>}
+          {overview.data?.data_mode === "mixed" && <Badge tone="info" title="Crypto prices stream live from Coinbase. Forex, stocks and ETFs need a paid real-time feed, so they are simulated here.">Crypto live · others simulated</Badge>}
         </div>
       </div>
 
