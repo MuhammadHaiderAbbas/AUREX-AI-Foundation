@@ -94,7 +94,7 @@ export function OverviewPage() {
           tone={pf?.open_positions ? undefined : "muted"} sub={pf ? `Exposure ${(pf.exposure * 100).toFixed(1)}%` : "Paper execution"} />
         <Stat label="Drawdown" icon={<ShieldAlert />} value={risk ? `${risk.metrics.drawdown_pct.toFixed(2)}%` : "—"}
           tone={risk?.state.blocked_reason ? "negative" : "muted"}
-          sub={risk ? (risk.state.blocked_reason ? "New exposure blocked" : `Limit ${risk.limits.max_drawdown_pct}% · risk gate on`) : "Risk engine"} />
+          sub={risk ? (risk.state.blocked_reason ? <Link to={`/risk?account=${risk.account_id}`} className="text-negative hover:underline" title={risk.state.blocked_reason}>Blocked: {risk.state.blocked_reason}</Link> : `Limit ${risk.limits.max_drawdown_pct}% · risk gate on`) : "Risk engine"} />
         <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone={risk?.autopilot.status === "RUNNING" ? "positive" : "accent"} /> {risk?.autopilot.status === "RUNNING" ? "Autopilot on" : "Advisory"}</span>}
           sub={risk?.autopilot.status === "RUNNING" ? `${risk.autopilot.symbols.join(", ")} · via risk gate` : "Proposals go through the risk gate"} />
       </div>
@@ -102,7 +102,9 @@ export function OverviewPage() {
       {pf && (history.data?.length ?? 0) + liveEquity.length >= 2 && (
         <Card>
           <CardHeader title={`Live equity · ${pf.account_name}`}
-            description={`${formatMoney(pf.equity, pf.currency)} marked to market on live prices, updated every 2 seconds`}
+            description={pf.open_positions === 0 && !Number(pf.binary_at_risk ?? 0)
+              ? `${formatMoney(pf.equity, pf.currency)} in cash. With no open positions equity cannot move: buy on Markets or open a binary contract to see it tick.`
+              : `${formatMoney(pf.equity, pf.currency)} marked to market on live prices, updated every 2 seconds`}
             action={<Link to={`/portfolio?account=${pf.account_id}`} className="text-xs text-accent hover:underline">Portfolio</Link>} />
           <div className="px-2 pb-3"><PortfolioChart snapshots={history.data ?? []} live={liveEquity} height={180} /></div>
         </Card>

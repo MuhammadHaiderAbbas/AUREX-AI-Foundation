@@ -9,8 +9,8 @@ import { defineConfig, type Plugin } from "vite";
  * deployment sets a stricter CSP header in Caddy instead.
  */
 const DEMO_CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
-  "font-src 'self'", "connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com", "worker-src 'self' blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https://coin-images.coingecko.com https://assets.coingecko.com",
+  "font-src 'self'", "connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com https://api.coinbase.com https://api.coingecko.com https://api.frankfurter.dev", "worker-src 'self' blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
 ].join("; ");
 const demoCsp = (): Plugin => ({
   name: "aurex-demo-csp",

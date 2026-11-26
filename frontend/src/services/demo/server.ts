@@ -1762,7 +1762,7 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^\/markets\/overview$/, (c) => {
     authUser(c);
     const groups: Record<string, unknown[]> = { CRYPTO: [], FX: [], STOCK: [], ETF: [] };
-    for (const i of [...INSTRUMENTS].sort((a, b) => a.symbol.localeCompare(b.symbol))) groups[i.asset_class]!.push(withQuote(i));
+    for (const i of INSTRUMENTS) groups[i.asset_class]!.push(withQuote(i));   // registry order: largest markets first
     return json(200, { markets: marketStatuses(), groups, data_mode: live.liveStatus() === "live" ? "mixed" : "synthetic" });
   }],
   ["GET", /^\/markets\/instruments$/, (c) => {
@@ -1782,7 +1782,7 @@ const routes: [string, RegExp, Handler][] = [
       const ticks = live.tickHistory(i.symbol, since);
       const first = ticks[0]?.t ?? Infinity;
       const pts = [...mins.filter((r) => Date.parse(r.open_time) + 60_000 <= first).map((r) => ({ t: Math.floor(Date.parse(r.open_time) / 1000) + 59, price: r.close })),
-        ...ticks.map((t) => ({ t: Math.floor(t.t / 1000), price: (t.bid + t.ask) / 2 }))];
+        ...ticks.map((t) => ({ t: Math.floor(t.t / 1000), price: t.price }))];
       return json(200, { symbol: i.symbol, source: "coinbase", points: pts });
     }
     const pts = [];

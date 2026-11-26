@@ -117,3 +117,22 @@ export const useTickHistory = (slug: string | undefined, seconds = 1800) =>
     queryKey: ["markets", "ticks", slug, seconds], enabled: !!slug, refetchInterval: 60_000, refetchOnWindowFocus: "always", staleTime: 5_000,
     queryFn: () => api<{ symbol: string; source: string; points: { t: number; price: number }[] }>(`/markets/instruments/${slug}/ticks?seconds=${seconds}`),
   });
+
+/** Every live price for one instrument: pushed per trade in the demo (Coinbase WebSocket), otherwise from quote polling. */
+export function useStreamTick(symbol: string, fallback: { t: number; v: number } | null) {
+  const [tick, setTick] = useState<{ t: number; v: number } | null>(null);
+  useEffect(() => {
+    if (!isDemo) return;
+    let unsub: (() => void) | undefined, cancelled = false;
+    import("@/services/demo/live").then((m) => {
+      if (cancelled) return;
+      unsub = m.onTick((s) => {
+        if (s !== symbol) return;
+        const t = m.latest(s);
+        if (t) setTick({ t: Math.floor(t.t / 1000), v: t.price });
+      }) as () => void;
+    });
+    return () => { cancelled = true; unsub?.(); };
+  }, [symbol]);
+  return tick && (!fallback || tick.t >= fallback.t) ? tick : fallback;
+}
