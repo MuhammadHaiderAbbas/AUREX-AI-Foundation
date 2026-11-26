@@ -110,7 +110,7 @@ export function LoginPage() {
         </Field>
         <Button type="submit" className="w-full" disabled={busy}>{busy && <Spinner className="text-accent-fg" />}Sign in</Button>
         {isDemo && <DemoLaunch onError={setError} onChallenge={setMfaToken} />}
-        {isDemo && <DemoLaunch small onError={setError} onChallenge={setMfaToken} />}
+        {isDemo && <DemoLaunch large onError={setError} onChallenge={setMfaToken} />}
         <p className="text-center text-xs text-muted">No account? <Link to="/register" className="text-accent hover:underline">Create one</Link></p>
       </form>
     </AuthLayout>
@@ -159,7 +159,8 @@ const DEMO_EMAIL = "demo@aurex.example";
 const DEMO_PASSWORD = "Demo-Account-2026!";
 
 /** One-click entry for the static demo: creates the demo user and a funded paper account. */
-function DemoLaunch({ onError, onChallenge, small = false }: { onError: (e: unknown) => void; onChallenge: (token: string) => void; small?: boolean }) {
+/** The demo's default account is £100 GBP; a US$100,000 account is the alternative. */
+function DemoLaunch({ onError, onChallenge, large = false }: { onError: (e: unknown) => void; onChallenge: (token: string) => void; large?: boolean }) {
   const { register, login } = useAuth();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -172,17 +173,17 @@ function DemoLaunch({ onError, onChallenge, small = false }: { onError: (e: unkn
       if (challenge) { onChallenge(challenge.mfaToken); return; }
       const accounts = await api<TradingAccount[]>("/accounts");
       if (accounts.length === 0) {
-        await api("/accounts", { method: "POST", json: small
-          ? { name: "£100 paper account", base_currency: "GBP", starting_balance: "100" }
-          : { name: "Demo paper account", base_currency: "USD", starting_balance: "100000" } });
+        await api("/accounts", { method: "POST", json: large
+          ? { name: "Demo paper account", base_currency: "USD", starting_balance: "100000" }
+          : { name: "£100 paper account", base_currency: "GBP", starting_balance: "100" } });
         await api("/research/samples", { method: "POST" });
       }
       navigate("/", { replace: true });
     } catch (e) { onError(e); } finally { setBusy(false); }
   }
   return (
-    <Button type="button" variant="secondary" className="w-full" onClick={launch} disabled={busy}>
-      {busy && <Spinner />}{small ? "Launch demo with £100" : "Launch demo"}
+    <Button type="button" variant={large ? "outline" : "secondary"} className="w-full" onClick={launch} disabled={busy}>
+      {busy && <Spinner />}{large ? "Launch demo with US$100,000" : "Launch demo"}
     </Button>
   );
 }

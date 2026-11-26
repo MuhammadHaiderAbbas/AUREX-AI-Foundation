@@ -4,6 +4,14 @@ import { expect, test } from "@playwright/test";
 // Runs against the static GitHub Pages build (VITE_DEMO_MODE=true). Set AUREX_E2E_DEMO=1.
 test.skip(!process.env.AUREX_E2E_DEMO, "demo build only");
 
+test("static demo: Launch demo opens a £100 GBP account", async ({ page }) => {
+  await page.goto("login");
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
+  await expect(page.getByRole("link", { name: "£100 paper account" })).toBeVisible();
+  await expect(page.getByText("£100.00").first()).toBeVisible();
+  await expect(page.getByText("US$100,000.00")).toHaveCount(0);
+});
+
 test("static demo: launch, markets, wallet, admin, deep links", async ({ page }) => {
   test.setTimeout(90_000);   // a long end-to-end tour that talks to real Coinbase and CoinGecko APIs
   const errors: string[] = [];
@@ -11,7 +19,8 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   await page.goto("login");
   await expect(page.getByText("Public demo.")).toBeVisible();
-  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
+  // This tour trades sizes a £100 account cannot afford, so it uses the US$100,000 alternative
+  await page.getByRole("button", { name: "Launch demo with US$100,000", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Demo Trader" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Demo paper account" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();

@@ -66,7 +66,7 @@ Delivered so far:
   - an admin Operations page with go-live gates, runbooks, and tag-triggered image releases.
 - **Small accounts and binary options (paper):**
   - fractional shares (0.0001) and 1-unit FX lots, a minimum order of 1 in the account
-    currency, and a £100 GBP default account (Launch demo with £100 in the live demo);
+    currency, and a £100 GBP default account (**Launch demo** opens a £100 account in the live demo; US$100,000 is the alternative);
   - a binary options simulator: HIGHER/LOWER fixed-payout contracts on live prices with a
     double-entry ledger, a dedicated risk gate, automatic settlement, and win-rate statistics
     against the break-even rate. Binary options are banned for UK retail customers (FCA); this
@@ -287,7 +287,7 @@ separately reviewed change. They are not a switch.
 ## Small accounts and binary options deliverables
 
 - [x] Fractional lots (migration 0012) and `AUREX_MIN_ORDER_VALUE`; the portfolio agent will not propose dust orders
-- [x] Account presets (£100, £500, £1,000, $10,000, $100,000); "Launch demo with £100"
+- [x] Account presets (£100, £500, £1,000, $10,000, $100,000); "Launch demo" defaults to £100 GBP
 - [x] Binary contracts (`/binary/config`, `/binary/contracts`, `/binary/stats`): HIGHER/LOWER, expiries 1m to 1d, 80% payout (`AUREX_BINARY_PAYOUT_RATE`)
 - [x] Ledger postings (`BINARY_OPEN`, `BINARY_SETTLE`); open stakes count in equity and the `BINARY` allocation
 - [x] Binary risk gate: stake cap (% of equity), max open contracts, on/off switch in the Risk Centre, plus halts, kill switch, breakers and order rate; every decision recorded
