@@ -7,15 +7,18 @@ WS   /markets/stream ─►│ staleness · tradability · gap-fill     │
                        └───────────────┬────────────────────────┘
                                        │ MarketDataProvider (one interface)
                  ┌─────────────────────┼──────────────────────┐
-           SyntheticProvider     CoinbaseProvider      FrankfurterProvider
-           (default, offline)    crypto, public API    ECB daily reference FX
+   SyntheticProvider   CoinbaseProvider       LiveFxProvider          AlpacaProvider
+   (default, offline)  crypto: WS ticker      FX: Coinbase rates +    US stocks/ETFs
+                       quotes, REST candles,  ECB daily (Frankfurter) (free key, IEX)
+                       30s bars recorded      simulated intraday
 ```
 
 ## Instruments
 `assets` (economic asset) → `instruments` (a listing on a venue, in a quote currency).
 `instrument_type` is constrained to cash instruments — `SPOT`, `SPOT_FX`, `SHARE`, `ETF` —
-so CFDs and derivatives cannot be confused with them when added later. Seeded: BTC, ETH, SOL;
-EUR/USD, GBP/USD, USD/JPY; AAPL, MSFT, NVDA, SHEL.L, AZN.L; SPY, QQQ, ISF.L.
+so CFDs and derivatives cannot be confused with them when added later. Seeded: 12 crypto pairs
+(BTC, ETH, SOL, XRP, DOGE, ADA, AVAX, LINK, LTC, DOT, BCH, PAXG); EUR/USD, GBP/USD, USD/JPY;
+AAPL, MSFT, NVDA, TSLA, NFLX, SHEL.L, AZN.L; SPY, QQQ, DIA, GLD, USO, ISF.L.
 URLs use the `slug` (symbol without `/`), e.g. `/markets/instruments/EURUSD/candles`.
 
 ## Sessions
@@ -27,7 +30,9 @@ Early closes are not yet modelled.
 | Mode | Crypto | FX | Stocks / ETFs |
 |---|---|---|---|
 | `synthetic` (default) | synthetic | synthetic | synthetic |
-| `live` | Coinbase Exchange | ECB reference (daily, **never tradable**) | synthetic until a licensed feed is configured |
+| `live` | Coinbase Exchange (quotes from the WebSocket feed, REST fallback; 30s bars recorded by the worker leader) | Coinbase exchange rates (tradable, ~1/min upstream), ECB daily history, simulated intraday candles scaled to the live rate (`source: synthetic`) | Alpaca IEX with a key, otherwise synthetic; UK listings synthetic |
+
+Set `AUREX_FX_LIVE_RATES=false` to fall back to ECB reference rates only (never tradable).
 
 Every quote and candle carries its `source`, and the UI labels synthetic data. If a provider
 fails, the API returns `503 market_data_unavailable`. It never substitutes synthetic prices

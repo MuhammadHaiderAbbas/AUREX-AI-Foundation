@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.market.service import MarketService
 from app.market.types import TIMEFRAMES
-from app.ml.features import build_dataset, latest_features
+from app.ml.features import WARMUP, build_dataset, latest_features
 from app.models import BinaryBot, BinaryContract, BinaryStatus, RiskEvent, TradingAccount, User
 from app.risk.service import RiskService
 
@@ -58,6 +58,8 @@ def compute_signal(times: list[datetime], high: list[float], low: list[float], c
     out: dict[str, Any] = {"break_even": break_even, "required_accuracy": required, "confidence_threshold": threshold,
                            "trade": False, "direction": None, "p_up": None, "confidence": None,
                            "holdout_accuracy": None, "holdout_n": 0, "train_n": 0, "expected_return": None}
+    if len(close) <= WARMUP + horizon:
+        return {**out, "reason": f"not enough history: 0 usable bars (need 200; have {len(close)} bars)"}
     ds = build_dataset(times, high, low, close, horizon)
     n = len(ds.y)
     if n < 200:

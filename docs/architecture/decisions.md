@@ -372,3 +372,21 @@ Simulated instruments generate 30-second bars directly. Bots cycle every
 would let the bot "validate" an edge on data that never happened, so it waits for real bars.
 Shorter expiries are noisier: the same out-of-sample gate (hit rate above 55.6% plus a margin)
 still decides whether any contract is opened.
+
+## ADR-044 Live-mode hardening: forex rates, quotes from the feed, empty-history guard
+**Decision.** A local end-to-end run in live mode, which CI does not cover because it uses
+simulated prices, found three problems that are now fixed:
+- **Forex was never tradable on the server.** Only ECB daily fixings were available. FX now
+  uses `LiveFxProvider`: Coinbase's public exchange-rates API (one cached request serves every
+  pair) for quotes with a small spread, ECB history for `1d`, and simulated intraday candles
+  scaled to the live rate, stored with `source: synthetic` and labelled.
+- **Position revaluation polled Coinbase REST every second per instrument** (ticker and
+  stats). With a dozen coins held, that is over the public limit of about 10 requests per
+  second. Quotes are now read from the ticker WebSocket the worker leader already keeps open;
+  REST is the fallback when a product has been quiet for 30 s, and 24 h stats are cached for
+  a minute.
+- **The bot signal crashed (HTTP 500) with no bars**, which is the state right after the
+  server starts recording 30-second bars. It now returns "not enough history".
+**Why.** These only show up against real upstreams. The same run checked all 12 coins and 3
+FX pairs live and tradable, a 30-second contract settling on the live price, an FX market
+order filling, and the bot declining on real 1-minute data with no validated edge.

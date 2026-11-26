@@ -13,6 +13,7 @@ binary bot needs about 140 minutes of it (80 warm-up bars + 200 usable) before i
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -96,6 +97,16 @@ class BarBuilder:
         self.partial.clear()
 
 
+# Latest ticker per product from the open connection: Coinbase quotes are served from here while fresh,
+# so revaluing positions every second does not hit the REST API (public limit ~10 requests/second).
+LATEST: dict[str, tuple[float, dict]] = {}
+
+
+def latest_ticker(product: str, max_age: float = 30.0) -> dict | None:
+    hit = LATEST.get(product)
+    return hit[1] if hit and time.monotonic() - hit[0] <= max_age else None
+
+
 def parse_ticker(msg: dict) -> tuple[str, datetime, Decimal, Decimal] | None:
     if msg.get("type") != "ticker" or not msg.get("product_id") or not msg.get("time") or not msg.get("price"):
         return None
@@ -154,8 +165,10 @@ async def run(is_leader: Callable[[], bool]) -> None:
                         raw = None
                     closed = builder.flush_before(datetime.now(UTC))
                     if raw is not None:
-                        t = parse_ticker(json.loads(raw))
+                        msg = json.loads(raw)
+                        t = parse_ticker(msg)
                         if t:
+                            LATEST[t[0]] = (time.monotonic(), msg)
                             closed += builder.add(*t)
                     if closed:
                         await store(closed, ids)

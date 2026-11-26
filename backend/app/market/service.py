@@ -14,6 +14,7 @@ from app.market.providers.alpaca import AlpacaProvider
 from app.market.providers.base import MarketDataProvider
 from app.market.providers.coinbase import CoinbaseProvider
 from app.market.providers.frankfurter import FrankfurterProvider
+from app.market.providers.livefx import LiveFxProvider
 from app.market.providers.synthetic import SyntheticProvider
 from app.market.types import TIMEFRAMES, AssetClass, InstrumentRef, ProviderError, RawQuote
 from app.models import Instrument, MarketCandle
@@ -60,8 +61,9 @@ def provider_for(inst: Instrument) -> MarketDataProvider:
             _providers[name] = CoinbaseProvider(s.coinbase_base_url)
         elif name == "alpaca":
             _providers[name] = AlpacaProvider(s.alpaca_key_id, s.alpaca_secret_key, s.alpaca_data_url, s.alpaca_feed)
-        elif name == "frankfurter":
-            _providers[name] = FrankfurterProvider(s.frankfurter_base_url)
+        elif name == "frankfurter":           # forex: live Coinbase rates, ECB daily history, simulated intraday
+            ecb = FrankfurterProvider(s.frankfurter_base_url)
+            _providers[name] = LiveFxProvider(s.coinbase_rates_url, ecb) if s.fx_live_rates else ecb
         else:
             _providers[name] = SyntheticProvider()
     return _providers[name]
@@ -207,7 +209,8 @@ class MarketService:
                                       details={"reason": str(e)})
         if not candles:
             return 0
-        source = provider_for(inst).name
+        p = provider_for(inst)
+        source = p.source_for(timeframe) if hasattr(p, "source_for") else p.name
         rows = [{
             "instrument_id": inst.id, "timeframe": timeframe, "open_time": c.open_time,
             "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume,

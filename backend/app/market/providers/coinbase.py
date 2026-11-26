@@ -7,6 +7,7 @@ Docs: GET /products/{id}/candles  -> [[time, low, high, open, close, volume], ..
 4h candles are not offered upstream and are aggregated from 1h.
 """
 
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -25,6 +26,7 @@ class CoinbaseProvider:
                  client: httpx.AsyncClient | None = None, timeout: float = 10.0):
         self._client = client or httpx.AsyncClient(
             base_url=base_url, timeout=timeout, headers={"User-Agent": "aurex-ai/0.2"})
+        self._stats_cache: dict[str, tuple[float, dict]] = {}
 
     async def _get(self, path: str, params: dict | None = None):
         try:
@@ -63,9 +65,27 @@ class CoinbaseProvider:
             return aggregate(hourly, TIMEFRAMES["4h"])
         raise ProviderError(f"unsupported timeframe {timeframe}")
 
+    async def _stats(self, product: str) -> dict:
+        """24-hour stats change slowly: cache them for a minute (halves REST calls per quote)."""
+        hit = self._stats_cache.get(product)
+        if hit and time.monotonic() - hit[0] < 60:
+            return hit[1]
+        stats = await self._get(f"/products/{product}/stats")
+        self._stats_cache[product] = (time.monotonic(), stats)
+        return stats
+
     async def get_quote(self, inst: InstrumentRef) -> RawQuote:
+        from app.market.tickbars import latest_ticker
+        m = latest_ticker(inst.provider_symbol)
+        if m and m.get("best_bid") and m.get("best_ask"):
+            try:                                   # the live WebSocket feed: no REST call
+                return RawQuote(last=Decimal(m["price"]), bid=Decimal(m["best_bid"]), ask=Decimal(m["best_ask"]),
+                                prev_close=Decimal(m["open_24h"]) if m.get("open_24h") else None,
+                                as_of=datetime.fromisoformat(m["time"].replace("Z", "+00:00")), source=self.name)
+            except (KeyError, ValueError, ArithmeticError):
+                pass
         t = await self._get(f"/products/{inst.provider_symbol}/ticker")
-        stats = await self._get(f"/products/{inst.provider_symbol}/stats")
+        stats = await self._stats(inst.provider_symbol)
         try:
             return RawQuote(
                 last=Decimal(t["price"]), bid=Decimal(t["bid"]), ask=Decimal(t["ask"]),

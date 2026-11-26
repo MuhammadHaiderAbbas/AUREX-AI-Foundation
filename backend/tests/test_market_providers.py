@@ -102,3 +102,56 @@ async def test_frankfurter_daily_fixings():
     q = await p.get_quote(EUR)
     assert q.last == Decimal("1.07510") and q.prev_close == Decimal("1.07346")
     assert q.source == "ecb_reference"
+
+
+async def test_coinbase_quotes_from_the_live_feed_and_caches_stats():
+    import time as _time
+
+    from app.market import tickbars
+    calls = []
+
+    def handler(req):
+        calls.append(req.url.path)
+        if req.url.path.endswith("/ticker"):
+            return httpx.Response(200, json={"price": "1", "bid": "0.9", "ask": "1.1", "time": "2026-11-23T12:00:00Z"})
+        return httpx.Response(200, json={"open": "0.5"})
+
+    p = coinbase(handler)
+    tickbars.LATEST["BTC-USD"] = (_time.monotonic(), {"type": "ticker", "product_id": "BTC-USD", "price": "91000.5",
+                                                      "best_bid": "91000.1", "best_ask": "91000.9", "open_24h": "90000",
+                                                      "time": "2026-11-23T12:00:00.5Z"})
+    try:
+        q = await p.get_quote(BTC)
+        assert calls == [] and q.last == Decimal("91000.5") and q.bid == Decimal("91000.1") and q.prev_close == 90000
+        tickbars.LATEST["BTC-USD"] = (_time.monotonic() - 60, tickbars.LATEST["BTC-USD"][1])   # feed went quiet
+        await p.get_quote(BTC)
+        await p.get_quote(BTC)
+        assert calls.count("/products/BTC-USD/stats") == 1 and calls.count("/products/BTC-USD/ticker") == 2
+    finally:
+        tickbars.LATEST.clear()
+
+
+async def test_live_fx_rates_quotes_daily_history_and_scaled_intraday():
+    from app.market.providers.livefx import LiveFxProvider
+    rate_calls = []
+
+    def rates(req):
+        rate_calls.append(1)
+        return httpx.Response(200, json={"data": {"currency": "USD", "rates": {"EUR": "0.9", "GBP": "0.8", "JPY": "150.25"}}})
+
+    def ecb(req):
+        return httpx.Response(200, json={"rates": {"2026-11-19": {"USD": 1.1}, "2026-11-20": {"USD": 1.105}}})
+
+    p = LiveFxProvider("https://rates.test/v2/exchange-rates", frankfurter(ecb),
+                       client=httpx.AsyncClient(transport=httpx.MockTransport(rates)))
+    q = await p.get_quote(EUR)
+    assert q.source == "coinbase_rates" and q.last == Decimal("1.11111") and q.bid < q.last < q.ask
+    assert q.prev_close == Decimal("1.10500")
+    await p.get_quote(EUR)
+    assert len(rate_calls) == 1                         # one cached request serves every pair
+    start = datetime.now(UTC) - timedelta(hours=3)
+    rows = await p.get_candles(EUR, "5m", start, datetime.now(UTC))
+    assert len(rows) > 30 and abs(rows[-1].close - Decimal("1.11111")) < Decimal("0.01")   # ends near the live rate
+    assert p.source_for("5m") == "synthetic" and p.source_for("1d") == "ecb_reference"
+    daily = await p.get_candles(EUR, "1d", datetime(2026, 11, 19, tzinfo=UTC), datetime(2026, 11, 21, tzinfo=UTC))
+    assert [c.close for c in daily] == [Decimal("1.10000"), Decimal("1.10500")]
