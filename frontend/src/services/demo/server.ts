@@ -330,7 +330,22 @@ const withEffective = (p: Record<string, unknown> | null) => p && ({ ...p, effec
 const runSummary = (r: Record<string, unknown>) => ({ id: r.id, symbol: r.symbol, decision: r.decision, bias: r.bias, net_score: r.net_score, agreement: r.agreement, coverage: r.coverage, confidence: r.confidence, created_at: r.created_at, latency_ms: r.latency_ms });
 
 // ---- model lab -----------------------------------------------------------------------------
-const ML_ALGOS = [{ key: "logistic", label: "Logistic regression", description: "Regularised linear baseline (L2, C = 0.5). Runs in your browser.", params: { C: 0.5 } }];
+const ML_ALGOS = [
+  { key: "logistic", label: "Logistic regression", description: "Regularised linear baseline (L2, C = 0.5). Runs in your browser.", params: { C: 0.5 } },
+  { key: "random_forest", label: "Random forest", description: "60 shallow trees, depth ≤ 5, ≥ 40 samples per leaf. Runs in your browser.", params: { n_estimators: 60, max_depth: 5, min_samples_leaf: 40 } },
+  { key: "lightgbm", label: "LightGBM", description: "Gradient boosting, 15 leaves, ≥ 50 samples per leaf, row/feature subsampling. Browser port of the backend settings.", params: { n_estimators: 120, learning_rate: 0.03, num_leaves: 15, min_child_samples: 50 } },
+];
+function championFor(s: State, inst: mkt.DemoInstrument) {
+  const v = s.mlVersions.find((x) => x.symbol === inst.symbol && x.status === "champion");
+  if (!v) return null;
+  const m = s.mlModels.find((x) => x.id === v.model_id);
+  const hb = hourBars(inst, 200).map((b) => ({ t: b.t, h: b.h, l: b.l, c: b.c }));
+  const row = ml.featureMatrix(hb).at(-1);
+  const probability = row && row.every(Number.isFinite) ? ml.predictModel(v.weights, row) : null;
+  return { name: m?.name ?? v.symbol, version: v.version, eligible: v.eligible, note: v.eligibility_note, horizon: v.metrics.horizon, probability,
+    auc: v.metrics.oos.auc, brier: v.metrics.oos.brier, data_source: v.data_source };
+}
+const ALGO_LABEL: Record<string, string> = Object.fromEntries(ML_ALGOS.map((a) => [a.key, a.label]));
 function mlSummary(v: Record<string, any>) { // eslint-disable-line @typescript-eslint/no-explicit-any
   const o = v.metrics.oos, b = v.metrics.baselines;
   return { auc: o.auc, brier: o.brier, brier_climatology: o.brier_climatology, net_return: o.strategy_net_return, sharpe: o.strategy_sharpe, buy_hold_return: b.buy_hold.net_return, trades: o.strategy_trades };
@@ -772,6 +787,7 @@ async function runAnalysis(s: State, user: DUser, symbol: string, accountId: str
     quote: { last: +q.last, bid: +q.bid, ask: +q.ask, market_open: q.market_open, stale: q.stale, tradable: q.tradable, source: q.source },
     docs, macro, account: acct && bal ? { id: acct.id, currency: acct.base_currency, equity: +bal.equity, cash: +bal.cash } : null,
     fx: acct ? fxRate(inst.quote_currency, acct.base_currency) : null, open_positions: 0,
+    ml: championFor(s, inst),
   };
   const agents = agentList(s);
   const enabled = new Set(agents.filter((a) => a.enabled).map((a) => a.name));
@@ -1958,23 +1974,23 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^\/ml\/train$/, async (c) => {
     const { user } = admin(c);
     const algo = String(c.body.algorithm ?? "logistic");
-    if (algo !== "logistic") throw new HttpError(422, "business_rule_violation", "Random forest and LightGBM run on the AUREX backend; the browser demo supports logistic regression");
+    if (!ALGO_LABEL[algo]) throw new HttpError(422, "business_rule_violation", `algorithm must be one of ${Object.keys(ALGO_LABEL).join(", ")}`);
     const inst = findInst(String(c.body.symbol ?? ""));
     const horizon = Number(c.body.horizon ?? 4), days = Math.min(365, Math.max(60, Number(c.body.days ?? 180)));
     await live.ensureCandles(inst.symbol, "1h", days * 24);
     const ds = ml.buildDataset(hourBars(inst, days * 24), horizon);
     let wf;
-    try { wf = ml.walkForward(ds, inst.asset_class, mkt.candleSource(inst, "1h", days * 24)); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
-    const final = ml.fitLogit(ds.X, ds.y);
-    const total = final.w.reduce((a, w) => a + Math.abs(w), 0) || 1;
-    const importance = Object.fromEntries(ml.FEATURES.map((f, j) => [f, +(Math.abs(final.w[j]!) / total).toFixed(4)]).sort((a, b) => (b[1] as number) - (a[1] as number)));
+    const source = mkt.candleSource(inst, "1h", days * 24);
+    try { wf = ml.walkForward(ds, inst.asset_class, source, algo); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
+    const final = ml.fitModel(algo, ds.X, ds.y);
+    const importance = ml.importance(final);
     let spec = c.s.mlModels.find((m) => m.symbol === inst.symbol && m.horizon === horizon && m.algorithm === algo);
-    if (!spec) { spec = { id: uuid(), name: `${inst.symbol} · Logistic regression · ${horizon}h`, symbol: inst.symbol, timeframe: "1h", horizon, algorithm: algo, created_at: now() }; c.s.mlModels.push(spec); }
+    if (!spec) { spec = { id: uuid(), name: `${inst.symbol} · ${ALGO_LABEL[algo]} · ${horizon}h`, symbol: inst.symbol, timeframe: "1h", horizon, algorithm: algo, created_at: now() }; c.s.mlModels.push(spec); }
     const version = Math.max(0, ...c.s.mlVersions.filter((v) => v.model_id === spec!.id).map((v) => v.version)) + 1;
     const failed = wf.gates.filter((g) => !g.passed).map((g) => g.name);
     const v = {
       id: uuid(), model_id: spec.id, symbol: inst.symbol, version, status: "candidate", eligible: wf.eligible,
-      eligibility_note: wf.eligible ? "All validation gates passed" : `Failed: ${failed.join("; ")}`, data_source: "synthetic",
+      eligibility_note: wf.eligible ? "All validation gates passed" : `Failed: ${failed.join("; ")}`, data_source: source,
       trained_at: now(), promoted_at: null, retired_at: null, n_samples: ds.y.length, gates: wf.gates,
       metrics: { oos: wf.oos, baselines: wf.baselines, folds: wf.folds, calibration: wf.calibration, curves: wf.curves, horizon },
       feature_importance: importance, train_from: ds.times[0], train_to: ds.times.at(-1), weights: final, reference: ml.reference(ds.X),
@@ -1982,7 +1998,7 @@ const routes: [string, RegExp, Handler][] = [
     };
     c.s.mlVersions.push(v);
     c.s.mlEvals.push({ id: uuid(), version_id: v.id, kind: "walk_forward", status: wf.eligible ? "eligible" : "ineligible", metrics: { oos: wf.oos, gates: wf.gates }, created_at: now() });
-    await audit(c.s, user.id, "ml.train", { type: "model_version", id: v.id, details: { symbol: v.symbol, algorithm: algo, version, eligible: v.eligible, data_source: "synthetic" } });
+    await audit(c.s, user.id, "ml.train", { type: "model_version", id: v.id, details: { symbol: v.symbol, algorithm: algo, version, eligible: v.eligible, data_source: source } });
     return json(201, mlDetail(c.s, v));
   }],
   ["GET", /^\/ml\/versions\/([\w-]+)$/, (c) => {
@@ -1991,12 +2007,19 @@ const routes: [string, RegExp, Handler][] = [
     if (!v) throw new HttpError(404, "not_found", "Model version not found");
     return json(200, mlDetail(c.s, v));
   }],
-  ["POST", /^\/ml\/versions\/([\w-]+)\/promote$/, (c) => {
+  ["POST", /^\/ml\/versions\/([\w-]+)\/promote$/, async (c) => {
     admin(c);
     const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
     if (!v) throw new HttpError(404, "not_found", "Model version not found");
     if (v.status !== "candidate") throw new HttpError(422, "business_rule_violation", "Only candidate versions can be promoted");
-    throw new HttpError(422, "business_rule_violation", `Version is not eligible for promotion. ${v.eligibility_note}`, v.gates.filter((g: { passed: boolean }) => !g.passed));
+    if (!v.eligible) throw new HttpError(422, "business_rule_violation", `Version is not eligible for promotion. ${v.eligibility_note}`, v.gates.filter((g: { passed: boolean }) => !g.passed));
+    const last = c.s.mlEvals.filter((e) => e.version_id === v.id && e.kind === "drift_check").at(-1);
+    if (last?.status === "drift") throw new HttpError(422, "business_rule_violation", "Latest drift check reports drift; retrain before promoting");
+    const prev = c.s.mlVersions.find((x) => x.symbol === v.symbol && x.status === "champion");
+    if (prev) { prev.status = "retired"; prev.retired_at = now(); }
+    v.status = "champion"; v.promoted_at = now();
+    await audit(c.s, admin(c).user.id, "ml.promote", { type: "model_version", id: v.id, details: { previous: prev?.id ?? null } });
+    return json(200, mlDetail(c.s, v));
   }],
   ["POST", /^\/ml\/versions\/([\w-]+)\/retire$/, async (c) => {
     const { user } = admin(c);
@@ -2012,7 +2035,7 @@ const routes: [string, RegExp, Handler][] = [
     const v = c.s.mlVersions.find((x) => x.id === c.params[0]);
     if (!v) throw new HttpError(404, "not_found", "Model version not found");
     const ds = ml.buildDataset(hourBars(findInst(v.symbol), 30 * 24), v.metrics.horizon);
-    const p = ds.X.map((r) => ml.predict(v.weights, r));
+    const p = ds.X.map((r) => ml.predictModel(v.weights, r));
     const recent = p.reduce((s, x, i) => s + (x - ds.y[i]!) ** 2, 0) / p.length;
     const result = { ...ml.drift(v.reference, ds.X, recent, v.metrics.oos.brier), window_days: 30, samples: ds.y.length };
     const ev = { id: uuid(), version_id: v.id, kind: "drift_check", status: result.status, metrics: result, created_at: now() };
@@ -2021,7 +2044,13 @@ const routes: [string, RegExp, Handler][] = [
     await audit(c.s, user.id, "ml.drift_check", { type: "model_version", id: v.id, details: { status: result.status, eligible_after: v.eligible } });
     return json(201, ev);
   }],
-  ["GET", /^\/ml\/champion$/, (c) => { authUser(c); throw new HttpError(404, "not_found", `No champion model for ${c.query.get("symbol")}`); }],
+  ["GET", /^\/ml\/champion$/, (c) => {
+    authUser(c);
+    const sym = c.query.get("symbol") ?? "";
+    const v = c.s.mlVersions.find((x) => x.status === "champion" && (x.symbol === sym || x.symbol.replace("/", "") === sym));
+    if (!v) throw new HttpError(404, "not_found", `No champion model for ${sym}`);
+    return json(200, mlSummaryRead(v));
+  }],
   ["GET", /^\/backtests\/strategies$/, (c) => { authUser(c); return json(200, bt.STRATEGIES.map(({ grid, ...s }) => ({ ...s, grid_size: grid.length }))); }],
   ["POST", /^\/backtests$/, async (c) => {
     const { user } = authUser(c);
