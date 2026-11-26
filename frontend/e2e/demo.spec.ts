@@ -86,6 +86,11 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
   await expect(page.getByRole("button", { name: "Promote" })).toBeDisabled();
   await page.getByRole("button", { name: "Drift check" }).click();
   await expect(page.getByText(/max PSI/)).toBeVisible();
+  // tree ensembles also run in the browser (LightGBM is the default algorithm)
+  await page.getByLabel("Algorithm").selectOption("lightgbm");
+  await page.getByRole("button", { name: "Train & validate" }).click();
+  await expect(page.getByText(/EUR\/USD · LightGBM · 4h/).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
 
   // Backtesting in the browser
   await page.getByRole("link", { name: "Backtesting" }).click();

@@ -273,7 +273,7 @@ export function ModelLabPage() {
       <div className="space-y-4">
         <TrainPanel onTrained={select} />
         <Registry selected={selected} onSelect={select} />
-        {isDemo && <p className="px-1 text-[11px] text-subtle">Demo build: logistic regression runs in your browser; random forest and LightGBM need the AUREX backend.</p>}
+        {isDemo && <p className="px-1 text-[11px] text-subtle">Demo build: all three algorithms train in your browser. Crypto models use real Coinbase history and can be promoted when every gate passes.</p>}
       </div>
       <div className="min-w-0">
         {version.data ? <VersionView v={version.data} /> : version.isLoading ? <Spinner className="mx-auto mt-16" /> : (

@@ -81,14 +81,17 @@ export function CryptoOverview({ instruments, quotes, onSelect, part }: {
           const up = (lp.change ?? 0) >= 0;
           return (
             <button key={c.id} type="button" onClick={() => lp.inst && onSelect(lp.inst.slug)} disabled={!lp.inst}
-              className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3 text-left hover:border-border-strong disabled:cursor-default">
-              <img src={c.image} alt="" className="size-8 rounded-full" loading="lazy" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{c.name}</div>
-                <div className="num text-sm">{price(lp.price)} <span className="text-[10px] text-subtle">USD</span></div>
-                <Pct v={lp.change} className="text-xs" />
+              className="min-w-0 rounded-lg border border-border bg-surface p-3 text-left hover:border-border-strong disabled:cursor-default">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src={c.image} alt="" className="size-6 shrink-0 rounded-full" loading="lazy" />
+                <span className="text-sm font-semibold uppercase">{c.symbol}</span>
+                <span className="min-w-0 truncate text-xs text-subtle">{c.name}</span>
               </div>
-              <Sparkline values={c.sparkline_in_7d?.price ?? []} up={up} width={56} height={30} />
+              <div className="num mt-1.5 text-sm font-medium" title={`${price(lp.price)} USD`}>{price(lp.price)}</div>
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <Pct v={lp.change} className="text-xs" />
+                <Sparkline values={c.sparkline_in_7d?.price ?? []} up={up} width={52} height={22} />
+              </div>
             </button>
           );
         })}

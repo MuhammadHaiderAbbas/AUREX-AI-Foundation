@@ -1,9 +1,11 @@
 /**
  * Browser port of backend/app/ml for the static demo: leak-free features, an L2 logistic
  * regression trained by gradient descent, purged walk-forward validation after costs,
- * validation gates and PSI drift. Random forest and LightGBM require the backend.
+ * validation gates and PSI drift. Random forest and LightGBM-style boosting are in ./trees.
  */
 import { ema, rsi, sma } from "./market";
+
+import { fitForest, fitGbm, predictTrees, type Forest, type Gbm } from "./trees";
 
 export const FEATURES = ["ret_1", "ret_4", "ret_24", "vol_24", "vol_72", "vol_ratio", "rsi_14", "macd_atr", "trend_atr", "bb_pctb", "er_24", "dist_high_72", "hour_sin", "hour_cos"];
 const WARMUP = 80;
@@ -77,6 +79,22 @@ export function fitLogit(X: number[][], y: number[], C = 0.5, iters = 300, lr = 
 }
 export const predict = (m: Logit, r: number[]) => sigmoid(r.reduce((s, v, j) => s + ((v - m.mean[j]!) / m.sd[j]!) * m.w[j]!, m.b));
 
+// ---- any supported algorithm --------------------------------------------------------
+export type Model = (Logit & { kind?: "logistic" }) | Forest | Gbm;
+export const ALGORITHMS = ["logistic", "random_forest", "lightgbm"] as const;
+export function fitModel(algo: string, X: number[][], y: number[]): Model {
+  if (algo === "random_forest") return fitForest(X, y);
+  if (algo === "lightgbm") return fitGbm(X, y);
+  return { kind: "logistic", ...fitLogit(X, y) };
+}
+export const predictModel = (m: Model, r: number[]) => (m.kind === "random_forest" || m.kind === "lightgbm" ? predictTrees(m, r) : predict(m, r));
+/** Normalised |coefficient| (logistic) or split gain (trees), by feature. */
+export function importance(m: Model): Record<string, number> {
+  const raw = m.kind === "random_forest" || m.kind === "lightgbm" ? m.importance : m.w.map(Math.abs);
+  const total = raw.reduce((a, b) => a + b, 0) || 1;
+  return Object.fromEntries(FEATURES.map((f, j) => [f, +(raw[j]! / total).toFixed(4)] as const).sort((a, b) => b[1] - a[1]));
+}
+
 // ---- validation ------------------------------------------------------------------------
 const COST: Record<string, number> = { CRYPTO: 0.0011, FX: 0.0001, STOCK: 0.0006, ETF: 0.0004 };
 const BPY: Record<string, number> = { CRYPTO: 8760, FX: 6240, STOCK: 1764, ETF: 1764 };
@@ -115,16 +133,16 @@ function strategy(p: number[], fwd: number[], cost: number, ppy: number) {
 const down = (x: number[], n = 250) => (x.length <= n ? x : Array.from({ length: n }, (_, i) => x[Math.floor((i * (x.length - 1)) / (n - 1))]!)).map((v) => +v.toFixed(5));
 const r5 = (v: number) => +v.toFixed(5);
 
-export function walkForward(ds: Dataset, asset: string, source = "synthetic") {
+export function walkForward(ds: Dataset, asset: string, source = "synthetic", algo = "logistic") {
   const n = ds.y.length, H = ds.horizon, start = Math.floor(n * 0.4), size = Math.floor((n - start) / 5);
   if (size < 5 * H || start < 200) throw new Error("Not enough data for walk-forward validation");
   const cost = COST[asset]!, ppy = BPY[asset]! / H, mom = FEATURES.indexOf("ret_24");
   const P: number[] = [], CL: number[] = [], MO: number[] = [], IDX: number[] = [], folds = [];
   for (let k = 0; k < 5; k++) {
     const s = start + k * size, e = k === 4 ? n : s + size, trainEnd = s - H;
-    const model = fitLogit(ds.X.slice(0, trainEnd), ds.y.slice(0, trainEnd));
+    const model = fitModel(algo, ds.X.slice(0, trainEnd), ds.y.slice(0, trainEnd));
     const test: number[] = []; for (let i = s; i < e; i += H) test.push(i);
-    const p = test.map((i) => predict(model, ds.X[i]!));
+    const p = test.map((i) => predictModel(model, ds.X[i]!));
     const base = ds.y.slice(0, trainEnd).reduce((x, y) => x + y, 0) / trainEnd;
     const y = test.map((i) => ds.y[i]!), fwd = test.map((i) => ds.fwd[i]!);
     const ms = strategy(p, fwd, cost, ppy), bh = strategy(test.map(() => 1), fwd, cost, ppy);

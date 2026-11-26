@@ -13,6 +13,8 @@ export interface Ctx {
   docs: DocSig[]; macro: DocSig[];
   account: { id: string; currency: string; equity: number; cash: number } | null;
   fx: number | null; open_positions: number;
+  /** Promoted champion model for this instrument, with its probability on the latest bar (null = none). */
+  ml?: { name: string; version: number; eligible: boolean; note: string; horizon: number; probability: number | null; auc: number; brier: number; data_source: string } | null;
 }
 export interface Ev { label: string; value: string; detail: string }
 export interface Finding {
@@ -230,6 +232,21 @@ export function riskCheck(c: Ctx, reg: Finding, nw: Finding, pf: Finding): Findi
 export const DEFAULT_WEIGHTS: Record<string, number> = { technical: 0.35, quant: 0.25, fundamental: 0.15, news: 0.15, sentiment: 0.1, ml: 0 };
 export const ORDER = ["technical", "quant", "regime", "fundamental", "news", "sentiment", "ml", "portfolio", "risk"];
 
+/** Mirrors backend specialists.ml_model: the promoted champion's probability, as a vote. */
+export function mlModel(c: Ctx): Finding {
+  const m = c.ml;
+  if (!m) return abstain("ml", "No promoted champion model for this instrument");
+  if (!m.eligible) return abstain("ml", `Champion v${m.version} is not eligible: ${m.note}`);
+  const p = m.probability;
+  if (p == null) return abstain("ml", "Not enough recent bars to compute model features");
+  return { agent: "ml", status: "ok", direction: p > 0.55 ? 1 : p < 0.45 ? -1 : 0, score: +clip((p - 0.5) * 4).toFixed(3), confidence: 0.6,
+    summary: `Champion ${m.name} v${m.version}: P(up over ${m.horizon}h) = ${(p * 100).toFixed(0)}%. Validated out-of-sample AUC ${m.auc.toFixed(2)}, Brier ${m.brier.toFixed(3)}.`,
+    evidence: [{ label: "P(up)", value: `${(p * 100).toFixed(1)}%`, detail: `${m.horizon}h horizon` },
+      { label: "Model", value: `${m.name} v${m.version}`, detail: `trained on ${m.data_source} data` },
+      { label: "Out-of-sample AUC", value: m.auc.toFixed(3), detail: "" }, { label: "Out-of-sample Brier", value: m.brier.toFixed(4), detail: "" }],
+    duration_ms: 0, data: { probability: p } };
+}
+
 export function runAgents(c: Ctx, enabled: Set<string>) {
   const f: Record<string, Finding> = {};
   const call = (name: string, fn: () => Finding) => {
@@ -240,8 +257,7 @@ export function runAgents(c: Ctx, enabled: Set<string>) {
   };
   call("technical", () => technical(c)); call("quant", () => quant(c)); call("regime", () => regime(c));
   call("fundamental", () => fundamental(c)); call("news", () => news(c)); call("sentiment", () => sentimentAgent(c));
-  // Models trained on synthetic data can never be promoted, so the demo never has a champion.
-  call("ml", () => abstain("ml", "No promoted champion model for this instrument"));
+  call("ml", () => mlModel(c));
   call("portfolio", () => portfolio(c, f.technical!.data.atr as number | undefined));
   call("risk", () => riskCheck(c, f.regime!, f.news!, f.portfolio!));
   return f;
