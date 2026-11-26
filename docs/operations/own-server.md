@@ -1,5 +1,7 @@
 # Run AUREX on your own server (real prices, private)
 
+> No budget? See [free-setup.md](free-setup.md): your own computer, or Oracle Cloud's Always Free tier.
+
 About an hour, once. Cost: roughly £4–10 a month for the server, and optionally ~£8 a year for
 a domain. Everything stays paper trading: live trading is disabled in code.
 

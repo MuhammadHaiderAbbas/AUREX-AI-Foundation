@@ -1,0 +1,18 @@
+# Build the AUREX images on this server from the checked-out code instead of pulling them from
+# GitHub Container Registry. Use it when no release has been published, or on an ARM server
+# (for example Oracle Cloud's Always Free Ampere A1), since the published images are x86 only.
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file .env.prod \
+#     --profile local-db up -d --build
+#
+# Set AUREX_IMAGE_OWNER=local and AUREX_VERSION=local in .env.prod; they only name the built images.
+services:
+  backend:
+    build: { context: ../../backend }
+    pull_policy: build
+  ops:
+    build: { context: ../../backend, target: ops }
+    pull_policy: build
+  web:
+    build: { context: ../../frontend }
+    pull_policy: build
