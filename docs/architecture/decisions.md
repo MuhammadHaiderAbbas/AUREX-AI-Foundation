@@ -301,3 +301,17 @@ another replica. Fingerprints see them with no pub/sub infrastructure and cannot
 the way a dropped message can; the cost is one small indexed query per connected user per
 second. Model Lab and backtest charts stay as they are: they show the results of finished runs,
 not live state.
+
+## ADR-039 The binary bot trades only on a validated out-of-sample edge
+**Decision.** A one-button bot per paper account. Each minute, for each instrument, it fits a
+logistic model on bars matching the contract expiry (1m to 1h), measures its hit rate on the
+latest 30% of bars it did not train on (purged), counting only predictions confident enough to
+trade, and opens a contract only if that hit rate beats break-even (55.6% at 80% payout) plus a
+margin and the current prediction is that confident. Contracts pass the normal binary risk gate.
+An edge guard pauses the bot when its live win rate is below break-even after 20 settled
+contracts; breakers, kill switches, halts and the binary switch pause it; the emergency stop
+stops it. Every cycle's reasoning is stored and shown.
+**Why.** The user asked for automatic binary trading. A bot that bets every minute would lose
+the house edge by construction. Requiring measured evidence, and stopping on live evidence of
+no edge, is the most honest automation possible. This revises ADR-037 ("no autopilot for
+binaries"): the bot is paper-only and, like everything else, cannot reach real money.

@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -47,6 +49,7 @@ class BinaryContract(UUIDPk, Timestamps, Base):
         CheckConstraint("status = 'OPEN' OR settled_at IS NOT NULL", name="settled_has_time"),
         Index("ix_binary_open_expiry", "expires_at", postgresql_where=text("status = 'OPEN'")),
         UniqueConstraint("account_id", "client_id", name="uq_binary_client_id"),
+        CheckConstraint("source IN ('manual','bot')", name="source_valid"),
     )
 
     account_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trading_accounts.id", ondelete="RESTRICT"),
@@ -72,3 +75,32 @@ class BinaryContract(UUIDPk, Timestamps, Base):
     open_txn_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     settle_txn_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     client_id: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(6), nullable=False, default="manual", server_default="manual")
+    signal: Mapped[dict | None] = mapped_column(JSON)          # the bot's evidence when it opened the contract
+
+
+class BinaryBot(Timestamps, Base):
+    """The one-button binary bot for a paper account. It trades only with a validated edge."""
+
+    __tablename__ = "binary_bots"
+    __table_args__ = (
+        CheckConstraint("status IN ('STOPPED','RUNNING','PAUSED')", name="status_valid"),
+        CheckConstraint("stake_pct > 0 AND stake_pct <= 5", name="stake_range"),
+        CheckConstraint("min_confidence >= 0.5 AND min_confidence < 1", name="confidence_range"),
+        CheckConstraint("edge_margin >= 0 AND edge_margin <= 0.2", name="edge_margin_range"),
+        CheckConstraint("guard_min_contracts BETWEEN 5 AND 500", name="guard_range"),
+    )
+
+    account_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trading_accounts.id", ondelete="CASCADE"),
+                                                  primary_key=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="STOPPED")
+    symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    expiry_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    stake_pct: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
+    edge_margin: Mapped[float] = mapped_column(Float, nullable=False, default=0.02)
+    guard_min_contracts: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    allow_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_cycle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paused_reason: Mapped[str | None] = mapped_column(Text)

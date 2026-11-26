@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [60, 300, 900, 3600, 86400])
     # Contracts whose settlement price cannot be observed this long after expiry are voided (refunded).
     binary_void_after_seconds: int = 600
+    # Binary bot: seconds between cycles for each RUNNING bot.
+    binary_bot_interval_seconds: float = 60.0
 
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
     order_matcher_interval_seconds: float = 1.0

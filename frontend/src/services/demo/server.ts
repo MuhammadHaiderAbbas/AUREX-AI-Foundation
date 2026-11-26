@@ -14,6 +14,7 @@ import * as ag from "./agents";
 import * as ml from "./ml";
 import * as bt from "./backtest";
 import * as risk from "./risk";
+import * as bbot from "./binarybot";
 import * as an from "./analytics";
 import * as totp from "./totp";
 
@@ -41,7 +42,8 @@ interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; 
 interface DAudit { id: number; occurred_at: string; actor_user_id: string | null; action: string; resource_type: string | null; resource_id: string | null; outcome: string; ip_address: string | null; request_id: string | null; details: Record<string, unknown>; prev_hash: string; hash: string }
 interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[]; stop_loss: string | null; take_profit: string | null; parent_order_id: string | null; oco_group: string | null; proposal_id: string | null }
 interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
-interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null }
+interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null; source?: "manual" | "bot"; signal?: Record<string, unknown> | null }
+interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
@@ -61,6 +63,7 @@ interface State {
   riskProfiles: Record<string, DRisk>; riskDecisions: DDecision[]; systemHalt: { halted: boolean; reason: string | null; since: string | null };
   riskEvents: { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }[];
   binaries?: DBinary[];
+  binaryBots?: Record<string, DBot>;
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -461,8 +464,13 @@ function blockReason(s: State, p: DRisk): string | null {
   if (p.drawdown_halted) return `maximum drawdown of ${p.max_drawdown_pct}% reached`;
   return null;
 }
+function pauseBot(s: State, accountId: string, reason: string) {
+  const b = s.binaryBots?.[accountId];
+  if (b?.status === "RUNNING") { b.status = "PAUSED"; b.paused_reason = reason; riskEvent(s, accountId, "BINARY_BOT_PAUSED", `Binary bot paused: ${reason}`); }
+}
 function trip(s: State, a: DAccount, p: DRisk, type: string, message: string, detail: Record<string, unknown>) {
   const cancelled = cancelOpen(s, a.id, `risk: ${message}`);
+  pauseBot(s, a.id, message);
   if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
   riskEvent(s, a.id, type, message, { ...detail, cancelled_orders: cancelled });
 }
@@ -493,6 +501,7 @@ function metrics(s: State, a: DAccount, pf = portfolio(s, a)) {
 }
 function engageKill(s: State, a: DAccount, p: DRisk, reason: string, automatic = false) {
   p.kill_switch = true; p.kill_reason = reason; p.kill_engaged_at = now();
+  pauseBot(s, a.id, `kill switch engaged (${reason})`);
   if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
   const cancelled = cancelOpen(s, a.id, `risk: kill switch engaged (${reason})`);
   riskEvent(s, a.id, automatic ? "ABNORMAL_ACTIVITY" : "KILL_SWITCH_ON", `Kill switch engaged${automatic ? " automatically" : ""}: ${reason}`, { cancelled_orders: cancelled });
@@ -843,7 +852,8 @@ function binaryStats(s: State, a: DAccount) {
     by_expiry: group((b) => String(b.expiry_seconds), (x, y) => +x - +y), by_symbol: group((b) => b.symbol), by_direction: group((b) => b.direction) };
 }
 
-async function openBinary(s: State, user: DUser, a: DAccount, body: Record<string, unknown>): Promise<{ b: DBinary; replay: boolean }> {
+async function openBinary(s: State, user: DUser, a: DAccount, body: Record<string, unknown>, opts: { source?: "manual" | "bot"; signal?: Record<string, unknown> } = {}): Promise<{ b: DBinary; replay: boolean }> {
+  const decisionSource = opts.source === "bot" ? "binary-bot" : "binary";
   s.binaries ??= [];
   const cid = body.client_id == null ? null : String(body.client_id);
   if (cid != null && !/^[A-Za-z0-9_-]{8,64}$/.test(cid)) throw bad("client_id must be 8-64 characters of A-Z, 0-9, _ or -", "client_id");
@@ -877,7 +887,7 @@ async function openBinary(s: State, user: DUser, a: DAccount, body: Record<strin
   if (!rate.passed && !p.kill_switch) engageKill(s, a, p, rate.message, true);
   const side = dir === "HIGHER" ? "CALL" : "PUT";
   if (reason) {
-    s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: null, proposal_id: null, source: "binary", symbol: i.symbol, side, approved: false, reason, checks, created_at: now() });
+    s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: null, proposal_id: null, source: decisionSource, symbol: i.symbol, side, approved: false, reason, checks, created_at: now() });
     await audit(s, user.id, "binary.open", { type: "trading_account", id: a.id, details: { symbol: i.symbol, direction: dir, stake: stakeStr, expiry_seconds: expiry, status: "REJECTED", reason: `risk: ${reason}` } });
     save();
     throw new HttpError(422, "risk_rejected", `risk: ${reason}`, { checks });
@@ -886,15 +896,127 @@ async function openBinary(s: State, user: DUser, a: DAccount, body: Record<strin
   post(s, a, "BINARY_OPEN", [["INVESTMENTS", "DEBIT", S], ["CASH", "CREDIT", S]], user.id, `Binary ${dir} ${i.symbol} ${expiry}s, stake ${S}`);
   const b: DBinary = { id: uuid(), account_id: a.id, user_id: user.id, symbol: i.symbol, direction: dir, stake: S, currency: a.base_currency, payout_rate: BINARY_PAYOUT,
     strike: String(+midOf(q).toFixed(i.price_decimals + 2)), expiry_seconds: expiry, opened_at: new Date(nowMs).toISOString(), expires_at: new Date(expMs).toISOString(),
-    status: "OPEN", settle_price: null, settle_price_at: null, settled_at: null, returned: null, pnl: null, void_reason: null, client_id: cid };
+    status: "OPEN", settle_price: null, settle_price_at: null, settled_at: null, returned: null, pnl: null, void_reason: null, client_id: cid, source: opts.source ?? "manual", signal: opts.signal ?? null };
   s.binaries.push(b);
-  s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: b.id, proposal_id: null, source: "binary", symbol: i.symbol, side, approved: true, reason: null, checks, created_at: now() });
+  s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, binary_id: b.id, proposal_id: null, source: decisionSource, symbol: i.symbol, side, approved: true, reason: null, checks, created_at: now() });
   snapshot(s, a, "binary");
   await audit(s, user.id, "binary.open", { type: "binary_contract", id: b.id, details: { symbol: b.symbol, direction: dir, stake: S, expiry_seconds: expiry, strike: b.strike, status: "OPEN" } });
   return { b, replay: false };
 }
 
+// ---- binary bot (mirror of backend app/binary/bot.py) -------------------------------------
+const BOT_INTERVAL_S = 60, BOT_DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD", "EUR/USD"];
+function getBot(s: State, accountId: string): DBot {
+  s.binaryBots ??= {};
+  return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 300, stake_pct: 1,
+    min_confidence: 0.6, edge_margin: 0.02, guard_min_contracts: 20, started_at: null, last_cycle_at: null, paused_reason: null });
+}
+function botSignal(symbol: string, expiry: number, bot?: DBot) {
+  const [tf, horizon] = bbot.EXPIRY_BARS[expiry]!;
+  const inst = findInst(symbol);
+  const bars = mkt.candles(inst, tf, 600).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
+  const sig = bbot.computeSignal(bars, horizon, BINARY_PAYOUT, bot?.min_confidence ?? 0.6, bot?.edge_margin ?? 0.02);
+  return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: "synthetic" };
+}
+function botStats(s: State, bot: DBot) {
+  const rows = (s.binaries ?? []).filter((c) => c.account_id === bot.account_id && c.source === "bot" && (!bot.started_at || c.opened_at >= bot.started_at));
+  const won = rows.filter((c) => c.status === "WON").length, lost = rows.filter((c) => c.status === "LOST").length;
+  const settled = rows.filter((c) => c.status !== "OPEN");
+  const staked = settled.reduce((t, c) => t + toUnits(c.stake), 0n), net = settled.reduce((t, c) => t + toUnits(c.pnl ?? "0"), 0n);
+  return { contracts: rows.length, open: rows.length - settled.length, won, lost, ties: rows.filter((c) => c.status === "TIE").length,
+    void: rows.filter((c) => c.status === "VOID").length, win_rate: won + lost ? won / (won + lost) : null, staked: fromUnits(staked),
+    net_pnl: fromUnits(net), return_on_stake: staked ? Number(net) / Number(staked) : null };
+}
+async function botCycle(s: State, a: DAccount, bot: DBot) {
+  const out: { at: string; results: Record<string, unknown>[]; skipped?: string } = { at: now(), results: [] };
+  bot.last_cycle_at = now();
+  const p = profile(s, a.id);
+  const block = blockReason(s, p) ?? (p.binary_enabled === false ? "binary trading is switched off in the Risk Centre" : null);
+  if (block) { pauseBot(s, a.id, block); out.skipped = block; return out; }
+  const st = botStats(s, bot), be = 1 / (1 + BINARY_PAYOUT);
+  if (st.won + st.lost >= bot.guard_min_contracts && st.win_rate! < be) {
+    const reason = `edge guard: won ${st.won} of ${st.won + st.lost} (${(st.win_rate! * 100).toFixed(1)}%), below the ${(be * 100).toFixed(1)}% break-even rate`;
+    pauseBot(s, a.id, reason); out.skipped = reason; return out;
+  }
+  const user = s.users.find((u) => u.id === a.owner_id)!;
+  for (const symbol of bot.symbols) {
+    if ((s.binaries ?? []).some((c) => c.account_id === a.id && c.source === "bot" && c.symbol === symbol && c.status === "OPEN")) {
+      out.results.push({ symbol, outcome: "waiting", detail: "a bot contract on this instrument is still open" }); continue;
+    }
+    const sig = botSignal(symbol, bot.expiry_seconds, bot);
+    const brief = { p_up: sig.p_up, confidence: sig.confidence, holdout_accuracy: sig.holdout_accuracy, holdout_n: sig.holdout_n,
+      required_accuracy: sig.required_accuracy, expected_return: sig.expected_return, timeframe: sig.timeframe, data_mode: sig.data_mode };
+    if (!sig.trade) { out.results.push({ symbol, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
+    const equity = +portfolio(s, a).equity;
+    const stake = Math.max(Math.floor(equity * bot.stake_pct) / 100, MIN_ORDER_VALUE).toFixed(2);
+    try {
+      const { b } = await openBinary(s, user, a, { symbol, direction: sig.direction, stake, expiry_seconds: bot.expiry_seconds, client_id: `bot-${uuid().replace(/-/g, "")}` },
+        { source: "bot", signal: { ...brief, reason: sig.reason } });
+      out.results.push({ symbol, outcome: "opened", contract_id: b.id, direction: b.direction, stake: b.stake, detail: sig.reason, signal: brief });
+    } catch (e) { out.results.push({ symbol, outcome: "risk_rejected", detail: (e as Error).message, signal: brief }); }
+  }
+  const n = out.results.filter((r) => r.outcome === "opened").length;
+  riskEvent(s, a.id, "BINARY_BOT_CYCLE", `Binary bot: ${out.results.length} instruments checked, ${n} contracts opened`, { results: out.results });
+  return out;
+}
+async function dueBots(s: State) {
+  for (const bot of Object.values(s.binaryBots ?? {})) {
+    if (bot.status !== "RUNNING" || (bot.last_cycle_at && Date.now() - Date.parse(bot.last_cycle_at) < BOT_INTERVAL_S * 1000)) continue;
+    const a = s.accounts.find((x) => x.id === bot.account_id);
+    if (a) await botCycle(s, a, bot);
+  }
+}
+function botRead(s: State, bot: DBot) {
+  return { ...bot, interval_seconds: BOT_INTERVAL_S, data_mode: "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
+    stats: botStats(s, bot), recent: s.riskEvents.filter((e) => e.account_id === bot.account_id && ["BINARY_BOT_CYCLE", "BINARY_BOT_PAUSED", "BINARY_BOT_CONTROL"].includes(e.type))
+      .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] })) };
+}
+
 const binaryRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/binary\/bot$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    processOpen(c.s); await dueBots(c.s); save();
+    return json(200, botRead(c.s, getBot(c.s, a.id)));
+  }],
+  ["POST", /^\/binary\/bot$/, async (c) => {
+    const { user } = authUser(c); const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const bot = getBot(c.s, a.id);
+    const action = c.body.action;
+    if (!["start", "pause", "stop"].includes(String(action))) throw bad("action must be start, pause or stop", "action");
+    const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+    if (Array.isArray(c.body.symbols)) {
+      if (!c.body.symbols.length || c.body.symbols.length > 6) throw bad("choose 1 to 6 instruments", "symbols");
+      bot.symbols = [...new Set((c.body.symbols as string[]).map((x) => findInst(String(x)).symbol))];
+    }
+    if (c.body.expiry_seconds != null) {
+      const e = Number(c.body.expiry_seconds);
+      if (!bbot.EXPIRY_BARS[e]) throw rule(`expiry_seconds must be one of [${Object.keys(bbot.EXPIRY_BARS).join(", ")}]`);
+      bot.expiry_seconds = e;
+    }
+    if (c.body.stake_pct != null) { const v = Number(c.body.stake_pct); if (!(v > 0 && v <= 5)) throw bad("stake_pct must be > 0 and ≤ 5", "stake_pct"); bot.stake_pct = v; }
+    if (c.body.min_confidence != null) { const v = Number(c.body.min_confidence); if (!(v >= 0.5 && v < 1)) throw bad("min_confidence must be in [0.5, 1)", "min_confidence"); bot.min_confidence = v; }
+    if (c.body.edge_margin != null) { const v = Number(c.body.edge_margin); if (!(v >= 0 && v <= 0.2)) throw bad("edge_margin must be in [0, 0.2]", "edge_margin"); bot.edge_margin = v; }
+    const old = bot.status;
+    if (action === "start") { bot.status = "RUNNING"; bot.paused_reason = null; if (old === "STOPPED" || !bot.started_at) bot.started_at = now(); }
+    else { bot.status = action === "pause" ? "PAUSED" : "STOPPED"; bot.paused_reason = action === "pause" ? "paused by you" : null; }
+    riskEvent(c.s, a.id, "BINARY_BOT_CONTROL", action === "stop" ? "Binary bot stopped" : `Binary bot ${action}ed`, { symbols: bot.symbols });
+    await audit(c.s, user.id, `binary.bot.${action}`, { type: "trading_account", id: a.id, details: { symbols: bot.symbols, expiry_seconds: bot.expiry_seconds, stake_pct: bot.stake_pct } });
+    if (action === "start") await botCycle(c.s, a, bot);
+    return json(200, botRead(c.s, bot));
+  }],
+  ["POST", /^\/binary\/bot\/run$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    const bot = getBot(c.s, a.id);
+    if (bot.status !== "RUNNING") throw new HttpError(422, "business_rule_violation", "Start the bot first");
+    processOpen(c.s);
+    return json(200, await botCycle(c.s, a, bot));
+  }],
+  ["GET", /^\/binary\/signal$/, (c) => {
+    authUser(c);
+    const e = Number(c.query.get("expiry_seconds") ?? 300);
+    if (!bbot.EXPIRY_BARS[e]) throw new HttpError(422, "business_rule_violation", "unsupported expiry");
+    return json(200, botSignal(c.query.get("symbol") ?? "BTC-USD", e));
+  }],
   ["GET", /^\/binary\/config$/, (c) => { authUser(c); return json(200, { ...binaryConfig(), notice: BINARY_NOTICE }); }],
   ["POST", /^\/binary\/contracts$/, async (c) => {
     const { user } = authUser(c);
@@ -960,6 +1082,7 @@ const tradingRoutes: [string, RegExp, Handler][] = [
     authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
     processOpen(c.s);
     await dueAutopilot(c.s, a);
+    await dueBots(c.s);
     const last = c.s.snapshots.filter((x) => x.account_id === a.id).at(-1);
     if (!last || Date.now() - Date.parse(last.taken_at) > 3600e3) snapshot(c.s, a, "periodic");
     save();
@@ -1056,6 +1179,8 @@ const tradingRoutes: [string, RegExp, Handler][] = [
     const p = profile(c.s, a.id);
     const reason = String(c.body.reason || "emergency stop");
     p.autopilot_status = "STOPPED";
+    const bot = c.s.binaryBots?.[a.id];
+    if (bot) { bot.status = "STOPPED"; bot.paused_reason = reason; }
     if (!p.kill_switch) engageKill(c.s, a, p, reason);
     let cancelled = cancelOpen(c.s, a.id, "emergency stop", (o) => o.side === "BUY" || o.source !== "protective");
     const flattened: Record<string, unknown>[] = [];
@@ -1088,6 +1213,7 @@ const tradingRoutes: [string, RegExp, Handler][] = [
     if (halted) {
       cancelOpen(c.s, null, "risk: platform trading halted");
       for (const p of Object.values(c.s.riskProfiles)) if (p.autopilot_status === "RUNNING") p.autopilot_status = "PAUSED";
+      for (const id of Object.keys(c.s.binaryBots ?? {})) pauseBot(c.s, id, "platform trading halted");
     }
     await audit(c.s, user.id, `risk.system.${halted ? "halt" : "resume"}`, { details: { reason: c.body.reason ?? null } });
     return json(200, c.s.systemHalt);

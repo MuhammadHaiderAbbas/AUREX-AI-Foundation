@@ -48,6 +48,7 @@ class BinaryRead(BaseModel):
     pnl: Decimal | None
     void_reason: str | None
     client_id: str | None
+    source: str = "manual"
 
 
 class BinaryGroupStats(BaseModel):
@@ -83,3 +84,46 @@ def read(c: Any) -> BinaryRead:
     potential = (c.stake * (1 + Decimal(str(c.payout_rate)))).quantize(Decimal("0.01"))
     return BinaryRead(**{k: getattr(c, k) for k in BinaryRead.model_fields if k != "potential_return"},
                       potential_return=potential)
+
+
+class BotControl(BaseModel):
+    account_id: uuid.UUID
+    action: Literal["start", "pause", "stop"]
+    symbols: list[str] | None = Field(default=None, min_length=1, max_length=6)
+    expiry_seconds: int | None = None
+    stake_pct: float | None = Field(default=None, gt=0, le=5)
+    min_confidence: float | None = Field(default=None, ge=0.5, lt=1)
+    edge_margin: float | None = Field(default=None, ge=0, le=0.2)
+
+
+class BotStats(BaseModel):
+    contracts: int
+    open: int
+    won: int
+    lost: int
+    ties: int
+    void: int
+    win_rate: float | None
+    staked: Decimal
+    net_pnl: Decimal
+    return_on_stake: float | None
+
+
+class BotRead(BaseModel):
+    account_id: uuid.UUID
+    status: str
+    symbols: list[str]
+    expiry_seconds: int
+    stake_pct: float
+    min_confidence: float
+    edge_margin: float
+    guard_min_contracts: int
+    started_at: datetime | None
+    last_cycle_at: datetime | None
+    paused_reason: str | None
+    interval_seconds: float
+    data_mode: str
+    break_even_win_rate: float
+    payout_rate: float
+    stats: BotStats
+    recent: list[dict[str, Any]]

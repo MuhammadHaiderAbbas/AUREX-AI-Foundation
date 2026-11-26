@@ -66,6 +66,7 @@ state = {"passes": 0, "last_error": None, "leader": False}
 
 async def one_pass() -> dict:
     """A single leader pass. Separated from the loop so it can be tested directly."""
+    from app.binary.bot import due_bots, run_bot_cycle
     from app.binary.service import BinaryService
     from app.risk.autopilot import due_accounts, run_cycle
     from app.risk.service import RiskService
@@ -78,6 +79,10 @@ async def one_pass() -> dict:
         await db.commit()
     async with SessionLocal() as db:
         binaries = await BinaryService(db).settle_due()
+        await db.commit()
+    async with SessionLocal() as db:
+        for acct, bot in await due_bots(db):
+            await run_bot_cycle(db, acct, bot)
         await db.commit()
     async with SessionLocal() as db:
         for acct in await due_accounts(db, s.autopilot_interval_seconds):

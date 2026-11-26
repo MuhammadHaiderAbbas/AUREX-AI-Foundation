@@ -538,7 +538,7 @@ export interface BinaryContract {
   id: string; account_id: string; symbol: string; direction: BinaryDirection; stake: string; currency: string;
   payout_rate: number; potential_return: string; strike: string; expiry_seconds: number; opened_at: string; expires_at: string;
   status: BinaryStatus; settle_price: string | null; settle_price_at: string | null; settled_at: string | null;
-  returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null;
+  returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null; source?: "manual" | "bot";
 }
 export interface BinaryGroupStats {
   contracts: number; open: number; won: number; lost: number; ties: number; void: number; staked: string; net_pnl: string;
@@ -547,4 +547,15 @@ export interface BinaryGroupStats {
 export interface BinaryStats extends BinaryGroupStats, Omit<BinaryConfig, "notice"> {
   account_id: string; currency: string; expected_return_at_win_rate: number | null; edge_vs_break_even: number | null;
   by_expiry: Record<string, BinaryGroupStats>; by_symbol: Record<string, BinaryGroupStats>; by_direction: Record<string, BinaryGroupStats>;
+}
+
+export type BotStatus = "STOPPED" | "RUNNING" | "PAUSED";
+export interface BotCycleResult { symbol: string; outcome: "opened" | "no_trade" | "waiting" | "risk_rejected" | "error"; detail: string; direction?: string; stake?: string;
+  signal?: { p_up: number | null; confidence: number | null; holdout_accuracy: number | null; holdout_n: number; required_accuracy: number; expected_return: number | null; timeframe: string; data_mode: string } }
+export interface BinaryBot {
+  account_id: string; status: BotStatus; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number;
+  guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number;
+  data_mode: string; break_even_win_rate: number; payout_rate: number;
+  stats: { contracts: number; open: number; won: number; lost: number; ties: number; void: number; win_rate: number | null; staked: string; net_pnl: string; return_on_stake: number | null };
+  recent: { at: string; type: string; message: string; results: BotCycleResult[] }[];
 }

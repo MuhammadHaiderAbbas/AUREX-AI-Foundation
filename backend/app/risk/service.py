@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import BusinessRuleViolation
 from app.models import (
     AutopilotStatus,
+    BinaryBot,
     Order,
     OrderEvent,
     OrderStatus,
@@ -74,6 +75,7 @@ class RiskService:
             accts = await self.db.scalars(select(TradingAccount.id))
             for aid in accts:
                 await self.cancel_open(aid, "risk: platform trading halted", buys_only=True)
+                await self.pause_bot(aid, "platform trading halted")
                 prof = await self.db.get(RiskProfile, aid)
                 if prof and prof.autopilot_status == AutopilotStatus.RUNNING:
                     prof.autopilot_status = AutopilotStatus.PAUSED
@@ -139,8 +141,15 @@ class RiskService:
             "open_positions": len(positions),
         }
 
+    async def pause_bot(self, account_id: uuid.UUID, reason: str) -> None:
+        bot = await self.db.get(BinaryBot, account_id)
+        if bot is not None and bot.status == "RUNNING":
+            bot.status, bot.paused_reason = "PAUSED", reason
+            self.event(account_id, "BINARY_BOT_PAUSED", f"Binary bot paused: {reason}")
+
     async def _trip(self, acct: TradingAccount, prof: RiskProfile, type_: str, message: str, **detail: Any) -> None:
         cancelled = await self.cancel_open(acct.id, f"risk: {message}", buys_only=True)
+        await self.pause_bot(acct.id, message)
         if prof.autopilot_status == AutopilotStatus.RUNNING:
             prof.autopilot_status = AutopilotStatus.PAUSED
         self.event(acct.id, type_, message, cancelled_orders=cancelled, **detail)
@@ -206,6 +215,7 @@ class RiskService:
     async def engage_kill_switch(self, acct: TradingAccount, prof: RiskProfile, reason: str, actor: uuid.UUID | None,
                                  automatic: bool = False) -> None:
         prof.kill_switch, prof.kill_reason, prof.kill_engaged_at = True, reason, datetime.now(UTC)
+        await self.pause_bot(acct.id, f"kill switch engaged ({reason})")
         if prof.autopilot_status == AutopilotStatus.RUNNING:
             prof.autopilot_status = AutopilotStatus.PAUSED
         cancelled = await self.cancel_open(acct.id, f"risk: kill switch engaged ({reason})", buys_only=True)
