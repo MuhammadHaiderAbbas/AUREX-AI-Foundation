@@ -73,8 +73,10 @@ Delivered so far:
 - **One-button AI binary bot (paper):** trades only when its model beat the 55.6%
   break-even rate on recent data it had not seen; pauses itself when its live win rate falls
   below break-even; shows its reasoning for every instrument on every cycle.
-- **Real prices in the demo:** BTC, ETH and SOL stream live from Coinbase (no key needed);
-  forex, stocks and ETFs are simulated with continuous movement until a real-time vendor key is added.
+- **Real prices in the demo:** 12 crypto markets stream live from Coinbase, forex rates are live
+  (Coinbase) with ECB daily history, and the Markets page shows a live crypto overview (market
+  cap, volume, dominance, top 20 with 7-day lines from CoinGecko). Stocks and ETFs stay simulated
+  until a keyed real-time vendor is connected on a server.
 - **Live everywhere:** a WebSocket account stream pushes fills, orders, ledger, position,
   binary and risk changes the moment they happen, plus a mark-to-market valuation every two
   seconds. Price candles tick with each quote, the equity chart grows live, and the Binary page

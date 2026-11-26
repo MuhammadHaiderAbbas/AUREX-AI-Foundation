@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
 test.skip(!process.env.AUREX_E2E_DEMO, "demo build only");
 
 test("static demo: launch, markets, wallet, admin, deep links", async ({ page }) => {
+  test.setTimeout(90_000);   // a long end-to-end tour that talks to real Coinbase and CoinGecko APIs
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
@@ -18,13 +19,13 @@ test("static demo: launch, markets, wallet, admin, deep links", async ({ page })
 
   // Markets: synthetic data clearly labelled, chart renders, indicators toggle
   await page.getByRole("link", { name: "Markets", exact: true }).click();
-  await expect(page.getByText(/^(Synthetic data|Crypto live · others simulated)$/)).toBeVisible();
+  await expect(page.getByText(/^(Synthetic data|Crypto & FX live · stocks simulated)$/)).toBeVisible();
   await expect(page.getByTestId("price-chart").locator("canvas").first()).toBeVisible();
   await page.getByRole("tab", { name: "Forex" }).click();
   await page.getByRole("button", { name: /^GBP\/USD British/ }).click();
   await expect(page).toHaveURL(/symbol=GBPUSD/);
   await page.getByRole("button", { name: "1d" }).click();
-  await expect(page.getByText(/\d+ candles · source Synthetic/)).toBeVisible();
+  await expect(page.getByText(/\d+ candles · source (Synthetic|ECB reference)/)).toBeVisible();
 
   // Wallet: double-entry ledger in the browser
   await page.getByRole("link", { name: "Wallet", exact: true }).click();

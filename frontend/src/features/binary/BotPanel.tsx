@@ -1,4 +1,5 @@
 import { Bot, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,18 @@ const pct = (v: number | null | undefined, dp = 1) => (v == null ? "—" : `${(v
 const OUTCOME = {
   opened: ["positive", "Opened"], no_trade: ["neutral", "Skipped"], waiting: ["info", "Waiting"], risk_rejected: ["negative", "Risk rejected"], error: ["warning", "Error"],
 } as const;
+
+function PauseHelp({ reason, accountId }: { reason: string; accountId: string }) {
+  const r = reason.toLowerCase();
+  const risk = <Link to={`/risk?account=${accountId}`} className="underline">Risk Centre</Link>;
+  if (r.includes("daily loss")) return <>The daily loss limit protects the account; it resets at 00:00 UTC, or raise it (up to 5%) in the {risk}.</>;
+  if (r.includes("drawdown")) return <>Review, then reset the drawdown breaker in the {risk}.</>;
+  if (r.includes("kill switch")) return <>Release the kill switch in the {risk}, then resume.</>;
+  if (r.includes("switched off")) return <>Turn binary options back on in the {risk}.</>;
+  if (r.includes("edge guard")) return <>It was losing more often than break-even. Change its instruments or expiry, then start it again.</>;
+  if (r.includes("halted")) return <>An administrator halted all trading.</>;
+  return null;
+}
 
 /** The one-button binary bot: start it, and it trades only when its model shows an out-of-sample edge. */
 export function BotPanel({ accountId, currency }: { accountId: string; currency: string }) {
@@ -64,7 +77,7 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
           )}
           <span className="text-xs text-muted">
             {running ? `Checks ${b.symbols.join(", ")} every ${Math.round(b.interval_seconds)}s${b.last_cycle_at ? ` · last ${relativeTime(b.last_cycle_at)}` : ""}`
-              : b.paused_reason ? <span className="text-warning" data-testid="bot-paused-reason">Paused: {b.paused_reason}</span> : "Paper money only"}
+              : b.paused_reason ? <span className="text-warning" data-testid="bot-paused-reason">Paused: {b.paused_reason}. <PauseHelp reason={b.paused_reason} accountId={accountId} /></span> : "Paper money only"}
           </span>
         </div>
 

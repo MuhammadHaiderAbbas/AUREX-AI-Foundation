@@ -11,7 +11,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { BotPanel } from "@/features/binary/BotPanel";
 import { useBinaryConfig, useBinaryContracts, useBinaryStats, useOpenBinary } from "@/features/binary/hooks";
 import { LiveTickChart } from "@/charts/LiveTickChart";
-import { useMarketOverview, useTickHistory } from "@/features/markets/hooks";
+import { useMarketOverview, useStreamTick, useTickHistory } from "@/features/markets/hooks";
 import { usePortfolio } from "@/features/trading/hooks";
 import { useAccountParam } from "@/features/trading/useAccountParam";
 import { cn, formatDateTime, formatMoney, formatPrice } from "@/lib/utils";
@@ -80,7 +80,8 @@ export function BinaryPage() {
   const mid = q ? (Number(q.bid) + Number(q.ask)) / 2 : null;
   const history = useTickHistory(slug(symbol));
   const seed = useMemo(() => (history.data?.points ?? []).map((p) => ({ t: p.t, v: p.price })), [history.data]);
-  const tick = useMemo(() => (q && mid != null ? { t: Math.floor(Date.parse(q.as_of) / 1000), v: mid } : null), [q?.as_of, mid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const polled = useMemo(() => (q ? { t: Math.floor(Date.parse(q.as_of) / 1000), v: Number(q.last) } : null), [q?.as_of, q?.last]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tick = useStreamTick(symbol, polled);
   const ccy = account?.base_currency ?? "GBP";
   const payout = cfg.data?.payout_rate ?? 0.8;
   const breakEven = cfg.data?.break_even_win_rate ?? 1 / (1 + payout);
@@ -162,7 +163,7 @@ export function BinaryPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader title={`${symbol} · live`}
-              description={`${history.data?.source === "coinbase" ? "Real Coinbase prices" : history.data?.source === "synthetic" ? "Simulated prices" : "Live prices"} · mid price, one point per quote. Dashed lines are your open strikes.`} />
+              description={`${history.data?.source === "coinbase" ? "Real Coinbase prices" : history.data?.source === "synthetic" ? "Simulated prices" : "Live prices"} · last traded price, live. Dashed lines are your open strikes (settled on the mid price).`} />
             <div className="px-2 pb-3">
               {seed.length > 0
                 ? <LiveTickChart symbol={symbol} history={seed} tick={tick} decimals={(inst?.price_decimals ?? 2) + 1}

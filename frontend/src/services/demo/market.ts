@@ -134,11 +134,11 @@ export interface DemoInstrument {
 }
 export const TIMEFRAMES: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
 
-function ohlc(i: DemoInstrument, s: number, e: number) {
+function ohlc(i: DemoInstrument, s: number, e: number, k = 1) {
   const step = Math.max(60, (e - s) / 16);
-  const samples = [priceAt(i.symbol, i.asset_class, i.reference_price, s)];
-  for (let t = s + step; t < e; t += step) samples.push(priceAt(i.symbol, i.asset_class, i.reference_price, t));
-  samples.push(priceAt(i.symbol, i.asset_class, i.reference_price, e));
+  const samples = [k * priceAt(i.symbol, i.asset_class, i.reference_price, s)];
+  for (let t = s + step; t < e; t += step) samples.push(k * priceAt(i.symbol, i.asset_class, i.reference_price, t));
+  samples.push(k * priceAt(i.symbol, i.asset_class, i.reference_price, e));
   return [samples[0]!, Math.max(...samples), Math.min(...samples), samples[samples.length - 1]!] as const;
 }
 
@@ -153,18 +153,31 @@ export function candles(i: DemoInstrument, timeframe: string, limit: number, now
       return real.map((r) => ({ open_time: r.open_time, open: r.open.toFixed(d), high: r.high.toFixed(d), low: r.low.toFixed(d), close: r.close.toFixed(d), volume: r.volume.toFixed(4) }));
     }
   }
+  if (live.isLiveFx(i.symbol) && timeframe === "1d") {
+    const d = live.fxDailyCandles(i.symbol, limit);
+    if (d && d.length >= Math.min(limit, 30)) return d.map((r) => ({ open_time: r.open_time, open: r.open.toFixed(i.price_decimals), high: r.high.toFixed(i.price_decimals), low: r.low.toFixed(i.price_decimals), close: r.close.toFixed(i.price_decimals), volume: "0" }));
+  }
   return syntheticCandles(i, timeframe, limit, nowMs);
 }
 
+/** Forex: scale the simulated path so it ends on the real live rate (shape simulated, level real). */
+function fxScale(i: DemoInstrument): number {
+  if (!live.isLiveFx(i.symbol)) return 1;
+  const t = live.latest(i.symbol);
+  return t ? t.price / priceAt(i.symbol, i.asset_class, i.reference_price, Date.now() / 1000) : 1;
+}
+
 export const candleSource = (i: DemoInstrument, timeframe: string, limit: number) =>
-  live.isLiveSymbol(i.symbol) && (live.candlesSync(i.symbol, timeframe, limit)?.length ?? 0) >= Math.min(limit, 250) * 0.9 ? "coinbase" : "synthetic";
+  live.isLiveSymbol(i.symbol) && (live.candlesSync(i.symbol, timeframe, limit)?.length ?? 0) >= Math.min(limit, 250) * 0.9 ? "coinbase"
+    : live.isLiveFx(i.symbol) && timeframe === "1d" && (live.fxDailyCandles(i.symbol, limit)?.length ?? 0) >= Math.min(limit, 30) ? "ecb_reference" : "synthetic";
 
 function syntheticCandles(i: DemoInstrument, timeframe: string, limit: number, nowMs: number) {
   const tf = TIMEFRAMES[timeframe]!;
   const seed2 = fnv1a(i.symbol + ":vol");
   const d = i.price_decimals;
+  const k = fxScale(i);
   const mk = (openMs: number, s: number, e: number) => {
-    const [o, h, l, c] = ohlc(i, s, e);
+    const [o, h, l, c] = ohlc(i, s, e, k);
     const v = BASE_VOLUME[i.asset_class] * (0.4 + 1.2 * rnd(seed2, Math.floor(s / tf))) * (e - s) / 3600;
     return { open_time: new Date(openMs).toISOString(), open: o.toFixed(d), high: h.toFixed(d), low: l.toFixed(d), close: c.toFixed(d), volume: v.toFixed(4) };
   };
@@ -188,20 +201,21 @@ function syntheticCandles(i: DemoInstrument, timeframe: string, limit: number, n
 }
 
 export function quote(i: DemoInstrument, nowMs = Date.now()) {
-  if (live.isLiveSymbol(i.symbol) && Math.abs(nowMs - Date.now()) < 5000) {
+  if ((live.isLiveSymbol(i.symbol) || live.isLiveFx(i.symbol)) && Math.abs(nowMs - Date.now()) < 5000 && isOpen(i.market, nowMs)) {
     const t = live.latest(i.symbol);
     if (t) {
       const d = i.price_decimals, prev = t.open24h ?? t.price, change = t.price - prev;
       return {
         symbol: i.symbol, last: t.price.toFixed(d), bid: t.bid.toFixed(d), ask: Math.max(t.ask, t.bid).toFixed(d), prev_close: prev.toFixed(d),
         change: change.toFixed(d), change_pct: ((change / prev) * 100).toFixed(2), as_of: new Date(Math.min(t.t, Date.now())).toISOString(),
-        source: "coinbase", market_open: true, stale: false, tradable: true, age_seconds: Math.max(0, Math.floor((Date.now() - t.t) / 1000)),
+        source: live.isLiveFx(i.symbol) ? "coinbase_rates" : "coinbase", market_open: true, stale: false, tradable: true, age_seconds: Math.max(0, Math.floor((Date.now() - t.t) / 1000)),
       };
     }
   }
   const open = isOpen(i.market, nowMs);
   const asOf = open ? nowMs : lastClose(i.market, nowMs) ?? nowMs;
-  const p = (ms: number) => priceAt(i.symbol, i.asset_class, i.reference_price, ms / 1000);
+  const k = fxScale(i);
+  const p = (ms: number) => k * priceAt(i.symbol, i.asset_class, i.reference_price, ms / 1000);
   let prevT = asOf - DAY;
   if (i.market === "US_EQUITY" || i.market === "UK_EQUITY") {
     const recent = sessions(i.market, asOf - 10 * DAY, asOf);

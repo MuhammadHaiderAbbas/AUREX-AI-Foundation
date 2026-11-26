@@ -62,7 +62,7 @@ async def test_overview_groups_all_asset_classes(client):
     body = (await client.get(f"{API}/markets/overview", headers=h)).json()
     assert body["data_mode"] == "synthetic"
     assert {k: len(v) for k, v in body["groups"].items()} == {
-        "CRYPTO": 3, "FX": 3, "STOCK": 5, "ETF": 3}
+        "CRYPTO": 12, "FX": 3, "STOCK": 5, "ETF": 3}
     btc = body["groups"]["CRYPTO"][0]
     assert btc["instrument"]["symbol"] == "BTC-USD" and btc["quote"]["source"] == "synthetic"
     assert btc["quote"]["market_open"] is True and btc["quote"]["tradable"] is True

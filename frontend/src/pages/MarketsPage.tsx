@@ -8,6 +8,7 @@ import { Badge, StatusDot } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/form";
+import { CryptoOverview } from "@/features/markets/CryptoOverview";
 import { useCandles, useLiveQuotes, useMarketOverview, useWatchlist, useWatchlistToggle } from "@/features/markets/hooks";
 import { cn, formatDateTime, formatPct, formatPrice } from "@/lib/utils";
 import type { AssetClass, Instrument, MarketStatus, Quote } from "@/services/api";
@@ -21,7 +22,7 @@ const INDICATORS = [
   { key: "sma20", label: "SMA 20" }, { key: "sma50", label: "SMA 50" }, { key: "ema20", label: "EMA 20" },
   { key: "bb20", label: "Bollinger" }, { key: "rsi14", label: "RSI 14" }, { key: "macd", label: "MACD" },
 ];
-const SOURCE_LABEL: Record<string, string> = { synthetic: "Synthetic", coinbase: "Coinbase", ecb_reference: "ECB reference" };
+const SOURCE_LABEL: Record<string, string> = { synthetic: "Synthetic", coinbase: "Coinbase", coinbase_rates: "Coinbase rates", ecb_reference: "ECB reference" };
 
 export function SourceBadge({ source }: { source: string | null | undefined }) {
   if (!source) return null;
@@ -85,13 +86,15 @@ export function MarketsPage() {
   return (
     <div className="space-y-4">
       <ErrorBanner error={overview.error ?? candles.error ?? toggle.error} />
+      <CryptoOverview part="cards" instruments={all.map((r) => r.instrument)} quotes={Object.fromEntries(all.map((r) => [r.instrument.symbol, quoteOf(r)]))}
+        onSelect={(slug) => setParams({ symbol: slug })} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SessionStrip markets={overview.data?.markets ?? []} />
         <div className="flex items-center gap-2 text-xs text-muted">
           <Radio className={cn("size-3.5", live ? "text-positive" : "text-subtle")} />
           {live ? "Streaming" : "Polling"}
           {overview.data?.data_mode === "synthetic" && <Badge tone="warning" title="Prices are generated deterministically for development. They are not real market data.">Synthetic data</Badge>}
-          {overview.data?.data_mode === "mixed" && <Badge tone="info" title="Crypto prices stream live from Coinbase. Forex, stocks and ETFs need a paid real-time feed, so they are simulated here.">Crypto live · others simulated</Badge>}
+          {overview.data?.data_mode === "mixed" && <Badge tone="info" title="Crypto streams live from Coinbase and forex rates refresh about once a minute. Stocks and ETFs need a keyed real-time data vendor, so they are simulated here.">Crypto &amp; FX live · stocks simulated</Badge>}
         </div>
       </div>
 
@@ -204,6 +207,8 @@ export function MarketsPage() {
           </Card>
         )}
       </div>
+      <CryptoOverview part="details" instruments={all.map((r) => r.instrument)} quotes={Object.fromEntries(all.map((r) => [r.instrument.symbol, quoteOf(r)]))}
+        onSelect={(slug) => { setParams({ symbol: slug }); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
       {selected && ticket && <OrderTicket open onClose={() => setTicket(null)} symbol={selected.instrument.symbol} side={ticket} />}
     </div>
   );

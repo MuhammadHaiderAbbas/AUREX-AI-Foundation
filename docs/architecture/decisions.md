@@ -331,3 +331,16 @@ time without data.
 **Why.** The user saw charts go flat. The cause was the synthetic model, not the streaming.
 Real prices where they are free, and honest labels where they are not, fix the problem without
 exposing credentials.
+
+## ADR-041 Free real data first, keyed vendors for the rest
+**Decision.** Everything that has a free, keyless, browser-accessible source now uses it:
+twelve crypto markets (BTC, ETH, SOL, XRP, DOGE, ADA, AVAX, LINK, BCH, LTC, DOT, and PAX Gold
+as a gold proxy) stream from Coinbase; forex rates come from Coinbase's exchange-rates API
+(refreshed about once a minute) with ECB daily history from Frankfurter; the Markets page adds a
+CoinGecko market overview (total capitalisation, volume, dominance, top 20 with 7-day lines).
+Coinbase REST calls from the browser are queued (3 at a time, 120 ms apart) with back-off on
+HTTP 429. Intraday forex candles remain simulated but are scaled onto the live rate and labelled.
+Stocks, ETFs, indices and other commodities stay simulated until a keyed vendor is connected.
+**Why.** Real-time equity and index data is licensed: every provider needs a key, and a key
+shipped inside a public static site can be copied by anyone. That feed belongs in the backend
+of a real deployment, where the key is a server-side secret.
