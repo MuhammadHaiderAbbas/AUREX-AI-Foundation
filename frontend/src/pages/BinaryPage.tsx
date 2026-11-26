@@ -8,6 +8,7 @@ import { EmptyState, ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Stat } from "@/components/ui/stat";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { BotPanel } from "@/features/binary/BotPanel";
 import { useBinaryConfig, useBinaryContracts, useBinaryStats, useOpenBinary } from "@/features/binary/hooks";
 import { LiveTickChart } from "@/charts/LiveTickChart";
 import { useCandles, useMarketOverview } from "@/features/markets/hooks";
@@ -108,6 +109,7 @@ export function BinaryPage() {
           </Select>)}
       </div>
       <Disclaimer notice={cfg.data?.notice} />
+      {account && <BotPanel accountId={account.id} currency={ccy} />}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr]">
         <Card>
@@ -191,7 +193,7 @@ export function BinaryPage() {
                 <tbody>{settled.map((c) => (
                   <Tr key={c.id}>
                     <Td className="num whitespace-nowrap text-xs text-muted">{formatDateTime(c.opened_at)}</Td>
-                    <Td className="text-sm"><Dir d={c.direction} /> {c.symbol} · {label(c.expiry_seconds)}</Td>
+                    <Td className="text-sm"><Dir d={c.direction} /> {c.symbol} · {label(c.expiry_seconds)}{c.source === "bot" && <Badge tone="accent" className="ml-1.5">Bot</Badge>}</Td>
                     <Td className="num text-right text-xs">{Number(c.strike)} → {c.settle_price == null ? "—" : Number(c.settle_price)}</Td>
                     <Td><Badge tone={STATUS_TONE[c.status]} title={c.void_reason ?? undefined}>{c.status}</Badge></Td>
                     <Td className={cn("num text-right", Number(c.pnl) > 0 ? "text-positive" : Number(c.pnl) < 0 ? "text-negative" : "text-muted")}>{formatMoney(c.pnl ?? 0, c.currency)}</Td>
@@ -224,7 +226,7 @@ function OpenRow({ c, now, price }: { c: BinaryContract; now: number; price: num
   const winning = price == null || price === strike ? null : c.direction === "HIGHER" ? price > strike : price < strike;
   return (
     <Tr data-testid="binary-open-row">
-      <Td className="text-sm"><Dir d={c.direction} /> {c.symbol}</Td>
+      <Td className="text-sm"><Dir d={c.direction} /> {c.symbol}{c.source === "bot" && <Badge tone="accent" className="ml-1.5">Bot</Badge>}</Td>
       <Td className="num text-right">{formatMoney(c.stake, c.currency)}</Td>
       <Td className="num text-right">{strike}</Td>
       <Td className="num text-right">{price == null ? "—" : Number(price.toPrecision(10))}</Td>

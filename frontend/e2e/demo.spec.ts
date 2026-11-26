@@ -298,7 +298,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
   await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
   await expect(page.getByTestId("live-tick-chart")).toBeVisible();
-  await page.getByLabel("Instrument").selectOption("BTC-USD");
+  await page.getByLabel("Instrument", { exact: true }).selectOption("BTC-USD");
   await expect(page.getByTestId("binary-price")).toContainText("Market open");
   // 2.50 is 2.5% of £100: above the 2% binary stake cap
   await page.getByLabel("Stake (GBP)").fill("2.50");
@@ -319,6 +319,11 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await page.goto(`binary?account=${acct}`);
   await page.getByRole("button", { name: "Open Higher contract" }).click();
   await expect(page.getByText(/binary trading is switched off/).first()).toBeVisible();
+  // The one-button AI bot: it refuses to run while binaries are switched off, and says why
+  await expect(page.getByRole("note", { name: "Synthetic data warning" })).toBeVisible();
+  await page.getByRole("button", { name: "Start AI bot" }).click();
+  await expect(page.getByTestId("bot-status")).toHaveText("PAUSED");
+  await expect(page.getByTestId("bot-paused-reason")).toContainText("switched off");
   await page.getByRole("link", { name: "Wallet", exact: true }).click();
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
 }
