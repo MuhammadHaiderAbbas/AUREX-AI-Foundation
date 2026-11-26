@@ -62,7 +62,7 @@ async def test_overview_groups_all_asset_classes(client):
     body = (await client.get(f"{API}/markets/overview", headers=h)).json()
     assert body["data_mode"] == "synthetic"
     assert {k: len(v) for k, v in body["groups"].items()} == {
-        "CRYPTO": 12, "FX": 3, "STOCK": 5, "ETF": 3}
+        "CRYPTO": 12, "FX": 3, "STOCK": 7, "ETF": 6}
     btc = body["groups"]["CRYPTO"][0]
     assert btc["instrument"]["symbol"] == "BTC-USD" and btc["quote"]["source"] == "synthetic"
     assert btc["quote"]["market_open"] is True and btc["quote"]["tradable"] is True
@@ -81,7 +81,7 @@ async def test_instrument_lookup_and_search(client):
     assert (await client.get(f"{API}/markets/instruments/eth-usd", headers=h)).status_code == 200
     assert (await client.get(f"{API}/markets/instruments/NOPE", headers=h)).status_code == 404
     etfs = (await client.get(f"{API}/markets/instruments?asset_class=ETF", headers=h)).json()
-    assert [i["symbol"] for i in etfs] == ["ISF.L", "QQQ", "SPY"]
+    assert [i["symbol"] for i in etfs] == ["DIA", "GLD", "ISF.L", "QQQ", "SPY", "USO"]
     found = (await client.get(f"{API}/markets/instruments?q=apple", headers=h)).json()
     assert [i["symbol"] for i in found] == ["AAPL"]
     shares = [i for i in (await client.get(f"{API}/markets/instruments", headers=h)).json()

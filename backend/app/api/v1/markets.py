@@ -47,8 +47,8 @@ async def status_(_: User = Depends(current_user)):
 # Display order within each asset class: the largest markets first, as on a trading terminal.
 RANK = {s: n for n, s in enumerate([
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "BCH-USD", "LTC-USD",
-    "DOT-USD", "PAXG-USD", "EUR/USD", "GBP/USD", "USD/JPY", "AAPL", "MSFT", "NVDA", "SHEL.L", "AZN.L", "SPY", "QQQ",
-    "ISF.L"])}
+    "DOT-USD", "PAXG-USD", "EUR/USD", "GBP/USD", "USD/JPY", "AAPL", "MSFT", "NVDA", "TSLA", "NFLX", "SHEL.L", "AZN.L",
+    "SPY", "QQQ", "DIA", "GLD", "USO", "ISF.L"])}
 
 
 @router.get("/overview", response_model=MarketOverview)

@@ -96,6 +96,13 @@ class Settings(BaseSettings):
     market_data_mode: Literal["synthetic", "live"] = "synthetic"
     coinbase_base_url: str = "https://api.exchange.coinbase.com"
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
+    # Alpaca market data (real US stocks/ETFs). Without a key these instruments stay simulated.
+    alpaca_data_url: str = "https://data.alpaca.markets"
+    alpaca_feed: str = "iex"
+    alpaca_key_id: str = ""
+    alpaca_secret_key: str = ""
+    alpaca_key_id_file: str | None = None
+    alpaca_secret_key_file: str | None = None
     quote_cache_seconds: float = 1.0
     stream_interval_seconds: float = 1.0
     # Live account stream: change detection every N seconds, mark-to-market valuation every M seconds.
@@ -155,6 +162,10 @@ class Settings(BaseSettings):
             self.redis_url = Path(self.redis_url_file).read_text().strip()
         if self.metrics_token_file:
             self.metrics_token = Path(self.metrics_token_file).read_text().strip()
+        if self.alpaca_key_id_file:
+            self.alpaca_key_id = Path(self.alpaca_key_id_file).read_text().strip()
+        if self.alpaca_secret_key_file:
+            self.alpaca_secret_key = Path(self.alpaca_secret_key_file).read_text().strip()
         return self
 
     @model_validator(mode="after")
