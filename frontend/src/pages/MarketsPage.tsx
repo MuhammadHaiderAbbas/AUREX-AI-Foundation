@@ -22,7 +22,7 @@ const INDICATORS = [
   { key: "sma20", label: "SMA 20" }, { key: "sma50", label: "SMA 50" }, { key: "ema20", label: "EMA 20" },
   { key: "bb20", label: "Bollinger" }, { key: "rsi14", label: "RSI 14" }, { key: "macd", label: "MACD" },
 ];
-const SOURCE_LABEL: Record<string, string> = { synthetic: "Synthetic", coinbase: "Coinbase", coinbase_rates: "Coinbase rates", ecb_reference: "ECB reference" };
+const SOURCE_LABEL: Record<string, string> = { synthetic: "Synthetic", coinbase: "Coinbase", coinbase_rates: "Coinbase rates", ecb_reference: "ECB reference", alpaca: "Alpaca" };
 
 export function SourceBadge({ source }: { source: string | null | undefined }) {
   if (!source) return null;

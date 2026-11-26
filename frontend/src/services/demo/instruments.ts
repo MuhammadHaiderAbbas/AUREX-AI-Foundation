@@ -1,6 +1,6 @@
 import type { DemoInstrument } from "./market";
 
-// Mirror of the registry seeded by backend migrations 0002 and 0014 (lot sizes per 0012: fractional shares, 1-unit FX).
+// Mirror of the registry seeded by backend migrations 0002, 0014 and 0015 (lot sizes per 0012: fractional shares, 1-unit FX).
 const row = (symbol: string, display_name: string, asset_class: DemoInstrument["asset_class"], instrument_type: string,
   venue: string, market: DemoInstrument["market"], base_currency: string, quote_currency: string,
   price_decimals: number, tick_size: string, lot_size: string, reference_price: number): DemoInstrument =>
@@ -25,9 +25,14 @@ export const INSTRUMENTS: DemoInstrument[] = [
   row("AAPL", "Apple Inc.", "STOCK", "SHARE", "NASDAQ", "US_EQUITY", "AAPL", "USD", 2, "0.01", "0.0001", 230),
   row("MSFT", "Microsoft Corporation", "STOCK", "SHARE", "NASDAQ", "US_EQUITY", "MSFT", "USD", 2, "0.01", "0.0001", 420),
   row("NVDA", "NVIDIA Corporation", "STOCK", "SHARE", "NASDAQ", "US_EQUITY", "NVDA", "USD", 2, "0.01", "0.0001", 140),
+  row("TSLA", "Tesla, Inc.", "STOCK", "SHARE", "NASDAQ", "US_EQUITY", "TSLA", "USD", 2, "0.01", "0.0001", 380),
+  row("NFLX", "Netflix, Inc.", "STOCK", "SHARE", "NASDAQ", "US_EQUITY", "NFLX", "USD", 2, "0.01", "0.0001", 59.4),
   row("SHEL.L", "Shell plc", "STOCK", "SHARE", "LSE", "UK_EQUITY", "SHEL", "GBP", 2, "0.01", "0.0001", 26),
   row("AZN.L", "AstraZeneca plc", "STOCK", "SHARE", "LSE", "UK_EQUITY", "AZN", "GBP", 2, "0.01", "0.0001", 110),
   row("SPY", "SPDR S&P 500 ETF Trust", "ETF", "ETF", "NYSEARCA", "US_EQUITY", "SPY", "USD", 2, "0.01", "0.0001", 590),
   row("QQQ", "Invesco QQQ Trust", "ETF", "ETF", "NASDAQ", "US_EQUITY", "QQQ", "USD", 2, "0.01", "0.0001", 510),
+  row("DIA", "SPDR Dow Jones Industrial Average ETF", "ETF", "ETF", "NYSEARCA", "US_EQUITY", "DIA", "USD", 2, "0.01", "0.0001", 500),
+  row("GLD", "SPDR Gold Shares (tracks gold)", "ETF", "ETF", "NYSEARCA", "US_EQUITY", "GLD", "USD", 2, "0.01", "0.0001", 330),
+  row("USO", "United States Oil Fund (tracks WTI crude)", "ETF", "ETF", "NYSEARCA", "US_EQUITY", "USO", "USD", 2, "0.01", "0.0001", 80),
   row("ISF.L", "iShares Core FTSE 100 UCITS ETF", "ETF", "ETF", "LSE", "UK_EQUITY", "ISF", "GBP", 2, "0.01", "0.0001", 8.5),
 ];

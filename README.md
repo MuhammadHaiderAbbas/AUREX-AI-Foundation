@@ -6,6 +6,7 @@ Autonomous multi-market research and **paper-trading** platform covering crypto,
 > and live trading is disabled in both the code and the database.
 
 **Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/ (click **Launch demo**).
+**Your own server (real stocks too):** [docs/operations/own-server.md](docs/operations/own-server.md).
 **Launch plan:** [docs/operations/launch-plan.md](docs/operations/launch-plan.md) — private, public and real-money launches.
 **Video walkthrough:** see [docs/video/walkthrough.md](docs/video/walkthrough.md) for the scene-by-scene
 script; `frontend/scripts/record-walkthrough.cjs` records a fresh captioned video of the demo.

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import AppError, BusinessRuleViolation, NotFound
 from app.market import calendar
+from app.market.providers.alpaca import AlpacaProvider
 from app.market.providers.base import MarketDataProvider
 from app.market.providers.coinbase import CoinbaseProvider
 from app.market.providers.frankfurter import FrankfurterProvider
@@ -52,9 +53,13 @@ def set_provider(name: str, provider: MarketDataProvider | None) -> None:
 def provider_for(inst: Instrument) -> MarketDataProvider:
     s = get_settings()
     name = inst.data_provider if s.market_data_mode == "live" else "synthetic"
+    if name == "alpaca" and not (s.alpaca_key_id and s.alpaca_secret_key) and "alpaca" not in _providers:
+        name = "synthetic"                      # no key configured yet: keep these instruments simulated
     if name not in _providers:
         if name == "coinbase":
             _providers[name] = CoinbaseProvider(s.coinbase_base_url)
+        elif name == "alpaca":
+            _providers[name] = AlpacaProvider(s.alpaca_key_id, s.alpaca_secret_key, s.alpaca_data_url, s.alpaca_feed)
         elif name == "frankfurter":
             _providers[name] = FrankfurterProvider(s.frankfurter_base_url)
         else:

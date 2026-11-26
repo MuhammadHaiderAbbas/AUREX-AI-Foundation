@@ -344,3 +344,14 @@ Stocks, ETFs, indices and other commodities stay simulated until a keyed vendor 
 **Why.** Real-time equity and index data is licensed: every provider needs a key, and a key
 shipped inside a public static site can be copied by anyone. That feed belongs in the backend
 of a real deployment, where the key is a server-side secret.
+
+## ADR-042 Real US stocks through Alpaca on the server; Postgres can run on the same host
+**Decision.** US stocks and ETFs (now including TSLA, NFLX, DIA, GLD for gold and USO for oil)
+use the Alpaca market-data API when a key is present (`AUREX_ALPACA_KEY_ID_FILE`,
+`AUREX_ALPACA_SECRET_KEY_FILE`); without one they stay on the simulator, so nothing breaks before
+the key is added. The free IEX feed is real time and includes bar history. The production stack
+gains an optional `local-db` profile (pgvector Postgres on the same server) and
+`make-secrets.sh --local-db`, so a single inexpensive server is enough to start.
+**Why.** The user chose to run their own server. Alpaca's free plan covers the instruments in
+their watchlist with real-time prices and history, keeps the key server-side, and needs no
+payment. UK listings and index levels need a paid feed and remain simulated (labelled).
