@@ -191,3 +191,8 @@ async def test_migration_moves_bots_on_old_defaults(client):
         rows = (await db.execute(text("SELECT symbols::text, expiry_seconds, status FROM binary_bots"))).all()
         await db.rollback()
     assert rows and all(r[0] == '["BTC-USD", "ETH-USD"]' and r[1] == 60 for r in rows if r[2] != "RUNNING")
+
+
+def test_signal_with_no_history_does_not_crash():
+    sig = botmod.compute_signal([], [], [], [], 1, payout=0.8, min_confidence=0.6, edge_margin=0.02)
+    assert not sig["trade"] and sig["reason"].startswith("not enough history")

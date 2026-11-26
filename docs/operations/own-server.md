@@ -8,7 +8,7 @@ What you get compared with the public demo:
 | | Public demo | Your server |
 |---|---|---|
 | Crypto (12 coins) | live (Coinbase) | live (Coinbase) |
-| Forex | live rates, simulated intraday history | live rates, ECB history |
+| Forex | live rates, simulated intraday history | live rates (tradable), ECB daily history, simulated intraday |
 | US stocks and ETFs (AAPL, MSFT, NVDA, TSLA, NFLX, SPY, QQQ, DIA, GLD gold, USO oil) | simulated | **live (Alpaca, free key)** |
 | Data stored | in your browser only | PostgreSQL, backed up daily, restore-tested weekly |
 | Bot and autopilot | run while the page is open | run 24/7 on the server |

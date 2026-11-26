@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     coinbase_base_url: str = "https://api.exchange.coinbase.com"
     # Public ticker feed the worker leader records into 30-second bars (live mode only).
     coinbase_ws_url: str = "wss://ws-feed.exchange.coinbase.com"
+    # Forex quotes from Coinbase's public exchange-rates API (false = ECB daily reference only, not tradable).
+    coinbase_rates_url: str = "https://api.coinbase.com/v2/exchange-rates"
+    fx_live_rates: bool = True
     tick_bars_enabled: bool = True
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     # Alpaca market data (real US stocks/ETFs). Without a key these instruments stay simulated.
