@@ -54,8 +54,14 @@ def price_at(symbol: str, asset_class: str, base: float, t: float) -> float:
         amp = vol * math.sqrt(period / YEAR) * AMP * weight
         phase = rnd(seed, 1000 + j) * 2 * math.pi
         x += amp * math.sin(2 * math.pi * t / period + phase)
+    # minute noise interpolated between anchors, plus 5-second noise: prices move continuously
     minute = math.floor(t / 60)
-    x += vol * math.sqrt(60 / YEAR) * 2.5 * (rnd(seed, minute) - 0.5)
+    f = t / 60 - minute
+    x += vol * math.sqrt(60 / YEAR) * 2.5 * ((1 - f) * (rnd(seed, minute) - 0.5) + f * (rnd(seed, minute + 1) - 0.5))
+    k = math.floor(t / 5)
+    g = t / 5 - k
+    s2 = seed ^ 0x5BD1E995
+    x += vol * math.sqrt(5 / YEAR) * 2 * ((1 - g) * (rnd(s2, k) - 0.5) + g * (rnd(s2, k + 1) - 0.5))
     return base * math.exp(x)
 
 

@@ -44,6 +44,7 @@ export function PortfolioChart({ snapshots, live = [], height = 240 }: { snapsho
     if (!s) return;
     for (const p of live) {
       if (p.t < lastT.current) continue;
+      if (lastT.current && p.t - lastT.current > 60) s.update({ time: (lastT.current + 1) as UTCTimestamp });   // gap: break, not a straight line
       s.update({ time: p.t as UTCTimestamp, value: p.equity });
       lastT.current = p.t;
     }

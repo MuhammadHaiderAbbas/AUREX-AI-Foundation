@@ -182,6 +182,7 @@ test("model lab: train, gated promotion, drift check", async ({ page }) => {
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("link", { name: "Model Lab" }).click();
+  await expect(page.getByText("Train a candidate")).toBeVisible();
   await page.getByLabel("Instrument").selectOption("BTC-USD");
   await page.getByLabel("Algorithm").selectOption("logistic");
   await page.getByLabel("History").selectOption("60");
@@ -204,6 +205,7 @@ test("backtesting: optimise in-sample, evaluate out-of-sample", async ({ page })
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Backtester" })).toBeVisible();
   await page.getByRole("link", { name: "Backtesting" }).click();
+  await expect(page.getByText("Configure backtest")).toBeVisible();
   await page.getByLabel("Strategy").selectOption("sma_crossover");
   await page.getByLabel("Instrument").selectOption("ETH-USD");
   await page.getByLabel("Period").selectOption("90");

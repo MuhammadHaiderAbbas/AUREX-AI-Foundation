@@ -60,7 +60,22 @@ export function useLiveQuotes(symbols: string[]): { quotes: Record<string, Quote
 
     if (isDemo || typeof WebSocket === "undefined") {
       poll();
-      return () => { cancelled = true; clearInterval(pollTimer); };
+      let unsub: (() => void) | undefined, last = 0;
+      if (isDemo) import("@/services/demo/live").then((m) => {
+        if (cancelled) return;
+        unsub = m.onTick(() => {
+          const t = Date.now();
+          if (t - last < 1000) return;
+          last = t;
+          api<MarketOverview>("/markets/overview").then((ov) => {
+            if (cancelled) return;
+            const next: Record<string, Quote> = {};
+            for (const g of Object.values(ov.groups)) for (const i of g) if (i.quote) next[i.quote.symbol] = i.quote;
+            setQuotes((prev) => ({ ...prev, ...next }));
+          }).catch(() => {});
+        }) as () => void;
+      });
+      return () => { cancelled = true; clearInterval(pollTimer); unsub?.(); };
     }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -95,3 +110,10 @@ export function useLiveQuotes(symbols: string[]): { quotes: Record<string, Quote
 
   return { quotes, live };
 }
+
+/** Recent price path for live charts (1-minute closes + recent ticks); refetched on focus so hidden time is filled in. */
+export const useTickHistory = (slug: string | undefined, seconds = 1800) =>
+  useQuery({
+    queryKey: ["markets", "ticks", slug, seconds], enabled: !!slug, refetchInterval: 60_000, refetchOnWindowFocus: "always", staleTime: 5_000,
+    queryFn: () => api<{ symbol: string; source: string; points: { t: number; price: number }[] }>(`/markets/instruments/${slug}/ticks?seconds=${seconds}`),
+  });

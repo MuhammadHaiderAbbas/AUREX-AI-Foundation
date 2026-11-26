@@ -15,6 +15,7 @@ import * as ml from "./ml";
 import * as bt from "./backtest";
 import * as risk from "./risk";
 import * as bbot from "./binarybot";
+import * as live from "./live";
 import * as an from "./analytics";
 import * as totp from "./totp";
 
@@ -750,6 +751,8 @@ async function dueAutopilot(s: State, a: DAccount) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function runAnalysis(s: State, user: DUser, symbol: string, accountId: string | null): Promise<Record<string, any>> {
+  const sym = findInst(symbol).symbol;
+  await Promise.all([live.ensureCandles(sym, "1h", 300), live.ensureCandles(sym, "1d", 250)]);
   const t0 = performance.now(), started = now();
   const inst = findInst(symbol);
   const mine = s.accounts.filter((a) => a.owner_id === user.id && a.status === "ACTIVE");
@@ -802,7 +805,11 @@ function settleBinaries(s: State) {
   for (const b of (s.binaries ?? []).filter((x) => x.status === "OPEN" && Date.parse(x.expires_at) <= nowMs)) {
     const i = instOf(b.symbol), a = s.accounts.find((x) => x.id === b.account_id)!;
     const at = Date.parse(b.expires_at);
-    const q = mkt.isOpen(i.market, at) ? mkt.quote(i, at) : null;     // synthetic prices are a function of time: use the price at expiry
+    // crypto: the first real Coinbase tick at or after expiry; otherwise synthetic prices are a function of time
+    const lt = live.isLiveSymbol(i.symbol) && live.liveStatus() === "live" ? live.priceAtOrAfter(i.symbol, at) : null;
+    const q = lt ? { bid: String(lt.bid), ask: String(lt.ask), as_of: new Date(lt.t).toISOString() }
+      : live.isLiveSymbol(i.symbol) && live.liveStatus() === "live" ? null
+      : mkt.isOpen(i.market, at) ? mkt.quote(i, at) : null;
     const stake = toUnits(b.stake);
     let status: DBinary["status"];
     if (!q) status = nowMs - at >= BINARY_VOID_AFTER_S * 1000 ? "VOID" : "OPEN";
@@ -911,12 +918,13 @@ function getBot(s: State, accountId: string): DBot {
   return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 300, stake_pct: 1,
     min_confidence: 0.6, edge_margin: 0.02, guard_min_contracts: 20, started_at: null, last_cycle_at: null, paused_reason: null });
 }
-function botSignal(symbol: string, expiry: number, bot?: DBot) {
+async function botSignal(symbol: string, expiry: number, bot?: DBot) {
   const [tf, horizon] = bbot.EXPIRY_BARS[expiry]!;
   const inst = findInst(symbol);
+  await live.ensureCandles(inst.symbol, tf, 600);
   const bars = mkt.candles(inst, tf, 600).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
   const sig = bbot.computeSignal(bars, horizon, BINARY_PAYOUT, bot?.min_confidence ?? 0.6, bot?.edge_margin ?? 0.02);
-  return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: "synthetic" };
+  return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: mkt.candleSource(inst, tf, 600) };
 }
 function botStats(s: State, bot: DBot) {
   const rows = (s.binaries ?? []).filter((c) => c.account_id === bot.account_id && c.source === "bot" && (!bot.started_at || c.opened_at >= bot.started_at));
@@ -943,7 +951,7 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
     if ((s.binaries ?? []).some((c) => c.account_id === a.id && c.source === "bot" && c.symbol === symbol && c.status === "OPEN")) {
       out.results.push({ symbol, outcome: "waiting", detail: "a bot contract on this instrument is still open" }); continue;
     }
-    const sig = botSignal(symbol, bot.expiry_seconds, bot);
+    const sig = await botSignal(symbol, bot.expiry_seconds, bot);
     const brief = { p_up: sig.p_up, confidence: sig.confidence, holdout_accuracy: sig.holdout_accuracy, holdout_n: sig.holdout_n,
       required_accuracy: sig.required_accuracy, expected_return: sig.expected_return, timeframe: sig.timeframe, data_mode: sig.data_mode };
     if (!sig.trade) { out.results.push({ symbol, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
@@ -967,7 +975,8 @@ async function dueBots(s: State) {
   }
 }
 function botRead(s: State, bot: DBot) {
-  return { ...bot, interval_seconds: BOT_INTERVAL_S, data_mode: "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
+  const allReal = live.liveStatus() === "live" && bot.symbols.every(live.isLiveSymbol);
+  return { ...bot, interval_seconds: BOT_INTERVAL_S, data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
     stats: botStats(s, bot), recent: s.riskEvents.filter((e) => e.account_id === bot.account_id && ["BINARY_BOT_CYCLE", "BINARY_BOT_PAUSED", "BINARY_BOT_CONTROL"].includes(e.type))
       .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] })) };
 }
@@ -1011,11 +1020,11 @@ const binaryRoutes: [string, RegExp, Handler][] = [
     processOpen(c.s);
     return json(200, await botCycle(c.s, a, bot));
   }],
-  ["GET", /^\/binary\/signal$/, (c) => {
+  ["GET", /^\/binary\/signal$/, async (c) => {
     authUser(c);
     const e = Number(c.query.get("expiry_seconds") ?? 300);
     if (!bbot.EXPIRY_BARS[e]) throw new HttpError(422, "business_rule_violation", "unsupported expiry");
-    return json(200, botSignal(c.query.get("symbol") ?? "BTC-USD", e));
+    return json(200, await botSignal(c.query.get("symbol") ?? "BTC-USD", e));
   }],
   ["GET", /^\/binary\/config$/, (c) => { authUser(c); return json(200, { ...binaryConfig(), notice: BINARY_NOTICE }); }],
   ["POST", /^\/binary\/contracts$/, async (c) => {
@@ -1754,7 +1763,7 @@ const routes: [string, RegExp, Handler][] = [
     authUser(c);
     const groups: Record<string, unknown[]> = { CRYPTO: [], FX: [], STOCK: [], ETF: [] };
     for (const i of [...INSTRUMENTS].sort((a, b) => a.symbol.localeCompare(b.symbol))) groups[i.asset_class]!.push(withQuote(i));
-    return json(200, { markets: marketStatuses(), groups, data_mode: "synthetic" });
+    return json(200, { markets: marketStatuses(), groups, data_mode: live.liveStatus() === "live" ? "mixed" : "synthetic" });
   }],
   ["GET", /^\/markets\/instruments$/, (c) => {
     authUser(c);
@@ -1762,16 +1771,39 @@ const routes: [string, RegExp, Handler][] = [
     return json(200, INSTRUMENTS.filter((i) => (!cls || i.asset_class === cls) && (!q || `${i.symbol} ${i.display_name}`.toLowerCase().includes(q))).map(instRead));
   }],
   ["GET", /^\/markets\/instruments\/([^/]+)$/, (c) => { authUser(c); return json(200, withQuote(findInst(c.params[0]!))); }],
+  ["GET", /^\/markets\/instruments\/([^/]+)\/ticks$/, async (c) => {
+    authUser(c);
+    const i = findInst(c.params[0]!);
+    const seconds = Math.min(Math.max(Number(c.query.get("seconds") ?? 1800), 60), 7200);
+    const since = Date.now() - seconds * 1000;
+    if (live.isLiveSymbol(i.symbol) && live.liveStatus() === "live") {
+      await live.ensureCandles(i.symbol, "1m", Math.ceil(seconds / 60) + 2);
+      const mins = (live.candlesSync(i.symbol, "1m", Math.ceil(seconds / 60) + 2) ?? []).filter((r) => Date.parse(r.open_time) >= since);
+      const ticks = live.tickHistory(i.symbol, since);
+      const first = ticks[0]?.t ?? Infinity;
+      const pts = [...mins.filter((r) => Date.parse(r.open_time) + 60_000 <= first).map((r) => ({ t: Math.floor(Date.parse(r.open_time) / 1000) + 59, price: r.close })),
+        ...ticks.map((t) => ({ t: Math.floor(t.t / 1000), price: (t.bid + t.ask) / 2 }))];
+      return json(200, { symbol: i.symbol, source: "coinbase", points: pts });
+    }
+    const pts = [];
+    for (let t = Math.ceil(since / 2000) * 2; t * 1000 <= Date.now(); t += 2) {
+      if (!mkt.isOpen(i.market, t * 1000)) continue;
+      const q = mkt.quote(i, t * 1000);
+      pts.push({ t, price: (+q.bid + +q.ask) / 2 });
+    }
+    return json(200, { symbol: i.symbol, source: "synthetic", points: pts });
+  }],
   ["GET", /^\/markets\/instruments\/([^/]+)\/quote$/, (c) => { authUser(c); return json(200, mkt.quote(findInst(c.params[0]!))); }],
-  ["GET", /^\/markets\/instruments\/([^/]+)\/candles$/, (c) => {
+  ["GET", /^\/markets\/instruments\/([^/]+)\/candles$/, async (c) => {
     authUser(c);
     const i = findInst(c.params[0]!);
     const tf = c.query.get("timeframe") ?? "1h";
     if (!mkt.TIMEFRAMES[tf]) throw new HttpError(422, "business_rule_violation", "Unsupported timeframe");
     const limit = Math.min(Number(c.query.get("limit") ?? 200), 1000);
+    await live.ensureCandles(i.symbol, tf, limit);
     const rows = mkt.candles(i, tf, limit);
     const names = (c.query.get("indicators") ?? "").split(",").filter(Boolean);
-    return json(200, { symbol: i.symbol, timeframe: tf, source: "synthetic", candles: rows, indicators: mkt.indicators(names, rows.map((r) => +r.close)) });
+    return json(200, { symbol: i.symbol, timeframe: tf, source: mkt.candleSource(i, tf, limit), candles: rows, indicators: mkt.indicators(names, rows.map((r) => +r.close)) });
   }],
   ["GET", /^\/markets\/watchlist$/, (c) => json(200, watchlist(c.s, authUser(c).user.id))],
   ["POST", /^\/markets\/watchlist\/items$/, (c) => {
@@ -1923,9 +1955,10 @@ const routes: [string, RegExp, Handler][] = [
     if (algo !== "logistic") throw new HttpError(422, "business_rule_violation", "Random forest and LightGBM run on the AUREX backend; the browser demo supports logistic regression");
     const inst = findInst(String(c.body.symbol ?? ""));
     const horizon = Number(c.body.horizon ?? 4), days = Math.min(365, Math.max(60, Number(c.body.days ?? 180)));
+    await live.ensureCandles(inst.symbol, "1h", days * 24);
     const ds = ml.buildDataset(hourBars(inst, days * 24), horizon);
     let wf;
-    try { wf = ml.walkForward(ds, inst.asset_class, "synthetic"); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
+    try { wf = ml.walkForward(ds, inst.asset_class, mkt.candleSource(inst, "1h", days * 24)); } catch (e) { throw new HttpError(422, "business_rule_violation", (e as Error).message); }
     const final = ml.fitLogit(ds.X, ds.y);
     const total = final.w.reduce((a, w) => a + Math.abs(w), 0) || 1;
     const importance = Object.fromEntries(ml.FEATURES.map((f, j) => [f, +(Math.abs(final.w[j]!) / total).toFixed(4)]).sort((a, b) => (b[1] as number) - (a[1] as number)));
@@ -1992,6 +2025,7 @@ const routes: [string, RegExp, Handler][] = [
     const inst = findInst(String(c.body.symbol ?? ""));
     const days = Number(c.body.days ?? 180);
     if (days < 30 || days > 365) throw bad("days must be between 30 and 365", "days");
+    await live.ensureCandles(inst.symbol, "1h", days * 24);
     const raw = mkt.candles(inst, "1h", days * 24);
     const bars = { t: raw.map((x) => x.open_time), o: raw.map((x) => +x.open), h: raw.map((x) => +x.high), l: raw.map((x) => +x.low), c: raw.map((x) => +x.close) };
     if (bars.c.length < 300) throw new HttpError(422, "business_rule_violation", "Not enough history for a backtest (need at least 300 hourly bars)");
@@ -2035,6 +2069,7 @@ export async function demoFetch(input: string, init: RequestInit = {}): Promise<
   const url = new URL(input, "https://demo.local");
   const path = url.pathname.replace(/^.*\/api\/v1/, "");
   const method = (init.method ?? "GET").toUpperCase();
+  await Promise.race([live.start(), new Promise((r) => setTimeout(r, 4000))]);   // real crypto prices, if reachable
   const s = load();
   try {
     for (const [m, re, handler] of routes) {

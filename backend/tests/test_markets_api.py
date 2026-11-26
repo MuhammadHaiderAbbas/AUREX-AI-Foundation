@@ -228,3 +228,12 @@ async def test_large_backfill_is_batched(client):
     r = await client.post(f"{API}/markets/backfill", headers=ah, json={"symbol": "ETH-USD", "timeframe": "1h", "days": 365})
     assert r.status_code == 200, r.text
     assert r.json()["candles_upserted"] > 8000
+
+
+async def test_tick_history_for_live_charts(client):
+    h = await auth_headers(client)
+    r = await client.get(f"{API}/markets/instruments/BTC-USD/ticks?seconds=1800", headers=h)
+    assert r.status_code == 200, r.text
+    pts = r.json()["points"]
+    assert 25 <= len(pts) <= 33 and all(b["t"] > a["t"] for a, b in zip(pts, pts[1:], strict=False))
+    assert (await client.get(f"{API}/markets/instruments/BTC-USD/ticks?seconds=10", headers=h)).status_code == 422

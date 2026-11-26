@@ -26,7 +26,7 @@ The production stack is ready; it needs a server, a domain and an operator.
 4. **Configure**: in `infrastructure/deployment/`, copy `.env.prod.example` to `.env.prod`, set the domain and image tag, run `./make-secrets.sh`, put the database URLs in `secrets/`.
 5. **Start**: `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d`, then `--profile monitoring` for Prometheus and Grafana.
 6. **Admin**: `python -m app.cli create-admin` inside the backend container; enrol 2FA at first sign-in (it is enforced for admins in production).
-7. **Real prices**: set `AUREX_MARKET_DATA_MODE=live` (Coinbase crypto and ECB FX need no key). Stocks and ETFs need a market-data vendor and a provider adapter.
+7. **Real prices**: set `AUREX_MARKET_DATA_MODE=live`. Crypto streams from Coinbase with no key. Frankfurter/ECB FX is a daily reference rate, so real-time forex, stocks and ETFs need a vendor key (for example Twelve Data, Finnhub or Alpaca) and a small provider adapter; the key is stored as a server secret, never in the browser.
 8. **Keep registration off** (`AUREX_ALLOW_REGISTRATION=false`) and check the Operations page until every go-live gate is green.
 
 Step-by-step detail: `docs/operations/deployment.md` and `docs/operations/runbooks.md`.
