@@ -912,11 +912,14 @@ async function openBinary(s: State, user: DUser, a: DAccount, body: Record<strin
 }
 
 // ---- binary bot (mirror of backend app/binary/bot.py) -------------------------------------
-const BOT_INTERVAL_S = 60, BOT_DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD", "EUR/USD"];
+const BOT_INTERVAL_S = 60, BOT_DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"];
 /** Short contracts need frequent cycles or the bot sits idle between them (mirrors bot.py cycle_interval). */
 const botInterval = (bot: DBot) => Math.min(BOT_INTERVAL_S, Math.max(10, bot.expiry_seconds / 3));
 function getBot(s: State, accountId: string): DBot {
   s.binaryBots ??= {};
+  const old = s.binaryBots[accountId];
+  // Bots saved with the earlier defaults (BTC, ETH, EUR/USD at 5 minutes) move to BTC and ETH at 1 minute while stopped.
+  if (old && old.status !== "RUNNING" && old.symbols.join() === "BTC-USD,ETH-USD,EUR/USD") Object.assign(old, { symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 60 });
   return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 60, stake_pct: 1,
     min_confidence: 0.6, edge_margin: 0.02, guard_min_contracts: 20, started_at: null, last_cycle_at: null, paused_reason: null });
 }

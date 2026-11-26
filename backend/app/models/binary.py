@@ -95,7 +95,7 @@ class BinaryBot(Timestamps, Base):
                                                   primary_key=True)
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="STOPPED")
     symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    expiry_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    expiry_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     stake_pct: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
     edge_margin: Mapped[float] = mapped_column(Float, nullable=False, default=0.02)

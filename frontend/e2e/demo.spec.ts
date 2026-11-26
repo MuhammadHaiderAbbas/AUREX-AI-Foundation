@@ -324,7 +324,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await page.getByRole("button", { name: "Open Higher contract" }).click();
   await expect(page.getByText(/binary trading is switched off/).first()).toBeVisible();
   // The one-button AI bot: it refuses to run while binaries are switched off, and says why
-  await expect(page.getByRole("note", { name: "Synthetic data warning" })).toBeVisible();
+  // defaults: BTC and ETH only (real Coinbase prices), so no simulated-prices warning while the feed is live
   await page.getByRole("button", { name: "Start AI bot" }).click();
   await expect(page.getByTestId("bot-status")).toHaveText("PAUSED");
   await expect(page.getByTestId("bot-paused-reason")).toContainText("switched off");

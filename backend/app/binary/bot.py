@@ -38,7 +38,7 @@ from app.risk.service import RiskService
 
 # expiry seconds -> (bar timeframe, bars ahead)
 EXPIRY_BARS = {30: ("30s", 1), 60: ("1m", 1), 300: ("5m", 1), 900: ("15m", 1), 3600: ("1h", 1), 86400: ("1h", 24)}
-DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD", "EUR/USD"]
+DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"]          # real Coinbase prices, 1-minute contracts by default
 HISTORY_BARS = 1000
 MIN_HOLDOUT = 30          # confident out-of-sample predictions needed before trusting the hit rate
 MIN_BARS = 280            # 80 feature warm-up bars + 200 usable
