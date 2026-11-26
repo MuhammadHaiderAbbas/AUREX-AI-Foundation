@@ -23,8 +23,8 @@ jobs:
     env:
       VITE_BASE: /${{ github.event.repository.name }}/
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
       - run: npx tsc -b
@@ -34,7 +34,7 @@ jobs:
           npx playwright install --with-deps chromium
           node scripts/pages-preview.cjs dist "$VITE_BASE" 4173 &
           AUREX_E2E_DEMO=1 AUREX_WEB_URL="http://localhost:4173$VITE_BASE" npx playwright test e2e/demo.spec.ts --trace off
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with: { path: frontend/dist }
 
   deploy:
@@ -45,4 +45,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

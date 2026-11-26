@@ -178,7 +178,7 @@ export function portfolio(c: Ctx, a: number | undefined): Finding {
   if (c.fx == null) return abstain("portfolio", `No FX rate from ${c.quote_currency} to ${acct.currency}`);
   const entry = q.ask, stop = 2 * a, budget = acct.equity * 0.005;
   let qty = stop > 0 ? budget / (stop * c.fx) : 0;
-  const cap = Math.min(acct.equity * 0.2, acct.cash) / (entry * c.fx), capped = qty > cap;
+  const cap = Math.min(acct.equity * 0.2, acct.cash) / (entry * c.fx * 1.01), capped = qty > cap;
   qty = Math.floor(Math.min(qty, cap) / c.lot_size) * c.lot_size;
   qty = +qty.toFixed(8);
   const notional = qty * entry * c.fx, risk = qty * stop * c.fx, ok = qty > 0 && notional >= 1;

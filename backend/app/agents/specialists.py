@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.market import indicators as ind
 
 MIN_BARS = 60
+SIZING_HEADROOM = Decimal("1.01")   # 1%: covers spread, slippage and fees between proposal and fill
 RISK_PER_TRADE = Decimal("0.005")       # 0.5% of equity (blueprint development default)
 MAX_POSITION_PCT = Decimal("0.20")      # notional cap per position
 MAX_SPREAD_BPS = {"CRYPTO": 10.0, "FX": 3.0, "STOCK": 10.0, "ETF": 5.0}
@@ -259,7 +260,8 @@ def portfolio(ctx: AgentContext, atr_1h: float | None) -> Finding:
     risk_budget = acct.equity * RISK_PER_TRADE
     lot = ctx.instrument.lot_size
     qty = (risk_budget / (stop_dist * fx)) if stop_dist > 0 else Decimal(0)
-    cap_qty = (min(acct.equity * MAX_POSITION_PCT, acct.cash) / (entry * fx)) if entry > 0 else Decimal(0)
+    # leave headroom for slippage and fees so the filled position stays inside the risk gate's cap
+    cap_qty = (min(acct.equity * MAX_POSITION_PCT, acct.cash) / (entry * fx * SIZING_HEADROOM)) if entry > 0 else Decimal(0)
     capped = qty > cap_qty
     qty = min(qty, cap_qty)
     qty = (qty / lot).to_integral_value(rounding=ROUND_DOWN) * lot
