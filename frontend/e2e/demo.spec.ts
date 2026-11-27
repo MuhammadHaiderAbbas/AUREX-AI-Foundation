@@ -194,12 +194,16 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   await page.getByRole("button", { name: "Put the site on hold" }).click();
   await expect(page.getByText(/The site is on hold/)).toBeVisible();
   await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);                     // wait until the session is really gone
   await page.goto("./");
   await expect(page.getByRole("status")).toContainText("Upgrading the AI desk");
   await page.goto("login");
   await page.getByRole("button", { name: "Launch demo", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Upgrading the AI desk" })).toBeVisible({ timeout: 30_000 });   // traders are locked out
+  // traders are locked out: sign-in is refused with the maintenance message (banner + error) and they stay on the login page
+  await expect(page.getByText("Upgrading the AI desk")).toHaveCount(2, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/login$/);
   await page.getByRole("button", { name: "Explore the admin console" }).click();
+  await expect(page).toHaveURL(/\/admin$/);
   await page.goto("admin/controls");
   await page.getByRole("button", { name: "Bring the site back online" }).click();
   await expect(page.getByRole("button", { name: "Put the site on hold" })).toBeVisible();
