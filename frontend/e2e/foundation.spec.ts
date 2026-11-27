@@ -57,9 +57,9 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await expect(page.getByTestId("perf-metrics")).toBeVisible();
 
   await page.getByTestId("user-menu").click(); await page.getByRole("menuitem", { name: "Log out" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\/?$/);
   await page.goto("app/wallet");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\/?$/);
 });
 
 test("admin can verify the audit chain", async ({ page }) => {
@@ -68,7 +68,7 @@ test("admin can verify the audit chain", async ({ page }) => {
   await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page).toHaveURL(/\/admin$/);                    // administrators land in the admin console
+  await expect(page).toHaveURL(/\/admin\/?$/);                    // administrators land in the admin console
   await page.getByRole("link", { name: "Users & audit" }).click();
   await page.getByRole("button", { name: "Verify chain" }).click();
   await expect(page.getByText(/Chain intact — \d+ records verified/)).toBeVisible();
@@ -97,7 +97,7 @@ test("non-admin users do not see administration", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Plain User" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await page.goto("/admin");
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/?$/);
 });
 
 test("markets stream live quotes and render charts", async ({ page }) => {
@@ -131,7 +131,7 @@ test("research lab: corpus, grounded report with citations", async ({ page }) =>
   await expect(page.getByText(/\d+ indexed/)).toBeVisible();
   await expect(page.getByText("Fictional sample").first()).toBeVisible();
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\/?$/);
 
   // a trader asks questions against the library
   await signUp(page, "Research User", `e2e-r-${Date.now()}@example.com`);
@@ -460,9 +460,9 @@ test("admin console: separate from trading, site on hold", async ({ page, browse
   await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin\/?$/);
   await page.goto("/app");                                     // administrators do not trade
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin\/?$/);
   await page.getByRole("link", { name: "Trading controls" }).click();
   await page.getByLabel("Message for traders (optional)").fill("e2e maintenance");
   await page.getByRole("button", { name: "Put the site on hold" }).click();
