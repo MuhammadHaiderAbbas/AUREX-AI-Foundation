@@ -116,12 +116,14 @@ class FuturesBotControl(BaseModel):
     symbols: list[str] | None = Field(default=None, min_length=1, max_length=4)
     margin_pct: float | None = Field(default=None, gt=0, le=20)
     max_leverage: int | None = Field(default=None, ge=1, le=10)
+    scan: bool | None = None
+    risk_mode: Literal["careful", "practice"] | None = None
 
 
 async def _bot_read(db: AsyncSession, account_id: uuid.UUID) -> dict:
     bot = await fbot.get_bot(db, account_id)
     return {"account_id": bot.account_id, "status": bot.status, "symbols": bot.symbols, "margin_pct": bot.margin_pct,
-            "max_leverage": bot.max_leverage, "started_at": bot.started_at, "last_cycle_at": bot.last_cycle_at,
+            "max_leverage": bot.max_leverage, "scan": bot.scan, "risk_mode": bot.risk_mode, "started_at": bot.started_at, "last_cycle_at": bot.last_cycle_at,
             "paused_reason": bot.paused_reason, "interval_seconds": fbot.interval(), "horizon_hours": fbot.HORIZON,
             "stats": await fbot.bot_stats(db, bot), "recent": await fbot.recent_cycles(db, account_id)}
 
@@ -147,6 +149,10 @@ async def control_futures_bot(data: FuturesBotControl, user: User = Depends(curr
         bot.margin_pct = data.margin_pct
     if data.max_leverage is not None:
         bot.max_leverage = min(data.max_leverage, config()["max_leverage"])
+    if data.scan is not None:
+        bot.scan = data.scan
+    if data.risk_mode is not None:
+        bot.risk_mode = data.risk_mode
     old = bot.status
     if data.action == "start":
         bot.status, bot.paused_reason = "RUNNING", None
@@ -158,7 +164,8 @@ async def control_futures_bot(data: FuturesBotControl, user: User = Depends(curr
     RiskService(db).event(acct.id, "FUTURES_BOT_CONTROL", "Futures bot stopped" if data.action == "stop" else f"Futures bot {data.action}ed",
                           symbols=bot.symbols)
     await AuditService(db).record(ctx, f"futures.bot.{data.action}", resource_type="trading_account", resource_id=acct.id,
-                                  details={"symbols": bot.symbols, "margin_pct": bot.margin_pct, "max_leverage": bot.max_leverage})
+                                  details={"symbols": bot.symbols, "margin_pct": bot.margin_pct, "max_leverage": bot.max_leverage,
+                                           "scan": bot.scan, "risk_mode": bot.risk_mode})
     if data.action == "start":
         await fbot.run_bot_cycle(db, acct, bot)
     out = await _bot_read(db, acct.id)

@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
+import { RiskModeField } from "@/features/binary/RiskModeField";
 import { useFuturesBot, useFuturesBotControl, useFuturesBotRun } from "@/features/futures/hooks";
+import type { RiskMode } from "@/services/api";
 import { app } from "@/lib/paths";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 
@@ -36,22 +38,26 @@ export function FuturesBotPanel({ accountId, currency }: { accountId: string; cu
   const [markets, setMarkets] = useState<string[]>([]);
   const [marginPct, setMarginPct] = useState("5");
   const [maxLev, setMaxLev] = useState(3);
+  const [scan, setScan] = useState(false);
+  const [mode, setMode] = useState<RiskMode>("careful");
   useEffect(() => {
     if (!b) return;
-    setMarkets(b.symbols); setMarginPct(String(b.margin_pct)); setMaxLev(b.max_leverage);
+    setMarkets(b.symbols); setMarginPct(String(b.margin_pct)); setMaxLev(b.max_leverage); setScan(!!b.scan); setMode(b.risk_mode ?? "careful");
   }, [b?.account_id, b?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!b) return <Card><CardBody>{bot.error ? <ErrorBanner error={bot.error} /> : <Spinner />}</CardBody></Card>;
   const running = b.status === "RUNNING";
   const tone = running ? "positive" : b.status === "PAUSED" ? "warning" : "neutral";
   const net = Number(b.stats.net_pnl);
   const act = (action: "start" | "pause" | "stop") =>
-    control.mutate({ account_id: accountId, action, ...(action === "start" ? { symbols: markets, margin_pct: Number(marginPct), max_leverage: maxLev } : {}) });
+    control.mutate({ account_id: accountId, action, ...(action === "start" ? { symbols: markets, margin_pct: Number(marginPct), max_leverage: maxLev, scan, risk_mode: mode } : {}) });
 
   return (
     <Card data-testid="futures-bot" data-tour="futures-bot">
       <CardHeader title={<span className="flex items-center gap-2"><Bot className="size-4 text-accent" />AI futures bot</span>}
         description={`Trades automatically, only when the AI futures model has a tested edge after costs. Every trade has a stop-loss and closes after ${b.horizon_hours} hours.`}
-        action={<Badge tone={tone} data-testid="futures-bot-status">{running ? "Running" : b.status === "PAUSED" ? "Paused" : "Stopped"}</Badge>} />
+        action={<span className="flex gap-1.5">{b.risk_mode === "practice" && <Badge tone="warning" data-testid="futures-bot-practice">Practice · high risk</Badge>}
+          {b.scan && <Badge tone="info">Scanning all coins</Badge>}
+          <Badge tone={tone} data-testid="futures-bot-status">{running ? "Running" : b.status === "PAUSED" ? "Paused" : "Stopped"}</Badge></span>} />
       <CardBody className="space-y-4">
         {b.status === "PAUSED" && b.paused_reason && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm" role="status">
@@ -62,8 +68,13 @@ export function FuturesBotPanel({ accountId, currency }: { accountId: string; cu
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
           <div className="space-y-3">
             <fieldset disabled={running} className="space-y-3">
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={scan} onChange={(e) => setScan(e.target.checked)} />
+                <span><span className="font-medium text-fg">Scan every crypto coin</span>
+                  <span className="block text-muted">Asks the model about all coins each cycle and trades wherever its test passes (up to 5 positions at once).</span></span>
+              </label>
               <div className="text-xs text-muted">Markets</div>
-              <div className="flex flex-wrap gap-2" role="group" aria-label="Bot markets">
+              <div className={cn("flex flex-wrap gap-2", scan && "pointer-events-none opacity-40")} role="group" aria-label="Bot markets">
                 {BOT_MARKETS.map((m) => {
                   const on = markets.includes(m);
                   return (
@@ -82,6 +93,8 @@ export function FuturesBotPanel({ accountId, currency }: { accountId: string; cu
                   </Select>
                 </Field>
               </div>
+              <RiskModeField value={mode} onChange={setMode}
+                practiceNote="Trades the model's direction whenever it is at least 55% sure, even without a proven edge. Margin capped at 2% of equity and leverage at 2x; stop-loss and 4-hour exit as usual." />
             </fieldset>
             <div className="flex flex-wrap gap-2">
               {!running && <Button onClick={() => act("start")} disabled={control.isPending || !markets.length}><Play />{b.status === "PAUSED" ? "Resume bot" : "Start bot"}</Button>}

@@ -53,6 +53,27 @@ async def signal_for(db: AsyncSession, symbol: str) -> dict[str, Any]:
     return sig
 
 
+PRACTICE_MAX_MARGIN_PCT = 2.0
+PRACTICE_MAX_LEVERAGE = 2
+
+
+async def scan_symbols(db: AsyncSession) -> list[str]:
+    from app.binary.bot import scan_symbols as crypto_markets
+    return await crypto_markets(db)
+
+
+def practice_call(sig: dict[str, Any]) -> dict[str, Any]:
+    """Practice (high risk): trade the model's current direction at its usual 55% confidence, with no proven edge."""
+    from app.futures.signal import CONFIDENCE
+    if sig["trade"] or sig.get("direction") is None or sig.get("confidence") is None:
+        return sig
+    if sig["confidence"] < CONFIDENCE:
+        return {**sig, "reason": f"practice mode: model only {sig['confidence']:.0%} sure (needs {CONFIDENCE:.0%})"}
+    mean = sig.get("mean_return")
+    tested = f"tested {mean * 100:+.2f}% per trade after costs" if mean is not None else "not tested yet"
+    return {**sig, "trade": True, "reason": f"practice mode, NO proven edge: model {sig['confidence']:.0%} sure {sig['direction']}; {tested}"}
+
+
 def clear_cache() -> None:
     _signals.clear()
 
@@ -150,7 +171,9 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: FuturesBot)
 
     user = await db.get(User, acct.owner_id)
     svc = FuturesService(db)
-    for symbol in bot.symbols:
+    practice = bot.risk_mode == "practice"
+    symbols = await scan_symbols(db) if bot.scan else bot.symbols
+    for symbol in symbols:
         open_here = await db.scalar(select(FuturesPosition.id).where(
             FuturesPosition.account_id == acct.id, FuturesPosition.source == "bot", FuturesPosition.symbol == symbol,
             FuturesPosition.status == FuturesStatus.OPEN).limit(1))
@@ -164,12 +187,16 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: FuturesBot)
             continue
         brief = {k: sig.get(k) for k in ("direction", "p_up", "confidence", "trades", "hit_rate", "mean_return", "return_lower", "folds",
                                          "folds_profitable", "suggested_leverage", "stop_distance_pct")}
+        if practice:
+            sig = practice_call(sig)
+        brief["mode"] = bot.risk_mode
         if not sig["trade"]:
             out["results"].append({"symbol": symbol, "outcome": "no_trade", "detail": sig["reason"], "signal": brief})
             continue
         summary = await svc.trading.summary(acct, take_snapshot=False)
-        margin = max((summary["equity"] * Decimal(str(bot.margin_pct)) / 100).quantize(CENT, rounding=ROUND_DOWN), MIN_MARGIN)
-        lev = max(1, min(int(sig["suggested_leverage"] or 1), bot.max_leverage))
+        margin_pct = min(bot.margin_pct, PRACTICE_MAX_MARGIN_PCT) if practice else bot.margin_pct
+        margin = max((summary["equity"] * Decimal(str(margin_pct)) / 100).quantize(CENT, rounding=ROUND_DOWN), MIN_MARGIN)
+        lev = max(1, min(int(sig["suggested_leverage"] or 1), bot.max_leverage, PRACTICE_MAX_LEVERAGE if practice else bot.max_leverage))
         try:
             pos, _ = await svc.open(user, OpenRequest(acct.id, symbol, sig["direction"], margin, lev, f"bot-{uuid.uuid4().hex}", source="bot"))
         except AppError as e:

@@ -556,7 +556,7 @@ export interface BotCycleResult { symbol: string; outcome: "opened" | "no_trade"
   signal?: { p_up: number | null; confidence: number | null; holdout_accuracy: number | null; holdout_n: number; required_accuracy: number; expected_return: number | null; timeframe: string; data_mode: string } }
 export interface BinaryBot {
   account_id: string; status: BotStatus; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number;
-  guard_min_contracts: number; require_futures_agreement: boolean; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number;
+  guard_min_contracts: number; require_futures_agreement: boolean; scan: boolean; risk_mode: RiskMode; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number;
   data_mode: string; break_even_win_rate: number; payout_rate: number;
   stats: { contracts: number; open: number; won: number; lost: number; ties: number; void: number; win_rate: number | null; staked: string; net_pnl: string; return_on_stake: number | null };
   recent: { at: string; type: string; message: string; results: BotCycleResult[] }[];
@@ -580,7 +580,9 @@ export interface FuturesSignal { symbol: string; trade: boolean; direction: Futu
   suggested_leverage: number | null; stop_distance_pct: number | null; horizon_hours: number; reason: string; bars: number; timeframe: string; data_mode?: string }
 export interface FuturesBotResult { symbol: string; outcome: "opened" | "no_trade" | "holding" | "risk_rejected" | "error"; detail: string; side?: FuturesSide;
   leverage?: number; margin?: string; stop_price?: string }
+export type RiskMode = "careful" | "practice";
 export interface FuturesBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number;
+  scan: boolean; risk_mode: RiskMode;
   started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number; horizon_hours: number;
   stats: { trades: number; open: number; closed: number; wins: number; losses: number; liquidated: number; stopped: number; timed_out: number;
     net_pnl: Num; fees: Num; avg_return_on_margin: number | null; return_upper: number | null };

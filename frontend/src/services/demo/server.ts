@@ -52,10 +52,10 @@ interface DOrder { id: string; account_id: string; user_id: string; symbol: stri
 interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
 interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null; source?: "manual" | "bot"; signal?: Record<string, unknown> | null }
 interface DAlert { id: string; user_id: string; symbol: string; direction: "ABOVE" | "BELOW"; price: string; note: string | null; status: "ACTIVE" | "TRIGGERED" | "CANCELLED"; created_at: string; updated_at: string; triggered_at: string | null; triggered_price: string | null; seen_at: string | null }
-interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; require_futures_agreement?: boolean }
+interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; require_futures_agreement?: boolean; scan?: boolean; risk_mode?: "careful" | "practice" }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DFutures { id: string; account_id: string; user_id: string; symbol: string; side: "LONG" | "SHORT"; quantity: number; entry_price: number; leverage: number; margin: number; margin_usd: number; fx_open: number; liquidation_price: number; fees: number; funding: number; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: number | null; realised_pnl: number | null; source: string; client_id: string | null; opened_at: string; closed_at: string | null; last_funding_at: string; stop_price?: number | null; exit_due_at?: string | null; exit_reason?: string | null; signal?: Record<string, unknown> | null }
-interface DFBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
+interface DFBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number; scan?: boolean; risk_mode?: "careful" | "practice"; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
@@ -971,7 +971,7 @@ async function openBinary(s: State, user: DUser, a: DAccount, body: Record<strin
 // ---- binary bot (mirror of backend app/binary/bot.py) -------------------------------------
 const BOT_INTERVAL_S = 60, BOT_DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"];
 /** Short contracts need frequent cycles or the bot sits idle between them (mirrors bot.py cycle_interval). */
-const botInterval = (bot: DBot) => Math.min(BOT_INTERVAL_S, Math.max(10, bot.expiry_seconds / 3));
+const botInterval = (bot: DBot) => (bot.scan ? BOT_INTERVAL_S : Math.min(BOT_INTERVAL_S, Math.max(10, bot.expiry_seconds / 3)));
 function getBot(s: State, accountId: string): DBot {
   s.binaryBots ??= {};
   const old = s.binaryBots[accountId];
@@ -998,6 +998,37 @@ function botStats(s: State, bot: DBot) {
     void: rows.filter((c) => c.status === "VOID").length, win_rate: won + lost ? won / (won + lost) : null, staked: fromUnits(staked),
     net_pnl: fromUnits(net), return_on_stake: staked ? Number(net) / Number(staked) : null };
 }
+// scan + practice mode (mirror of backend best_signal / practice_call). The browser scans 1- and 5-minute
+// expiries only (15m and 1h would need far more Coinbase history downloads per coin); the server scans all four.
+const DEMO_SCAN_EXPIRIES = [60, 300];
+const SCAN_SYMBOLS = () => INSTRUMENTS.filter((i) => i.asset_class === "CRYPTO" && i.symbol !== "PAXG-USD" && live.isLiveSymbol(i.symbol)).map((i) => i.symbol);
+const binSigCache = new Map<string, { bucket: number; sig: Awaited<ReturnType<typeof botSignal>> }>();
+async function cachedBotSignal(symbol: string, expiry: number, bot: DBot) {
+  const tf = bbot.EXPIRY_BARS[expiry]![0], key = `${symbol}|${expiry}|${bot.min_confidence}|${bot.edge_margin}`;
+  const bucket = Math.floor(Date.now() / 1000 / mkt.TIMEFRAMES[tf]!), hit = binSigCache.get(key);
+  if (hit && hit.bucket === bucket) return hit.sig;
+  const sig = await botSignal(symbol, expiry, bot);
+  binSigCache.set(key, { bucket, sig });
+  return sig;
+}
+function practiceCall<T extends { trade: boolean; p_up: number | null; confidence: number | null; holdout_accuracy: number | null; break_even: number; direction: string | null; reason: string }>(sig: T, bot: DBot): T {
+  if (sig.p_up == null || sig.trade) return sig;
+  const conf = sig.confidence!, pc = (v: number) => `${(v * 100).toFixed(1)}%`, bar = Math.min(bot.min_confidence, 0.55);
+  if (conf < bar) return { ...sig, trade: false, reason: `practice mode: model only ${Math.round(conf * 100)}% sure (needs ${Math.round(bar * 100)}%)` };
+  const tested = sig.holdout_accuracy != null ? `tested hit rate ${pc(sig.holdout_accuracy)}` : "no tested hit rate yet";
+  return { ...sig, trade: true, reason: `practice mode, NO proven edge: model ${Math.round(conf * 100)}% sure ${sig.direction}; ${tested} vs ${pc(sig.break_even)} break-even` };
+}
+async function bestBinarySignal(symbol: string, expiries: number[], bot: DBot, practice: boolean) {
+  const found = [];
+  for (const e of expiries) {
+    const raw = await (expiries.length > 1 ? cachedBotSignal(symbol, e, bot) : botSignal(symbol, e, bot));
+    found.push(practice ? practiceCall({ ...raw }, bot) : { ...raw });
+  }
+  const trades = found.filter((x) => x.trade), pool = trades.length ? trades : found;
+  const best = pool.reduce((m, x) => ((x.holdout_lower ?? 0) > (m.holdout_lower ?? 0) || ((x.holdout_lower ?? 0) === (m.holdout_lower ?? 0) && (x.confidence ?? 0) > (m.confidence ?? 0)) ? x : m));
+  if (expiries.length > 1) best.reason = trades.length ? `${best.expiry_seconds / 60}m expiry: ${best.reason}` : `no expiry passed (${found.length} tried); best: ${best.expiry_seconds / 60}m, ${best.reason}`;
+  return best;
+}
 async function botCycle(s: State, a: DAccount, bot: DBot) {
   const out: { at: string; results: Record<string, unknown>[]; skipped?: string } = { at: now(), results: [] };
   bot.last_cycle_at = now();
@@ -1015,13 +1046,15 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
     pauseBot(s, a.id, reason); out.skipped = reason; return out;
   }
   const user = s.users.find((u) => u.id === a.owner_id)!;
-  for (const symbol of bot.symbols) {
+  const practice = bot.risk_mode === "practice";
+  const symbols = bot.scan ? SCAN_SYMBOLS() : bot.symbols, expiries = bot.scan ? DEMO_SCAN_EXPIRIES : [bot.expiry_seconds];
+  for (const symbol of symbols) {
     if ((s.binaries ?? []).some((c) => c.account_id === a.id && c.source === "bot" && c.symbol === symbol && c.status === "OPEN")) {
       out.results.push({ symbol, outcome: "waiting", detail: "a bot contract on this instrument is still open" }); continue;
     }
-    const sig = await botSignal(symbol, bot.expiry_seconds, bot);
+    const sig = await bestBinarySignal(symbol, expiries, bot, practice);
     const brief = { p_up: sig.p_up, confidence: sig.confidence, holdout_accuracy: sig.holdout_accuracy, holdout_n: sig.holdout_n,
-      required_accuracy: sig.required_accuracy, expected_return: sig.expected_return, timeframe: sig.timeframe, data_mode: sig.data_mode };
+      required_accuracy: sig.required_accuracy, expected_return: sig.expected_return, timeframe: sig.timeframe, data_mode: sig.data_mode, expiry_seconds: sig.expiry_seconds, mode: bot.risk_mode ?? "careful" };
     if (!sig.trade) { out.results.push({ symbol, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
     if (bot.require_futures_agreement ?? true) {
       const [agrees, why, f] = await futuresAgreement(symbol, sig.direction!);
@@ -1029,12 +1062,12 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
       if (!agrees) { out.results.push({ symbol, outcome: "no_trade", detail: `${sig.reason}; skipped: ${why}`, signal: brief }); continue; }
       sig.reason = `${sig.reason}; ${why}`;
     }
-    const equity = +portfolio(s, a).equity;
-    const stake = Math.max(Math.floor(equity * bot.stake_pct) / 100, MIN_ORDER_VALUE).toFixed(2);
+    const equity = +portfolio(s, a).equity, pct = practice ? Math.min(bot.stake_pct, 1) : bot.stake_pct;
+    const stake = Math.max(Math.floor(equity * pct) / 100, MIN_ORDER_VALUE).toFixed(2);
     try {
-      const { b } = await openBinary(s, user, a, { symbol, direction: sig.direction, stake, expiry_seconds: bot.expiry_seconds, client_id: `bot-${uuid().replace(/-/g, "")}` },
+      const { b } = await openBinary(s, user, a, { symbol, direction: sig.direction, stake, expiry_seconds: sig.expiry_seconds, client_id: `bot-${uuid().replace(/-/g, "")}` },
         { source: "bot", signal: { ...brief, reason: sig.reason } });
-      out.results.push({ symbol, outcome: "opened", contract_id: b.id, direction: b.direction, stake: b.stake, detail: sig.reason, signal: brief });
+      out.results.push({ symbol, outcome: "opened", contract_id: b.id, direction: b.direction, stake: b.stake, expiry_seconds: b.expiry_seconds, detail: sig.reason, signal: brief });
     } catch (e) { out.results.push({ symbol, outcome: "risk_rejected", detail: (e as Error).message, signal: brief }); }
   }
   const n = out.results.filter((r) => r.outcome === "opened").length;
@@ -1063,7 +1096,7 @@ async function futuresAgreement(symbol: string, direction: string): Promise<[boo
 }
 function botRead(s: State, bot: DBot) {
   const allReal = live.liveStatus() === "live" && bot.symbols.every(live.isLiveSymbol);
-  return { require_futures_agreement: true, ...bot, interval_seconds: botInterval(bot), data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
+  return { require_futures_agreement: true, scan: false, risk_mode: "careful", ...bot, interval_seconds: botInterval(bot), data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
     stats: botStats(s, bot), recent: s.riskEvents.filter((e) => e.account_id === bot.account_id && ["BINARY_BOT_CYCLE", "BINARY_BOT_PAUSED", "BINARY_BOT_CONTROL"].includes(e.type))
       .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] })) };
 }
@@ -1092,6 +1125,8 @@ const binaryRoutes: [string, RegExp, Handler][] = [
     if (c.body.stake_pct != null) { const v = Number(c.body.stake_pct); if (!(v > 0 && v <= 5)) throw bad("stake_pct must be > 0 and ≤ 5", "stake_pct"); bot.stake_pct = v; }
     if (c.body.min_confidence != null) { const v = Number(c.body.min_confidence); if (!(v >= 0.5 && v < 1)) throw bad("min_confidence must be in [0.5, 1)", "min_confidence"); bot.min_confidence = v; }
     if (c.body.require_futures_agreement != null) bot.require_futures_agreement = !!c.body.require_futures_agreement;
+    if (c.body.scan != null) bot.scan = !!c.body.scan;
+    if (c.body.risk_mode != null) { if (!["careful", "practice"].includes(String(c.body.risk_mode))) throw bad("risk_mode must be careful or practice", "risk_mode"); bot.risk_mode = c.body.risk_mode as DBot["risk_mode"]; }
     if (c.body.edge_margin != null) { const v = Number(c.body.edge_margin); if (!(v >= 0 && v <= 0.2)) throw bad("edge_margin must be in [0, 0.2]", "edge_margin"); bot.edge_margin = v; }
     const old = bot.status;
     if (action === "start") { bot.status = "RUNNING"; bot.paused_reason = null; if (old === "STOPPED" || !bot.started_at) bot.started_at = now(); }
@@ -1300,6 +1335,12 @@ async function futSignal(sym: string): Promise<Record<string, any>> { // eslint-
   fsigCache.set(i.symbol, { at: Date.now(), sig });
   return sig;
 }
+function futPracticeCall(sig: Record<string, any>): Record<string, any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (sig.trade || sig.direction == null || sig.confidence == null) return sig;
+  if (sig.confidence < 0.55) return { ...sig, reason: `practice mode: model only ${Math.round(sig.confidence * 100)}% sure (needs 55%)` };
+  const tested = sig.mean_return != null ? `tested ${sig.mean_return >= 0 ? "+" : ""}${(sig.mean_return * 100).toFixed(2)}% per trade after costs` : "not tested yet";
+  return { ...sig, trade: true, reason: `practice mode, NO proven edge: model ${Math.round(sig.confidence * 100)}% sure ${sig.direction}; ${tested}` };
+}
 function getFBot(s: State, accountId: string): DFBot {
   s.futuresBots ??= {};
   return (s.futuresBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: ["BTC-USD", "ETH-USD"], margin_pct: 5, max_leverage: 3, started_at: null, last_cycle_at: null, paused_reason: null });
@@ -1329,15 +1370,19 @@ async function fbotCycle(s: State, a: DAccount, bot: DFBot) {
     : st.closed >= FBOT_LATE && st.avg_return_on_margin! < 0 ? `edge guard: ${st.closed} closed trades averaged ${pc(st.avg_return_on_margin!)} on margin` : null;
   if (guard) { fbotPause(s, bot, guard); out.skipped = guard; return out; }
   const user = s.users.find((u) => u.id === a.owner_id)!;
-  for (const sym of bot.symbols) {
+  const practice = bot.risk_mode === "practice";
+  for (const sym of bot.scan ? SCAN_SYMBOLS() : bot.symbols) {
     if ((s.futures ?? []).some((f) => f.account_id === a.id && f.source === "bot" && f.symbol === sym && f.status === "OPEN")) {
       out.results.push({ symbol: sym, outcome: "holding", detail: "the bot already holds a position here; it exits on its stop or after 4 hours" }); continue;
     }
-    let sig;
+    let sig: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     try { sig = await futSignal(sym); } catch (e) { out.results.push({ symbol: sym, outcome: "error", detail: e instanceof HttpError ? e.message : String(e) }); continue; }
-    const brief = Object.fromEntries(["direction", "p_up", "confidence", "trades", "hit_rate", "mean_return", "return_lower", "folds", "folds_profitable", "suggested_leverage", "stop_distance_pct"].map((k) => [k, sig[k]]));
+    const brief: Record<string, unknown> = Object.fromEntries(["direction", "p_up", "confidence", "trades", "hit_rate", "mean_return", "return_lower", "folds", "folds_profitable", "suggested_leverage", "stop_distance_pct"].map((k) => [k, sig[k]]));
+    if (practice) sig = futPracticeCall(sig);
+    brief.mode = bot.risk_mode ?? "careful";
     if (!sig.trade) { out.results.push({ symbol: sym, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
-    const margin = Math.max(Math.floor(+portfolio(s, a).equity * bot.margin_pct) / 100, 1), lev = Math.max(1, Math.min(sig.suggested_leverage ?? 1, bot.max_leverage));
+    const margin = Math.max(Math.floor(+portfolio(s, a).equity * (practice ? Math.min(bot.margin_pct, 2) : bot.margin_pct)) / 100, 1);
+    const lev = Math.max(1, Math.min(sig.suggested_leverage ?? 1, bot.max_leverage, practice ? 2 : bot.max_leverage));
     try {
       const { f } = await openFutures(s, user, a, { symbol: sym, side: sig.direction, margin: margin.toFixed(2), leverage: lev, client_id: `bot-${uuid()}` }, "bot");
       const d = sig.stop_distance_pct / 100;
@@ -1361,7 +1406,7 @@ async function dueFuturesBots(s: State) {
 function fbotRead(s: State, bot: DFBot) {
   const recent = s.riskEvents.filter((e) => e.account_id === bot.account_id && ["FUTURES_BOT_CYCLE", "FUTURES_BOT_PAUSED", "FUTURES_BOT_CONTROL", "FUTURES_BOT_EXIT"].includes(e.type))
     .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] }));
-  return { ...bot, interval_seconds: FBOT_INTERVAL_S, horizon_hours: 4, stats: fbotStats(s, bot), recent };
+  return { scan: false, risk_mode: "careful", ...bot, interval_seconds: FBOT_INTERVAL_S, horizon_hours: 4, stats: fbotStats(s, bot), recent };
 }
 const futuresBotRoutes: [string, RegExp, Handler][] = [
   ["GET", /^\/futures\/bot$/, async (c) => {
@@ -1379,6 +1424,8 @@ const futuresBotRoutes: [string, RegExp, Handler][] = [
     }
     if (c.body.margin_pct != null) { const v = Number(c.body.margin_pct); if (!(v > 0 && v <= 20)) throw bad("margin_pct must be > 0 and ≤ 20", "margin_pct"); bot.margin_pct = v; }
     if (c.body.max_leverage != null) { const v = Number(c.body.max_leverage); if (!Number.isInteger(v) || v < 1 || v > 10) throw bad("max_leverage must be 1 to 10", "max_leverage"); bot.max_leverage = v; }
+    if (c.body.scan != null) bot.scan = !!c.body.scan;
+    if (c.body.risk_mode != null) { if (!["careful", "practice"].includes(String(c.body.risk_mode))) throw bad("risk_mode must be careful or practice", "risk_mode"); bot.risk_mode = c.body.risk_mode as DFBot["risk_mode"]; }
     const old = bot.status;
     if (action === "start") { bot.status = "RUNNING"; bot.paused_reason = null; if (old === "STOPPED" || !bot.started_at) bot.started_at = now(); }
     else { bot.status = action === "pause" ? "PAUSED" : "STOPPED"; bot.paused_reason = action === "pause" ? "paused by you" : null; }
