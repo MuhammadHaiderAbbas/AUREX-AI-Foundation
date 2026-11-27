@@ -15,7 +15,7 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page.getByRole("heading", { name: "E2E Trader" })).toBeVisible();
-  await expect(page.getByText("Paper mode")).toBeVisible();
+  await expect(page.getByText(/^Paper( · Demo)?$/)).toBeVisible();
   await expect(page.getByText("No paper accounts yet")).toBeVisible();
 
   // Create a paper account with the $100,000 preset (the default is £100)
@@ -30,7 +30,7 @@ test("register, fund a paper account, move virtual cash, persist session", async
   await expect(page.getByTestId("portfolio-chart")).toBeVisible({ timeout: 15_000 });
 
   // Wallet: deposit then attempt an overdraw
-  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await page.goto("app/wallet");
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
   await page.getByLabel("Amount (USD)").fill("2500.50");
   await page.getByRole("button", { name: "Deposit virtual cash" }).click();
@@ -45,20 +45,20 @@ test("register, fund a paper account, move virtual cash, persist session", async
   // Session survives a reload via the httpOnly refresh cookie
   await page.reload();
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
-  await page.goto("/");
+  await page.goto("app");
   await expect(page.getByText("Virtual deposit").first()).toBeVisible();
 
   // Active sessions are listed, with this one marked
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("app/settings/security");
   await expect(page.getByTestId("sessions")).toContainText("This session");
 
   // Analytics is available from day one (with honest "not enough history" states)
   await page.getByRole("link", { name: /Analytics/ }).click();
   await expect(page.getByTestId("perf-metrics")).toBeVisible();
 
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByTestId("user-menu").click(); await page.getByRole("menuitem", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);
-  await page.goto("/wallet");
+  await page.goto("app/wallet");
   await expect(page).toHaveURL(/\/login$/);
 });
 
@@ -67,8 +67,9 @@ test("admin can verify the audit chain", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: "Administration" }).click();
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/admin$/);                    // administrators land in the admin console
+  await page.getByRole("link", { name: "Users & audit" }).click();
   await page.getByRole("button", { name: "Verify chain" }).click();
   await expect(page.getByText(/Chain intact — \d+ records verified/)).toBeVisible();
   const download = page.waitForEvent("download");
@@ -76,7 +77,7 @@ test("admin can verify the audit chain", async ({ page }) => {
   expect((await download).suggestedFilename()).toMatch(/^aurex-audit-\d{8}T\d{6}Z\.jsonl$/);
 
   // Operations: readiness, integrity check, go-live gates and an attestation
-  await page.getByRole("link", { name: "Operations" }).click();
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(page.getByTestId("ops-ready")).toContainText("Live trading disabled");
   await page.getByRole("button", { name: "Run integrity check" }).click();
   await expect(page.getByTestId("integrity-result")).toContainText("audit_chain");
@@ -96,7 +97,7 @@ test("non-admin users do not see administration", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Plain User" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await page.goto("/admin");
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
 });
 
 test("markets stream live quotes and render charts", async ({ page }) => {
@@ -109,7 +110,7 @@ test("markets stream live quotes and render charts", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Market User" })).toBeVisible();
   await expect(page.getByText("Watchlist").first()).toBeVisible();
 
-  await page.getByRole("link", { name: "Markets", exact: true }).click();
+  await page.getByRole("link", { name: "Trade", exact: true }).click();
   await expect(page.getByText("Streaming")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("price-chart").locator("canvas").first()).toBeVisible();
   await page.getByRole("tab", { name: "ETFs" }).click();
@@ -124,14 +125,16 @@ test("research lab: corpus, grounded report with citations", async ({ page }) =>
   await page.goto("/login");
   await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: "AI Research Lab" }).click();
-  await page.getByRole("tab", { name: "Corpus" }).click();
+  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByRole("link", { name: "Research library" }).click();
   await page.getByRole("button", { name: "Load sample corpus" }).click();
   await expect(page.getByText(/\d+ indexed/)).toBeVisible();
   await expect(page.getByText("Fictional sample").first()).toBeVisible();
+  await page.getByRole("button", { name: "Log out" }).click();
 
-  await page.getByRole("tab", { name: "Research" }).click();
+  // a trader asks questions against the library
+  await signUp(page, "Research User", `e2e-r-${Date.now()}@example.com`);
+  await page.getByRole("link", { name: "Research", exact: true }).click();
   await page.getByLabel("Research question").fill("What did the central bank decide on the policy rate?");
   await page.getByRole("button", { name: "Research", exact: true }).click();
   await expect(page.getByText("Verified facts")).toBeVisible();
@@ -157,7 +160,7 @@ test("agent desk: run analysis, explained decision, evidence", async ({ page }) 
   await page.locator("dialog").getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("link", { name: "Main paper account" })).toBeVisible();
 
-  await page.getByRole("link", { name: "AI Trading" }).click();
+  await page.getByRole("link", { name: "AI Desk" }).click();
   await page.getByLabel("Instrument").selectOption("ETH-USD");
   await page.getByRole("button", { name: "Run analysis" }).click();
   const decision = page.getByTestId("decision");
@@ -171,8 +174,6 @@ test("agent desk: run analysis, explained decision, evidence", async ({ page }) 
   await page.getByTestId("agent-technical").getByRole("button", { name: /Evidence/ }).click();
   await expect(page.getByText("RSI(14)")).toBeVisible();
   await expect(page.getByText(/ETH-USD · (BUY|No trade)/)).toBeVisible();
-  await page.getByRole("tab", { name: "Agents" }).click();
-  await expect(page.getByText("Risk Agent")).toBeVisible();
 });
 
 test("model lab: train, gated promotion, drift check", async ({ page }) => {
@@ -180,7 +181,7 @@ test("model lab: train, gated promotion, drift check", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
   await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Log in" }).click();
   await page.getByRole("link", { name: "Model Lab" }).click();
   await expect(page.getByText("Train a candidate")).toBeVisible();
   await page.getByLabel("Instrument").selectOption("BTC-USD");
@@ -204,7 +205,7 @@ test("backtesting: optimise in-sample, evaluate out-of-sample", async ({ page })
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Backtester" })).toBeVisible();
-  await page.getByRole("link", { name: "Backtesting" }).click();
+  await page.goto("app/backtests");
   await expect(page.getByText("Configure backtest")).toBeVisible();
   await page.getByLabel("Strategy").selectOption("sma_crossover");
   await page.getByLabel("Instrument").selectOption("ETH-USD");
@@ -237,7 +238,7 @@ test("paper execution: market buy, limit order, cancel, close position, history"
 
 // Shared with the static demo spec (kept in sync manually: Playwright specs don't share imports here).
 async function tradeFlow(page: import("@playwright/test").Page) {
-  await page.goto("markets?symbol=BTC-USD");
+  await page.goto("app/trade?symbol=BTC-USD");
   await page.getByRole("button", { name: "Buy", exact: true }).click();
   const dialog = page.locator("dialog");
   await expect(dialog.getByText("Tradable")).toBeVisible();
@@ -262,7 +263,7 @@ async function tradeFlow(page: import("@playwright/test").Page) {
   await expect(page.getByRole("cell", { name: /^BTC-USD/ })).toBeVisible();
   await expect(page.getByText("1 of 5 positions")).toBeVisible();
 
-  await page.getByRole("link", { name: "Trade History", exact: true }).click();
+  await page.goto("app/history");
   await page.getByRole("button", { name: "Cancel order BTC-USD" }).click();
   await expect(page.getByRole("button", { name: "Cancel order BTC-USD" })).toHaveCount(0);
   await page.getByRole("button", { name: "Rejected", exact: true }).click();
@@ -278,7 +279,7 @@ async function tradeFlow(page: import("@playwright/test").Page) {
   await expect(page.getByText("No open positions")).toBeVisible();
   await expect(page.getByText("Closed positions")).toBeVisible();
 
-  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await page.goto("app/wallet");
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
   await expect(page.getByText("Trade · sell")).toBeVisible();
   await expect(page.getByText(/^Sell 0.05 BTC-USD @/)).toBeVisible();
@@ -302,14 +303,14 @@ test("risk engine: limits, rejection with checks, brackets, kill switch, autopil
 
 // Shared with the static demo spec (kept in sync manually).
 async function riskFlow(page: import("@playwright/test").Page) {
-  await page.goto("risk");
+  await page.goto("app/risk");
   await expect(page.getByTestId("risk-status")).toContainText("Trading allowed");
   await page.getByLabel("Max position size").fill("2");
   await page.getByRole("button", { name: "Save limits" }).click();
   await expect(page.getByText("Saved")).toBeVisible();
 
   // The gate refuses an oversized order and shows every check
-  await page.goto("markets?symbol=BTC-USD");
+  await page.goto("app/trade?symbol=BTC-USD");
   await page.getByRole("button", { name: "Buy", exact: true }).click();
   const dialog = page.locator("dialog");
   await dialog.getByLabel("Quantity").fill("0.05");
@@ -328,7 +329,7 @@ async function riskFlow(page: import("@playwright/test").Page) {
   await dialog.getByRole("button", { name: "Close dialog" }).click();
 
   // Decisions log, kill switch
-  await page.getByRole("link", { name: "Risk Centre" }).click();
+  await page.goto("app/risk");
   await page.getByLabel("Decision filter").selectOption("false");
   await expect(page.getByRole("cell", { name: /position would be/ })).toBeVisible();
   await page.getByLabel("Kill switch reason").fill("e2e drill");
@@ -354,7 +355,7 @@ async function riskFlow(page: import("@playwright/test").Page) {
 
 // Shared with the static demo spec (kept in sync manually). Expects tradeFlow to have run first.
 async function analyticsFlow(page: import("@playwright/test").Page) {
-  await page.goto("analytics?period=all");
+  await page.goto("app/analytics?period=all");
   await expect(page.getByTestId("perf-metrics")).toContainText("Return (TWR)");
   await expect(page.getByText(/need at least 20/)).toBeVisible();
   await page.getByRole("tab", { name: "Trades" }).click();
@@ -393,7 +394,7 @@ test("£100 account and paper binary options: disclosure, risk gate, open contra
 
 // Shared with the static demo spec (kept in sync manually).
 async function binaryFlow(page: import("@playwright/test").Page, account?: string) {
-  await page.getByRole("link", { name: "Binary Options", exact: true }).click();
+  await page.goto("app/binary");
   if (account) await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
   await expect(page.getByRole("note", { name: "Binary options warning" })).toContainText("banned for retail customers in the UK");
   await expect(page.getByTestId("binary-maths")).toContainText("55.6%");
@@ -413,10 +414,10 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await expect(page.getByTestId("binary-stats")).toContainText("£1.00");          // at risk now
   // Switch binaries off in the Risk Centre; new contracts are then refused
   const acct = new URL(page.url()).searchParams.get("account");
-  await page.goto(`risk?account=${acct}`);
+  await page.goto(`app/risk?account=${acct}`);
   await page.getByLabel("Allow binary options").click();
   await expect(page.getByLabel("Allow binary options")).not.toBeChecked();
-  await page.goto(`binary?account=${acct}`);
+  await page.goto(`app/binary?account=${acct}`);
   await page.getByRole("button", { name: "Open Higher contract" }).click();
   await expect(page.getByText(/binary trading is switched off/).first()).toBeVisible();
   // The one-button AI bot: it refuses to run while binaries are switched off, and says why
@@ -424,7 +425,7 @@ async function binaryFlow(page: import("@playwright/test").Page, account?: strin
   await page.getByRole("button", { name: "Start AI bot" }).click();
   await expect(page.getByTestId("bot-status")).toHaveText("PAUSED");
   await expect(page.getByTestId("bot-paused-reason")).toContainText("switched off");
-  await page.getByRole("link", { name: "Wallet", exact: true }).click();
+  await page.goto("app/wallet");
   await expect(page.getByText("Ledger balanced (debits = credits)")).toBeVisible();
 }
 
@@ -439,8 +440,43 @@ test("two-factor authentication: enrol, then sign in with a code", async ({ page
   await mfaFlow(page, PASSWORD, async () => {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Log in" }).click();
   });
+});
+
+async function signUp(page: import("@playwright/test").Page, name: string, email: string) {
+  await page.goto("/register");
+  await page.getByLabel("Full name").fill(name);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+}
+
+test("admin console: separate from trading, site on hold", async ({ page, browser }) => {
+  test.skip(!process.env.AUREX_E2E_ADMIN_EMAIL, "needs an admin");
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(process.env.AUREX_E2E_ADMIN_EMAIL!);
+  await page.getByLabel("Password").fill(process.env.AUREX_E2E_ADMIN_PASSWORD!);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.goto("/app");                                     // administrators do not trade
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.getByRole("link", { name: "Trading controls" }).click();
+  await page.getByLabel("Message for traders (optional)").fill("e2e maintenance");
+  await page.getByRole("button", { name: "Put the site on hold" }).click();
+  await expect(page.getByText(/The site is on hold/)).toBeVisible();
+  const trader = await browser.newPage();
+  try {
+    await trader.goto("/");
+    await expect(trader.getByRole("status")).toContainText("e2e maintenance");
+    await trader.goto("/login");                              // the notice is on every public page, including sign-in
+    await expect(trader.getByRole("status")).toContainText("e2e maintenance");
+  } finally {
+    await page.getByRole("button", { name: "Bring the site back online" }).click();
+    await expect(page.getByRole("button", { name: "Put the site on hold" })).toBeVisible();
+    await trader.close();
+  }
 });
 
 // RFC 6238 code for a base32 secret (used to act as the user's authenticator app).
@@ -458,7 +494,7 @@ function totpCode(secret: string, step = Math.floor(Date.now() / 30_000)): strin
 
 // Shared with the other spec (kept in sync manually). Enrols, signs out, signs back in with a code.
 async function mfaFlow(page: import("@playwright/test").Page, password: string, signIn: () => Promise<void>) {
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("app/settings/security");
   const card = page.getByTestId("two-factor");
   await card.getByRole("button", { name: "Set up two-factor authentication" }).click();
   await card.getByLabel("Confirm your password").fill(password);
@@ -469,7 +505,7 @@ async function mfaFlow(page: import("@playwright/test").Page, password: string, 
   await expect(card.getByTestId("recovery-codes")).toContainText("will not be shown again");
   await card.getByRole("button", { name: "I have saved them" }).click();
   await expect(card.getByText("On", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByTestId("user-menu").click(); await page.getByRole("menuitem", { name: "Log out" }).click();
   await signIn();
   await expect(page.getByRole("heading", { name: "Two-factor authentication" })).toBeVisible();
   await page.getByLabel("Authentication code").fill("000000");
@@ -478,5 +514,5 @@ async function mfaFlow(page: import("@playwright/test").Page, password: string, 
   // the enrolment code's time step is spent (no replay): use the next one, within the drift window
   await page.getByLabel("Authentication code").fill(totpCode(secret, Math.floor(Date.now() / 30_000) + 1));
   await page.getByRole("button", { name: "Verify" }).click();
-  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
 }

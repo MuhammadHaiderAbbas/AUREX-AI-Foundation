@@ -68,6 +68,7 @@ async def one_pass() -> dict:
     """A single leader pass. Separated from the loop so it can be tested directly."""
     from app.binary.bot import due_bots, run_bot_cycle
     from app.binary.service import BinaryService
+    from app.ops import maintenance
     from app.risk.autopilot import due_accounts, run_cycle
     from app.risk.service import RiskService
     from app.trading.service import TradingService
@@ -81,14 +82,17 @@ async def one_pass() -> dict:
         binaries = await BinaryService(db).settle_due()
         await db.commit()
     async with SessionLocal() as db:
-        for acct, bot in await due_bots(db):
-            await run_bot_cycle(db, acct, bot)
-        await db.commit()
-    async with SessionLocal() as db:
-        for acct in await due_accounts(db, s.autopilot_interval_seconds):
-            prof = await RiskService(db).profile(acct.id, lock=True)
-            await run_cycle(db, acct, prof)
+        on_hold = (await maintenance.state(db, fresh=True))["enabled"]     # site on hold: AI bots and autopilot pause
+    if not on_hold:
+        async with SessionLocal() as db:
+            for acct, bot in await due_bots(db):
+                await run_bot_cycle(db, acct, bot)
             await db.commit()
+        async with SessionLocal() as db:
+            for acct in await due_accounts(db, s.autopilot_interval_seconds):
+                prof = await RiskService(db).profile(acct.id, lock=True)
+                await run_cycle(db, acct, prof)
+                await db.commit()
     anchored = False
     if anchoring.sinks_configured():
         async with SessionLocal() as db:
@@ -97,7 +101,7 @@ async def one_pass() -> dict:
                 await anchoring.anchor_now(db)
                 await db.commit()
                 anchored = True
-    return {"matcher": stats, "binary": binaries, "anchored": anchored}
+    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold}
 
 
 async def heartbeat(error: str | None = None) -> None:

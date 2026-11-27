@@ -5,7 +5,7 @@ Autonomous multi-market research and **paper-trading** platform covering crypto,
 > **Stage 1: virtual capital only.** No real money is moved, no broker is connected,
 > and live trading is disabled in both the code and the database.
 
-**Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/ (click **Launch demo**).
+**Live demo:** https://muhammadhaiderabbas.github.io/AUREX-AI-Foundation/: a public website with live prices; **Log in → Launch demo** opens the trading app with £100, and **Explore the admin console** opens the separate admin area.
 **Your own server (real stocks too):** [docs/operations/own-server.md](docs/operations/own-server.md). **Free:** [docs/operations/free-setup.md](docs/operations/free-setup.md) (your computer, or Oracle Always Free).
 **Launch plan:** [docs/operations/launch-plan.md](docs/operations/launch-plan.md) — private, public and real-money launches.
 **Video walkthrough:** see [docs/video/walkthrough.md](docs/video/walkthrough.md) for the scene-by-scene

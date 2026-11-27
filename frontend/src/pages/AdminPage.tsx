@@ -12,7 +12,7 @@ import { useSystemHalt, useSystemHaltControl } from "@/features/risk/hooks";
 import { formatDateTime } from "@/lib/utils";
 import { api, apiDownload, type AuditLog, type Page, type User } from "@/services/api";
 
-function Users() {
+export function Users() {
   const { user: me } = useAuth();
   const qc = useQueryClient();
   const users = useQuery({ queryKey: ["admin-users"], queryFn: () => api<Page<User>>("/admin/users?limit=200") });
@@ -56,7 +56,7 @@ function Users() {
   );
 }
 
-function Audit() {
+export function Audit() {
   const [action, setAction] = useState("");
   const [exportErr, setExportErr] = useState<unknown>(null);
   const audit = useQuery({
@@ -105,7 +105,7 @@ function Audit() {
   );
 }
 
-function TradingHalt() {
+export function TradingHalt() {
   const halt = useSystemHalt();
   const control = useSystemHaltControl();
   const [reason, setReason] = useState("");
@@ -129,5 +129,5 @@ function TradingHalt() {
 }
 
 export function AdminPage() {
-  return <div className="space-y-6"><TradingHalt /><Users /><Audit /></div>;
+  return <div className="space-y-6"><Users /><Audit /></div>;
 }

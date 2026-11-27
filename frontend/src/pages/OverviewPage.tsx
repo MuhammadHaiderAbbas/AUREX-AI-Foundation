@@ -1,4 +1,5 @@
 import { Activity, Bot, CandlestickChart, Briefcase, CircleDollarSign, Landmark, Plus, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
+import { app } from "@/lib/paths";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -90,11 +91,11 @@ export function OverviewPage() {
           value={primary ? formatMoney(primary.cash, primary.ccy) : "—"} sub="Virtual capital" />
         <Stat label="Total P&L" icon={<TrendingUp />} value={pf ? `${pnl > 0 ? "+" : ""}${formatMoney(pnl, pf.currency)}` : "—"}
           tone={pnl > 0 ? "positive" : pnl < 0 ? "negative" : "muted"} sub={pf ? `Realised + unrealised · ${pf.account_name}` : "No trades executed"} />
-        <Stat label="Open positions" icon={<Briefcase />} value={<Link to="/portfolio" className="hover:text-accent">{pf?.open_positions ?? 0}</Link>}
+        <Stat label="Open positions" icon={<Briefcase />} value={<Link to={app("/portfolio")} className="hover:text-accent">{pf?.open_positions ?? 0}</Link>}
           tone={pf?.open_positions ? undefined : "muted"} sub={pf ? `Exposure ${(pf.exposure * 100).toFixed(1)}%` : "Paper execution"} />
         <Stat label="Drawdown" icon={<ShieldAlert />} value={risk ? `${risk.metrics.drawdown_pct.toFixed(2)}%` : "—"}
           tone={risk?.state.blocked_reason ? "negative" : "muted"}
-          sub={risk ? (risk.state.blocked_reason ? <Link to={`/risk?account=${risk.account_id}`} className="text-negative hover:underline" title={risk.state.blocked_reason}>Blocked: {risk.state.blocked_reason}</Link> : `Limit ${risk.limits.max_drawdown_pct}% · risk gate on`) : "Risk engine"} />
+          sub={risk ? (risk.state.blocked_reason ? <Link to={app(`/risk?account=${risk.account_id}`)} className="text-negative hover:underline" title={risk.state.blocked_reason}>Blocked: {risk.state.blocked_reason}</Link> : `Limit ${risk.limits.max_drawdown_pct}% · risk gate on`) : "Risk engine"} />
         <Stat label="AI agents" icon={<Bot />} className="col-span-2 md:col-span-1" value={<span className="flex items-center gap-2 text-base"><StatusDot tone={risk?.autopilot.status === "RUNNING" ? "positive" : "accent"} /> {risk?.autopilot.status === "RUNNING" ? "Autopilot on" : "Advisory"}</span>}
           sub={risk?.autopilot.status === "RUNNING" ? `${risk.autopilot.symbols.join(", ")} · via risk gate` : "Proposals go through the risk gate"} />
       </div>
@@ -103,9 +104,9 @@ export function OverviewPage() {
         <Card>
           <CardHeader title={`Live equity · ${pf.account_name}`}
             description={pf.open_positions === 0 && !Number(pf.binary_at_risk ?? 0)
-              ? `${formatMoney(pf.equity, pf.currency)} in cash. With no open positions equity cannot move: buy on Markets or open a binary contract to see it tick.`
+              ? `${formatMoney(pf.equity, pf.currency)} in cash. With no open positions equity cannot move: buy on Trade or open a binary contract to see it tick.`
               : `${formatMoney(pf.equity, pf.currency)} marked to market on live prices, updated every 2 seconds`}
-            action={<Link to={`/portfolio?account=${pf.account_id}`} className="text-xs text-accent hover:underline">Portfolio</Link>} />
+            action={<Link to={app(`/portfolio?account=${pf.account_id}`)} className="text-xs text-accent hover:underline">Portfolio</Link>} />
           <div className="px-2 pb-3"><PortfolioChart snapshots={history.data ?? []} live={liveEquity} height={180} /></div>
         </Card>
       )}
@@ -113,7 +114,7 @@ export function OverviewPage() {
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <Card>
           <CardHeader title="Paper accounts" description="Balances derived from the double-entry ledger"
-            action={<Link to="/wallet" className="text-xs text-accent hover:underline">Open wallet</Link>} />
+            action={<Link to={app("/wallet")} className="text-xs text-accent hover:underline">Open wallet</Link>} />
           {accounts.isLoading ? (
             <div className="p-8"><Spinner className="mx-auto" /></div>
           ) : list.length === 0 ? (
@@ -127,7 +128,7 @@ export function OverviewPage() {
               <tbody>
                 {list.map((a) => (
                   <Tr key={a.id}>
-                    <Td><Link to={`/wallet?account=${a.id}`} className="font-medium hover:text-accent">{a.name}</Link>
+                    <Td><Link to={app(`/wallet?account=${a.id}`)} className="font-medium hover:text-accent">{a.name}</Link>
                       <div className="text-[11px] text-subtle">{a.base_currency}</div></Td>
                     <Td><Badge tone="accent">{a.mode}</Badge></Td>
                     <Td className="num text-right">{formatMoney(a.cash_balance, a.base_currency)}</Td>
@@ -193,7 +194,7 @@ function MarketSnapshot() {
   return (
     <Card>
       <CardHeader title="Watchlist" description="Live quotes from the market-data service"
-        action={<Link to="/markets" className="text-xs text-accent hover:underline">Open markets</Link>} />
+        action={<Link to={app("/trade")} className="text-xs text-accent hover:underline">Open markets</Link>} />
       {wl.isLoading ? <div className="p-8"><Spinner className="mx-auto" /></div> : items.length === 0 ? (
         <EmptyState icon={<CandlestickChart />} title="Your watchlist is empty" />
       ) : (
@@ -201,7 +202,7 @@ function MarketSnapshot() {
           {items.slice(0, 8).map((i) => {
             const q = quotes[i.instrument.symbol] ?? i.quote;
             return (
-              <Link key={i.instrument.symbol} to={`/markets?symbol=${i.instrument.slug}`} className="border-b border-border/60 p-4 hover:bg-surface-2">
+              <Link key={i.instrument.symbol} to={app(`/trade?symbol=${i.instrument.slug}`)} className="border-b border-border/60 p-4 hover:bg-surface-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{i.instrument.symbol}</span>
                   <QuoteState q={q} />

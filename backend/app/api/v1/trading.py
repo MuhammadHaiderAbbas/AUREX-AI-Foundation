@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user, get_audit_context, require_admin
+from app.api.deps import current_trader, get_audit_context, require_admin
 from app.core.errors import NotFound, RateLimited
 from app.core.rate_limit import SlidingWindowLimiter
 from app.database.session import get_db
@@ -51,7 +51,7 @@ async def _detail(db: AsyncSession, o: Order) -> OrderDetail:
 
 
 @router.post("/trading/orders", response_model=OrderDetail, status_code=status.HTTP_201_CREATED)
-async def place_order(data: OrderCreate, response: Response, user: User = Depends(current_user),
+async def place_order(data: OrderCreate, response: Response, user: User = Depends(current_trader),
                       ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Submit a paper order. Business rejections are persisted (status REJECTED) for the audit trail."""
     if not await order_limiter.hit(str(user.id), ORDERS_PER_MINUTE, 60):
@@ -75,7 +75,7 @@ async def place_order(data: OrderCreate, response: Response, user: User = Depend
 @router.get("/trading/orders", response_model=Page[OrderRead])
 async def list_orders(account_id: uuid.UUID | None = None, status_: str | None = Query(None, alias="status"),
                       limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                      user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+                      user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     ids = await _owned_account_ids(db, user, account_id)
     base = select(Order).where(Order.account_id.in_(ids))
     if status_:
@@ -86,7 +86,7 @@ async def list_orders(account_id: uuid.UUID | None = None, status_: str | None =
 
 
 @router.get("/trading/orders/{order_id}", response_model=OrderDetail)
-async def get_order(order_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def get_order(order_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     o = await db.get(Order, order_id)
     if o is None or o.user_id != user.id:
         raise NotFound("Order not found")
@@ -94,7 +94,7 @@ async def get_order(order_id: uuid.UUID, user: User = Depends(current_user), db:
 
 
 @router.post("/trading/orders/{order_id}/cancel", response_model=OrderDetail)
-async def cancel_order(order_id: uuid.UUID, user: User = Depends(current_user),
+async def cancel_order(order_id: uuid.UUID, user: User = Depends(current_trader),
                        ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     o = await TradingService(db).cancel(user, order_id)
     await AuditService(db).record(ctx, "order.cancel", resource_type="order", resource_id=o.id)
@@ -104,7 +104,7 @@ async def cancel_order(order_id: uuid.UUID, user: User = Depends(current_user),
 
 @router.get("/trading/executions", response_model=Page[ExecutionRead])
 async def list_executions(account_id: uuid.UUID | None = None, limit: int = Query(50, ge=1, le=200),
-                          offset: int = Query(0, ge=0), user: User = Depends(current_user),
+                          offset: int = Query(0, ge=0), user: User = Depends(current_trader),
                           db: AsyncSession = Depends(get_db)):
     ids = await _owned_account_ids(db, user, account_id)
     base = select(Execution).where(Execution.account_id.in_(ids))
@@ -114,7 +114,7 @@ async def list_executions(account_id: uuid.UUID | None = None, limit: int = Quer
 
 
 @router.get("/trading/positions/closed", response_model=list[ClosedPositionRead])
-async def closed_positions(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def closed_positions(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     ids = await _owned_account_ids(db, user, account_id)
     rows = await db.scalars(select(Position).where(Position.account_id.in_(ids), Position.status == "CLOSED")
                             .order_by(Position.closed_at.desc()).limit(100))
@@ -130,7 +130,7 @@ async def process_orders(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary)
-async def portfolio_summary(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def portfolio_summary(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     svc = TradingService(db)
     acct = await svc._account(user, account_id)
     out = await svc.summary(acct)
@@ -139,7 +139,7 @@ async def portfolio_summary(account_id: uuid.UUID, user: User = Depends(current_
 
 
 @router.get("/portfolio/history", response_model=list[SnapshotRead])
-async def portfolio_history(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def portfolio_history(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     await _owned_account_ids(db, user, account_id)
     rows = await db.scalars(select(PortfolioSnapshot).where(PortfolioSnapshot.account_id == account_id)
                             .order_by(PortfolioSnapshot.taken_at).limit(2000))

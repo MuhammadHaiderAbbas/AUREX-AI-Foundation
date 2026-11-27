@@ -43,6 +43,11 @@ class RateLimited(AppError):
     code = "rate_limited"
 
 
+class ServiceUnavailable(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+
+
 class BusinessRuleViolation(AppError):
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     code = "business_rule_violation"

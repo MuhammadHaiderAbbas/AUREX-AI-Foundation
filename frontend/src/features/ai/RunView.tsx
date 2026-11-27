@@ -1,4 +1,5 @@
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Ban, CheckCircle2, ChevronDown, Clock, ShieldAlert, XCircle } from "lucide-react";
+import { app } from "@/lib/paths";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -126,7 +127,7 @@ export function ProposalCard({ p }: { p: TradeProposal }) {
         <div className="flex items-start gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
           <ShieldAlert className="mt-0.5 size-4 shrink-0 text-accent" />
           <span data-testid="proposal-gate">
-            {p.effective_status === "EXECUTED" ? <>Approved by the risk gate and executed as a paper market order with a protective stop and take-profit. {p.order_id && <Link className="text-accent hover:underline" to={`/history?account=${p.account_id}&order=${p.order_id}`}>View order</Link>}</>
+            {p.effective_status === "EXECUTED" ? <>Approved by the risk gate and executed as a paper market order with a protective stop and take-profit. {p.order_id && <Link className="text-accent hover:underline" to={app(`/history?account=${p.account_id}&order=${p.order_id}`)}>View order</Link>}</>
               : p.effective_status === "RISK_REJECTED" ? <>Refused by the risk gate: {p.decision_reason}</>
               : <>Agents cannot place orders. Executing sends this proposal to the independent risk engine, which has the final say. {pending && <>Expires {formatDateTime(p.expires_at)}.</>}</>}
           </span>

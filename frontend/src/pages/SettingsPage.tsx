@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Plus, ShieldCheck, UserRound, Wallet } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { Link, Navigate, NavLink, useParams } from "react-router-dom";
+import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
+import { app } from "@/lib/paths";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { useRevokeSession, useSessions } from "@/features/accounts/hooks";
-import { formatDateTime, relativeTime } from "@/lib/utils";
+import { useAccounts, useRevokeSession, useSessions } from "@/features/accounts/hooks";
+import { cn, formatDateTime, relativeTime } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { api, type User, type UserSettings } from "@/services/api";
 
@@ -192,28 +195,98 @@ function Sessions() {
   );
 }
 
-export function SettingsPage() {
+function Profile() {
   const { user } = useAuth();
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <Card className="lg:col-span-2">
-        <CardHeader title="Profile" />
-        <CardBody className="grid gap-4 text-sm sm:grid-cols-3">
-          <div><div className="text-xs text-muted">Name</div>{user?.full_name}</div>
-          <div><div className="text-xs text-muted">Email</div>{user?.email}</div>
-          <div><div className="text-xs text-muted">Role</div><span className="capitalize">{user?.role}</span></div>
-        </CardBody>
-      </Card>
-      <Preferences />
-      <ChangePassword />
-      <TwoFactor />
-      <Sessions />
-      <Card className="lg:col-span-2">
-        <CardHeader title="Brokers & data providers" description="Integrations arrive in Phase 3 (data) and Phase 12 (broker sandboxes)" />
-        <CardBody className="text-sm text-muted">
-          No external connections are configured. Live trading is disabled at both the application and database level during Stage 1.
-        </CardBody>
-      </Card>
+    <Card>
+      <CardHeader title="Profile" description="Your identity on AUREX" />
+      <CardBody className="flex flex-wrap items-center gap-5">
+        <span className="flex size-14 items-center justify-center rounded-full bg-accent/20 text-lg font-semibold text-accent">
+          {(user?.full_name ?? "?").split(/\s+/).map((x) => x[0]).slice(0, 2).join("").toUpperCase()}
+        </span>
+        <dl className="grid flex-1 gap-4 text-sm sm:grid-cols-3">
+          <div><dt className="text-xs text-muted">Name</dt><dd className="mt-0.5 font-medium">{user?.full_name}</dd></div>
+          <div><dt className="text-xs text-muted">Email</dt><dd className="mt-0.5 font-medium">{user?.email}</dd></div>
+          <div><dt className="text-xs text-muted">Member since</dt><dd className="mt-0.5 font-medium">{user?.created_at ? formatDateTime(user.created_at) : "—"}</dd></div>
+        </dl>
+      </CardBody>
+    </Card>
+  );
+}
+
+function Activity() {
+  const activity = useQuery({ queryKey: ["my-activity"], queryFn: () => api<{ id: number; action: string; outcome: string; created_at: string; ip_address: string | null }[]>("/users/me/activity?limit=15") });
+  return (
+    <Card>
+      <CardHeader title="Recent activity" description="Sign-ins and changes on your account" />
+      {activity.isLoading ? <CardBody><Spinner /></CardBody> : (
+        <Table>
+          <thead><tr><Th>When</Th><Th>Action</Th><Th>Result</Th></tr></thead>
+          <tbody>
+            {(activity.data ?? []).map((a) => (
+              <Tr key={a.id}><Td className="whitespace-nowrap text-xs text-muted">{relativeTime(a.created_at)}</Td><Td className="text-sm">{a.action}</Td>
+                <Td><Badge tone={a.outcome === "success" ? "positive" : "negative"}>{a.outcome}</Badge></Td></Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Card>
+  );
+}
+
+function Accounts() {
+  const accounts = useAccounts();
+  const [creating, setCreating] = useState(false);
+  return (
+    <Card>
+      <CardHeader title="Paper accounts" description="Each account has its own balance, positions, limits and AI settings"
+        action={<Button size="sm" onClick={() => setCreating(true)}><Plus />New account</Button>} />
+      {accounts.isLoading ? <CardBody><Spinner /></CardBody> : (
+        <Table>
+          <thead><tr><Th>Name</Th><Th>Currency</Th><Th>Mode</Th><Th>Status</Th><Th /></tr></thead>
+          <tbody>
+            {(accounts.data ?? []).map((a) => (
+              <Tr key={a.id}>
+                <Td className="font-medium">{a.name}</Td><Td>{a.base_currency}</Td><Td><Badge>{a.mode}</Badge></Td>
+                <Td><Badge tone={a.status === "ACTIVE" ? "positive" : "neutral"}>{a.status}</Badge></Td>
+                <Td className="text-right"><Link to={app(`/wallet?account=${a.id}`)} className="text-sm text-accent hover:underline">Wallet</Link></Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+      <CreateAccountDialog open={creating} onClose={() => setCreating(false)} />
+    </Card>
+  );
+}
+
+const SECTIONS = [
+  { key: "profile", label: "Profile", icon: UserRound },
+  { key: "security", label: "Security", icon: ShieldCheck },
+  { key: "accounts", label: "Paper accounts", icon: Wallet },
+] as const;
+
+export function SettingsPage() {
+  const { section = "profile" } = useParams();
+  if (!SECTIONS.some((x) => x.key === section)) return <Navigate to={app("/settings/profile")} replace />;
+  return (
+    <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
+      <aside>
+        <h1 className="mb-4 text-xl font-semibold">Settings</h1>
+        <nav aria-label="Settings" className="flex gap-1 overflow-x-auto lg:flex-col">
+          {SECTIONS.map((x) => (
+            <NavLink key={x.key} to={app(`/settings/${x.key}`)}
+              className={({ isActive }) => cn("flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm", isActive ? "bg-surface-2 text-fg" : "text-muted hover:text-fg")}>
+              <x.icon className="size-4" />{x.label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+      <div className="min-w-0 space-y-6">
+        {section === "profile" && <><Profile /><Preferences /><Activity /></>}
+        {section === "security" && <><ChangePassword /><TwoFactor /><Sessions /></>}
+        {section === "accounts" && <Accounts />}
+      </div>
     </div>
   );
 }

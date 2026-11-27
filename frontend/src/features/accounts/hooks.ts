@@ -10,7 +10,7 @@ import {
 } from "@/services/api";
 
 export const useSystemInfo = () =>
-  useQuery({ queryKey: ["system-info"], queryFn: () => api<SystemInfo>("/system/info"), staleTime: 60_000 });
+  useQuery({ queryKey: ["system-info"], queryFn: () => api<SystemInfo>("/system/info"), staleTime: 15_000, refetchInterval: 30_000 });
 
 export const useAccounts = () =>
   useQuery({ queryKey: ["accounts"], queryFn: () => api<TradingAccount[]>("/accounts") });

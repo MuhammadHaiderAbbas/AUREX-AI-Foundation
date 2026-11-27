@@ -400,3 +400,36 @@ are removed. Migration 0017 moves bots set to 30 seconds to 1 minute and deletes
 **Why.** 30-second moves are mostly noise, so the model has little to learn. They also needed
 about 2 h 20 min of recording before the bot could judge an edge, and they encourage over-trading.
 The product owner asked for 1 minute as the shortest interval.
+
+## ADR-046 Product structure: public website, trading app, separate admin console
+**Decision.** The frontend is split into three areas:
+- **Public website at `/`** (no sign-in): home, live markets, AI trading, security, about, and
+  terms, privacy and risk pages, with Log in and Sign up buttons. Public prices come from
+  CoinGecko, falling back to Coinbase when CoinGecko rate-limits, and from Coinbase exchange
+  rates for forex.
+- **Trading app at `/app`**, in a terminal layout: top navigation, a live ticker tape, a trade
+  screen with watchlist, chart, trade panel and positions/orders, an account menu with
+  Profile/Security/Paper accounts settings, and a phone tab bar.
+- **Admin console at `/admin`** with its own layout: overview (operations), trading controls
+  (kill switch and maintenance), users and audit, Model Lab, agents and the research library.
+
+The design tokens move from navy and yellow to a neutral near-black with a blue accent; green and
+red are reserved for gains, losses and buy/sell.
+
+Separation of duties is enforced on the server, not just hidden in the UI:
+- Trading endpoints (accounts, orders, portfolio, binary, per-account risk and autopilot) use
+  `current_trader`, which refuses administrators (`403 admin_cannot_trade`).
+- Administrators land in `/admin` and are redirected away from `/app`.
+- The demo has a separate administrator account ("Explore the admin console"); "Launch demo"
+  is a normal trader.
+
+**Maintenance mode ("site on hold").** Administrators set it from Trading controls
+(`POST /admin/maintenance`, audited). While it is on:
+- traders get `503 maintenance` on sign-in, refresh and API calls, and see a notice;
+- administrators keep access;
+- the worker pauses AI bots and autopilot, while the order matcher keeps protective stops working.
+
+Old links (`/wallet`, `/markets?...` in the app sense, etc.) redirect into `/app`, and every route
+gets its own `index.html` on GitHub Pages so deep links answer 200.
+**Why.** The product owner asked for a real product front door, a professional trading UI, a
+proper settings area and an admin who manages the platform rather than trading on it.

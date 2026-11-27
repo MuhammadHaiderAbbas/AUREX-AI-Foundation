@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { app } from "@/lib/paths";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -158,7 +159,7 @@ function OrderResult({ o, decimals, onClose, onAgain }: { o: OrderDetail; decima
       )}
       <div className="flex gap-2">
         <Button variant="secondary" className="flex-1" onClick={onAgain}>New order</Button>
-        <Link to={`/history?order=${o.id}`} className="flex-1" onClick={onClose}><Button variant="outline" className="w-full">View in history</Button></Link>
+        <Link to={app(`/history?order=${o.id}`)} className="flex-1" onClick={onClose}><Button variant="outline" className="w-full">View in history</Button></Link>
       </div>
     </div>
   );

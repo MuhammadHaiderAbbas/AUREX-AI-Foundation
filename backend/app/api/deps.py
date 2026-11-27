@@ -60,8 +60,18 @@ async def get_principal(
     return Principal(user=user, session_id=session_id)
 
 
-async def current_user(principal: Principal = Depends(get_principal)) -> User:
+async def current_user(principal: Principal = Depends(get_principal), db: AsyncSession = Depends(get_db)) -> User:
+    from app.ops import maintenance
+    await maintenance.ensure_open(db, principal.user)
     return principal.user
+
+
+async def current_trader(user: User = Depends(current_user)) -> User:
+    """Trading endpoints: administrators manage the platform and do not trade (separation of duties)."""
+    if user.is_admin:
+        raise Forbidden("Administrators manage the platform and cannot trade. Sign in with a trader account to trade.",
+                        code="admin_cannot_trade")
+    return user
 
 
 async def require_admin(user: User = Depends(current_user)) -> User:

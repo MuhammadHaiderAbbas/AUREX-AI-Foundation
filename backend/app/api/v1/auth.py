@@ -56,6 +56,16 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
     )
 
 
+async def _open_for(db: AsyncSession, user) -> None:
+    """During maintenance only administrators may start or refresh a session."""
+    from app.ops import maintenance
+    try:
+        await maintenance.ensure_open(db, user)
+    except Exception:
+        await db.rollback()
+        raise
+
+
 def _token_response(response: Response, tokens: IssuedTokens) -> TokenResponse:
     _set_refresh_cookie(response, tokens.refresh_token)
     return TokenResponse(
@@ -77,6 +87,8 @@ async def login(data: LoginRequest, request: Request, response: Response,
     """Tokens, or — for accounts with two-factor authentication — an MFA challenge to
     complete at /auth/mfa/verify. No session exists until the second factor is verified."""
     result = await AuthService(db).login(data, audit_context(request), request.headers.get("user-agent"))
+    if not isinstance(result, MfaRequired):
+        await _open_for(db, result.user)
     await db.commit()
     if isinstance(result, MfaRequired):
         return MfaChallenge(mfa_token=result.token, expires_in=result.expires_in)
@@ -87,6 +99,7 @@ async def login(data: LoginRequest, request: Request, response: Response,
 async def mfa_verify(data: MfaVerifyRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     tokens = await AuthService(db).mfa_verify(data.mfa_token, data.code, audit_context(request),
                                               request.headers.get("user-agent"))
+    await _open_for(db, tokens.user)
     await db.commit()
     return _token_response(response, tokens)
 
@@ -129,6 +142,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     token = request.cookies.get(get_settings().refresh_cookie_name)
     tokens = await AuthService(db).refresh(token, audit_context(request),
                                            request.headers.get("user-agent"))
+    await _open_for(db, tokens.user)
     await db.commit()
     return _token_response(response, tokens)
 

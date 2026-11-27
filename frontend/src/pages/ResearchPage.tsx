@@ -199,7 +199,7 @@ function AddDocumentDialog({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
-function CorpusTab() {
+export function CorpusTab() {
   const { user } = useAuth();
   const admin = user?.role === "admin";
   const [docType, setDocType] = useState("");
