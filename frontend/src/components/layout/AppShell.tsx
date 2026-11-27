@@ -147,7 +147,8 @@ function TopNav() {
 }
 
 function MobileTabs() {
-  const tabs = [APP_NAV[0]!, APP_NAV[1]!, APP_NAV[2]!, APP_NAV[4]!];
+  const pick = (label: string) => APP_NAV.find((i) => i.label === label)!;
+  const tabs = [pick("Dashboard"), pick("Trade"), pick("Futures"), pick("Portfolio")];
   return (
     <nav aria-label="Mobile" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border bg-surface/95 backdrop-blur lg:hidden print:hidden">
       {tabs.map((t) => (
@@ -156,7 +157,7 @@ function MobileTabs() {
         </NavLink>
       ))}
       <Menu align="right" label={<span className="flex flex-col items-center gap-0.5 text-[11px]"><MoreHorizontal className="size-5" />More</span>}>
-        {(close) => [...APP_NAV.slice(3), ...APP_MORE].filter((i) => i !== APP_NAV[4]).map((i) => <MenuLink key={i.to} item={i} onClick={close} />)}
+        {(close) => [...APP_NAV, ...APP_MORE].filter((i) => !tabs.includes(i)).map((i) => <MenuLink key={i.to} item={i} onClick={close} />)}
       </Menu>
     </nav>
   );

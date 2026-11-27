@@ -1,5 +1,5 @@
 import {
-  BarChart3, Bot, BrainCircuit, CandlestickChart, FlaskConical, History, LayoutDashboard, Library, PieChart, PauseCircle,
+  BarChart3, Bot, Gauge, BrainCircuit, CandlestickChart, FlaskConical, History, LayoutDashboard, Library, PieChart, PauseCircle,
   Server, ShieldAlert, ShieldCheck, SlidersHorizontal, Timer, Users, Wallet, Workflow, type LucideIcon,
 } from "lucide-react";
 import { admin, app } from "@/lib/paths";
@@ -10,6 +10,7 @@ export interface NavItem { to: string; label: string; description: string; icon:
 export const APP_NAV: NavItem[] = [
   { to: app(), end: true, label: "Dashboard", description: "Your accounts, equity and activity", icon: LayoutDashboard },
   { to: app("/trade"), label: "Trade", description: "Charts, order book and orders", icon: CandlestickChart },
+  { to: app("/futures"), label: "Futures", description: "Leveraged crypto perpetuals with a real order book", icon: Gauge },
   { to: app("/ai"), label: "AI Desk", description: "Agent analysis, proposals and autopilot", icon: Bot },
   { to: app("/research"), label: "Research", description: "Ask questions about the research library", icon: BrainCircuit },
   { to: app("/portfolio"), label: "Portfolio", description: "Positions and closed trades", icon: PieChart },

@@ -10,6 +10,7 @@ from app.api.v1 import (
     backtests,
     binary,
     coach,
+    futures,
     markets,
     ml,
     ops,
@@ -22,7 +23,8 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
-MODULES = (system, auth, users, accounts, markets, research, ai, ml, backtests, trading, binary, risk, alerts, coach,
+MODULES = (system, auth, users, accounts, markets, research, ai, ml, backtests, trading, binary, futures, risk, alerts,
+           coach,
            analytics, admin, ops, stream)
 for module in MODULES:
     api_router.include_router(module.router)

@@ -505,6 +505,12 @@ class TradingService:
         if binary_at_risk:
             mv_total += binary_at_risk
             by_class["BINARY"] = binary_at_risk
+        # open futures are carried at margin plus unrealised P&L (never below zero: isolated margin)
+        from app.futures.service import futures_value
+        futures_margin, futures_upnl, futures_val = await futures_value(self.db, self.market, acct)
+        if futures_margin:
+            mv_total += futures_val
+            by_class["FUTURES"] = futures_val
         cash = led.get(LedgerCode.CASH, Decimal(0))
         equity = cash + mv_total
         out = {
@@ -514,7 +520,7 @@ class TradingService:
             "realised_pnl": led.get(LedgerCode.REALISED_PNL, Decimal(0)), "fees": led.get(LedgerCode.FEES, Decimal(0)),
             "exposure": float(mv_total / equity) if equity else 0.0, "open_positions": len(rows),
             "allocation": {k: float(v / equity) if equity else 0.0 for k, v in by_class.items()},
-            "positions": rows, "binary_at_risk": binary_at_risk,
+            "positions": rows, "binary_at_risk": binary_at_risk, "futures_margin": futures_margin, "futures_unrealised_pnl": futures_upnl,
             "available_cash": cash - await self._reserved(acct.id),
         }
         if take_snapshot:

@@ -431,7 +431,7 @@ export interface ClosedPosition { id: string; symbol: string; avg_price: string;
 export interface PortfolioSummary {
   account_id: string; account_name: string; currency: string; cash: string; available_cash: string;
   investments_at_cost: string; market_value: string; equity: string; unrealised_pnl: string; realised_pnl: string;
-  fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[]; binary_at_risk?: string;
+  fees: string; exposure: number; open_positions: number; allocation: Record<string, number>; positions: Position[]; binary_at_risk?: string; futures_margin?: string; futures_unrealised_pnl?: string;
 }
 export interface PortfolioSnapshot { taken_at: string; cash: string; market_value: string; equity: string; reason: string }
 
@@ -561,3 +561,19 @@ export interface BinaryBot {
   stats: { contracts: number; open: number; won: number; lost: number; ties: number; void: number; win_rate: number | null; staked: string; net_pnl: string; return_on_stake: number | null };
   recent: { at: string; type: string; message: string; results: BotCycleResult[] }[];
 }
+
+// --- paper futures (perpetuals, isolated margin) ---------------------------------------------
+type Num = number | string;
+export type FuturesSide = "LONG" | "SHORT";
+export interface FuturesConfig { max_leverage: number; taker_fee: number; maintenance_margin: number; funding_rate_8h: number; funding_interval_hours: number;
+  max_margin_pct: number; max_total_margin_pct: number; max_open: number; minimum_margin: string; next_funding_at: string; notice?: string }
+export interface FuturesBook { symbol: string; source: string; bids: [string, string][]; asks: [string, string][] }
+export interface FuturesPreview { symbol: string; side: FuturesSide; leverage: number; margin: Num; quantity: Num; fx: Num; book_source: string;
+  quote: { bid: Num; ask: Num; tradable: boolean }; avg_price?: Num; slippage_bps?: number; levels?: number; notional?: Num; fee?: Num; liquidation_price?: Num }
+export interface FuturesPosition { id: string; account_id: string; symbol: string; side: FuturesSide; quantity: Num; entry_price: Num; leverage: number; margin: Num;
+  liquidation_price: Num; fees: Num; funding: Num; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: Num | null;
+  realised_pnl: Num | null; source: string; opened_at: string; closed_at: string | null; price_decimals: number; mark_price: Num | null;
+  unrealised_pnl?: Num; roe_pct?: number; distance_to_liquidation_pct?: number; checks?: RiskCheck[] }
+export interface FuturesSignal { symbol: string; trade: boolean; direction: FuturesSide | null; p_up: number | null; confidence: number | null; trades: number;
+  hit_rate: number | null; mean_return: number | null; return_lower: number | null; folds: number; folds_profitable: number; cost_per_trade: number;
+  suggested_leverage: number | null; stop_distance_pct: number | null; horizon_hours: number; reason: string; bars: number; timeframe: string; data_mode?: string }

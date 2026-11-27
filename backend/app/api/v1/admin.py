@@ -99,4 +99,5 @@ async def set_maintenance(data: MaintenanceUpdate, admin: User = Depends(require
     details = {"message": data.message, "until": value["until"]}
     await AuditService(db).record(ctx, action, resource_type="platform", details=details)
     await db.commit()
+    maintenance.clear_cache()      # again after the commit: a request in between may have cached the old state
     return value

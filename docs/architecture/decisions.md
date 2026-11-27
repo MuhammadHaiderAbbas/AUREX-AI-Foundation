@@ -494,3 +494,59 @@ reachable only by link.
 demo). A confidence bound and consistency across time periods stop that. The coach turns the
 platform's numbers into explanations a beginner can follow, and the Claude key never reaches the
 public demo.
+
+## ADR-050 Paper crypto perpetual futures with real order-book liquidity
+**Decision.**
+- **Product.** A new Futures screen (`/app/futures`, in the main menu and the guided tour) for
+  paper LONG/SHORT positions on the crypto markets, with leverage from 1x to 10x
+  (`AUREX_FUTURES_MAX_LEVERAGE`) and **isolated margin**: the most a position can lose is its
+  margin. Paper only; no real orders are ever sent.
+- **Liquidity.** Market orders walk the order book level by level, so a large order gets a worse
+  average price, and an order bigger than the visible depth is refused.
+  - The server uses Coinbase's public level-2 book (`/products/{id}/book?level=2`, top 50 levels,
+    cached for 2 s). The demo reads the same book from the browser.
+  - When that book is unavailable, a synthetic book is built around the quote (40 levels, 2 bps
+    apart, about $25k at the top) and labelled "Synthetic".
+- **Costs and liquidation.**
+  - Taker fee: 0.05% of notional on open and close.
+  - Maintenance margin: 0.5%. The liquidation price is
+    `E ∓ (M − mmr·E·Q)/Q`, which is `E·(1 − 1/L + mmr)` for a long at leverage L.
+  - The worker liquidates a position when the mid price crosses that level; the margin is lost
+    and nothing more.
+  - Funding: every 8 hours (00:00, 08:00 and 16:00 UTC) at 0.01%, with longs paying shorts. It is
+    charged to or credited from the margin, which moves the liquidation price.
+- **Ledger.**
+  - Open: margin INVESTMENTS dr / CASH cr, fee FEES dr / CASH cr.
+  - Close: margin back plus P&L to CASH.
+  - Funding: REALISED_PNL against INVESTMENTS.
+
+  Equity counts margin plus unrealised P&L, so the daily-loss and drawdown breakers see futures
+  too.
+- **Risk.** There are nine pre-trade checks, each recorded as a `RiskDecision` with source
+  `futures`:
+  1. no halt, kill switch or breaker;
+  2. a fresh price;
+  3. minimum margin of 1.00;
+  4. enough cash for margin plus fee;
+  5. ≤ 20% of equity per position;
+  6. ≤ 50% of equity across all futures;
+  7. ≤ 5 open positions;
+  8. a size above the minimum lot;
+  9. enough book depth.
+
+  Requests are idempotent with `client_id`, and administrators cannot trade.
+- **AI futures model.** `GET /futures/signal` gives LONG, SHORT or no trade on a 4-hour horizon.
+  - It uses a logistic regression on 2,000 hourly bars and five-fold purged walk-forward, with
+    non-overlapping out-of-sample trades charged the taker fee twice plus half a day of funding.
+  - It suggests a trade only when:
+    - there are at least 40 such trades;
+    - the 95% lower bound of their mean return after costs is above zero;
+    - at least three quarters of the periods are profitable;
+    - the current call is at least 55% confident.
+  - Its leverage suggestion is sized from volatility, so a 2×ATR move costs at most about 25% of
+    margin (1x to 5x).
+  - The backend and the demo port (`frontend/src/services/demo/futures.ts`) are kept in sync.
+**Why.** The product owner asked for futures trading "with proper liquidity" and a model for it.
+Walking a real book makes fills honest about size. Isolated margin and the caps keep a £100
+account from being wiped out by one position. Like the binary bot, the model is judged after
+costs with a confidence bound, so on most days it says "no trade".

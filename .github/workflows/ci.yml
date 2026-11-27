@@ -74,6 +74,13 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test --trace off
+      - name: API log (on failure)
+        if: failure()
+        run: grep -v "INFO aurex.http\|httpx:" backend/api.log | tail -150
+      - name: Playwright results (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-results, path: frontend/test-results, retention-days: 7 }
 
   ops:
     name: Backup and restore drill
