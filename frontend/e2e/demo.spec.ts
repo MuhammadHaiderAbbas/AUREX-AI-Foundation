@@ -41,7 +41,7 @@ test("static demo: trader tour of the app", async ({ page }) => {
   await expect(page.getByText("Public demo.")).toBeVisible();
   // This tour trades sizes a £100 account cannot afford, so it uses the US$100,000 alternative
   await page.getByRole("button", { name: "Launch demo with US$100,000", exact: true }).click();
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/?$/);
   await expect(page.getByRole("heading", { name: "Demo Trader" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Demo paper account" })).toBeVisible();
   await expect(page.getByText("US$100,000.00").first()).toBeVisible();
@@ -123,7 +123,7 @@ test("static demo: trader tour of the app", async ({ page }) => {
   await page.reload();
   await expect(page.getByTestId("price-chart")).toBeVisible();
   await page.goto("wallet");
-  await expect(page).toHaveURL(/\/app\/wallet$/);
+  await expect(page).toHaveURL(/\/app\/wallet\/?$/);
 
   expect(errors).toEqual([]);
 });
@@ -134,9 +134,9 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("login");
   await page.getByRole("button", { name: "Explore the admin console" }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin\/?$/);
   await page.goto("app");                                       // administrators do not trade
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin\/?$/);
 
   // Overview: readiness, anchoring, integrity
   await expect(page.getByTestId("ops-ready")).toContainText("Live trading disabled");
@@ -194,16 +194,16 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   await page.getByRole("button", { name: "Put the site on hold" }).click();
   await expect(page.getByText(/The site is on hold/)).toBeVisible();
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page).toHaveURL(/\/login$/);                     // wait until the session is really gone
+  await expect(page).toHaveURL(/\/login\/?$/);                     // wait until the session is really gone
   await page.goto("./");
   await expect(page.getByRole("status")).toContainText("Upgrading the AI desk");
   await page.goto("login");
   await page.getByRole("button", { name: "Launch demo", exact: true }).click();
   // traders are locked out: sign-in is refused with the maintenance message (banner + error) and they stay on the login page
   await expect(page.getByText("Upgrading the AI desk")).toHaveCount(2, { timeout: 30_000 });
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\/?$/);
   await page.getByRole("button", { name: "Explore the admin console" }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin\/?$/);
   await page.goto("admin/controls");
   await page.getByRole("button", { name: "Bring the site back online" }).click();
   await expect(page.getByRole("button", { name: "Put the site on hold" })).toBeVisible();
