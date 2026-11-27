@@ -5,14 +5,15 @@ export const useFuturesConfig = () =>
   useQuery({ queryKey: ["futures", "config"], queryFn: () => api<FuturesConfig>("/futures/config"), staleTime: 60_000 });
 
 export const useFuturesBook = (symbol: string) =>
-  useQuery({ queryKey: ["futures", "book", symbol], queryFn: () => api<FuturesBook>(`/futures/book?symbol=${encodeURIComponent(symbol)}&depth=10`), refetchInterval: 2000 });
+  useQuery({ queryKey: ["futures", "book", symbol], queryFn: () => api<FuturesBook>(`/futures/book?symbol=${encodeURIComponent(symbol)}&depth=10`), refetchInterval: 3000 });
 
 export const useFuturesPreview = (v: { account_id?: string; symbol: string; side: FuturesSide; margin: string; leverage: number }) =>
-  useQuery({ queryKey: ["futures", "preview", v], enabled: !!v.account_id && Number(v.margin) > 0, refetchInterval: 3000, retry: false,
+  useQuery({ queryKey: ["futures", "preview", v], enabled: !!v.account_id && Number(v.margin) > 0, refetchInterval: 6000, retry: false,   // also refetches at once when an input changes
     queryFn: () => api<FuturesPreview>(`/futures/preview?${new URLSearchParams({ account_id: v.account_id!, symbol: v.symbol, side: v.side, margin: v.margin, leverage: String(v.leverage) })}`) });
 
 export const useFuturesPositions = (accountId: string | undefined) =>
-  useQuery({ queryKey: ["futures", accountId, "positions"], enabled: !!accountId, refetchInterval: 2000,
+  useQuery({ queryKey: ["futures", accountId, "positions"], enabled: !!accountId,
+    refetchInterval: (q) => (q.state.data?.some((p) => p.status === "OPEN") ? 3000 : 15_000),   // marks move only while something is open
     queryFn: () => api<FuturesPosition[]>(`/futures/positions?account_id=${accountId}`) });
 
 export const useFuturesSignal = (symbol: string, enabled: boolean) =>
@@ -35,7 +36,7 @@ export function useCloseFutures() {
 }
 
 export const useFuturesBot = (accountId: string | undefined) =>
-  useQuery({ queryKey: ["futures", accountId, "bot"], enabled: !!accountId, refetchInterval: 5000,
+  useQuery({ queryKey: ["futures", accountId, "bot"], enabled: !!accountId, refetchInterval: (q) => (q.state.data?.status === "RUNNING" ? 5000 : 15_000),
     queryFn: () => api<FuturesBot>(`/futures/bot?account_id=${accountId}`) });
 
 export function useFuturesBotControl() {
