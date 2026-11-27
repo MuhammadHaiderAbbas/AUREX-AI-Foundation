@@ -105,6 +105,16 @@ test("static demo: paper futures with an order book, liquidation price and the A
   await page.getByRole("button", { name: "Analyse BTC-USD" }).click();
   await expect(page.getByTestId("futures-signal-verdict")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("futures-signal")).toContainText("Out-of-sample trades");
+
+  // the automatic bot: one button; it explains every decision and trades only a validated edge
+  const bot = page.getByTestId("futures-bot");
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Stopped");
+  await bot.getByRole("button", { name: "Start bot" }).click();
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Running", { timeout: 60_000 });
+  await expect(page.getByTestId("futures-bot-log")).toContainText("BTC-USD", { timeout: 60_000 });
+  await expect(page.getByTestId("futures-bot-log")).toContainText(/No trade|Opened|Risk rejected/);
+  await bot.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Stopped");
 });
 
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {

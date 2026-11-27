@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Uuid
+from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, Timestamps, UUIDPk
@@ -54,3 +54,28 @@ class FuturesPosition(UUIDPk, Timestamps, Base):
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_funding_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # set for positions the AI bot opens: its exits (stop-loss and the model's 4-hour horizon) and the signal it acted on
+    stop_price: Mapped[Decimal | None] = mapped_column(PRICE)
+    exit_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_reason: Mapped[str | None] = mapped_column(String(16))
+    signal: Mapped[dict | None] = mapped_column(JSON)
+
+
+class FuturesBot(Timestamps, Base):
+    """The automatic futures bot for a paper account. It trades only when the AI futures model has a validated edge."""
+
+    __tablename__ = "futures_bots"
+    __table_args__ = (
+        CheckConstraint("status IN ('STOPPED','RUNNING','PAUSED')", name="status_valid"),
+        CheckConstraint("margin_pct > 0 AND margin_pct <= 20", name="margin_range"),
+        CheckConstraint("max_leverage BETWEEN 1 AND 10", name="leverage_range"),
+    )
+
+    account_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("trading_accounts.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="STOPPED")
+    symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    margin_pct: Mapped[float] = mapped_column(Float, nullable=False, default=5.0)
+    max_leverage: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_cycle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paused_reason: Mapped[str | None] = mapped_column(Text)

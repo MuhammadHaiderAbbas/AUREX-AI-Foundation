@@ -486,6 +486,15 @@ test("paper futures on the server: live order book, risk gate, open and close", 
   await expect(row).toContainText("LONG 3x");
   await row.getByRole("button", { name: "Close" }).click();
   await expect(page.getByTestId("futures-closed-row").first()).toContainText("Closed", { timeout: 15_000 });
+
+  // the automatic bot on the server: starts, runs the model on every market, explains each decision
+  const bot = page.getByTestId("futures-bot");
+  await bot.getByRole("button", { name: "Start bot" }).click();
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Running", { timeout: 60_000 });
+  await expect(page.getByTestId("futures-bot-log")).toContainText("BTC-USD", { timeout: 60_000 });
+  await expect(page.getByTestId("futures-bot-log")).toContainText(/No trade|Opened|Risk rejected/);
+  await bot.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Stopped");
 });
 
 test("admin console: separate from trading, site on hold", async ({ page, browser }) => {

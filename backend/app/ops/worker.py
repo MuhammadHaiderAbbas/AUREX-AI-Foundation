@@ -69,6 +69,7 @@ async def one_pass() -> dict:
     from app.alerts import check_all as check_alerts
     from app.binary.bot import due_bots, run_bot_cycle
     from app.binary.service import BinaryService
+    from app.futures import bot as fbot
     from app.futures.service import FuturesService
     from app.ops import maintenance
     from app.risk.autopilot import due_accounts, run_cycle
@@ -90,6 +91,7 @@ async def one_pass() -> dict:
         futures_svc = FuturesService(db)
         liquidated = await futures_svc.check_liquidations()
         funded = await futures_svc.apply_funding()
+        bot_exits = await fbot.manage_exits(db)              # stop-losses and time exits: also while on hold (they cut risk)
         await db.commit()
     async with SessionLocal() as db:
         on_hold = (await maintenance.state(db, fresh=True))["enabled"]     # site on hold: AI bots and autopilot pause
@@ -97,6 +99,10 @@ async def one_pass() -> dict:
         async with SessionLocal() as db:
             for acct, bot in await due_bots(db):
                 await run_bot_cycle(db, acct, bot)
+            await db.commit()
+        async with SessionLocal() as db:
+            for acct, fb in await fbot.due_bots(db):
+                await fbot.run_bot_cycle(db, acct, fb)
             await db.commit()
         async with SessionLocal() as db:
             for acct in await due_accounts(db, s.autopilot_interval_seconds):
@@ -111,7 +117,7 @@ async def one_pass() -> dict:
                 await anchoring.anchor_now(db)
                 await db.commit()
                 anchored = True
-    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold, "alerts": alerts_fired, "futures": {"liquidated": liquidated, "funded": funded}}
+    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold, "alerts": alerts_fired, "futures": {"liquidated": liquidated, "funded": funded, "bot_exits": bot_exits}}
 
 
 async def heartbeat(error: str | None = None) -> None:

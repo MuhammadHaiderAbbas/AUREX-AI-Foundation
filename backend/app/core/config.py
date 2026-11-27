@@ -147,6 +147,7 @@ class Settings(BaseSettings):
     futures_max_margin_pct: float = 20.0         # one position's margin, % of equity
     futures_max_total_margin_pct: float = 50.0   # all futures margin, % of equity
     futures_max_open: int = 5
+    futures_bot_interval_seconds: int = 900       # how often the bot asks the model (it trades a 4-hour horizon)
 
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
     order_matcher_interval_seconds: float = 1.0

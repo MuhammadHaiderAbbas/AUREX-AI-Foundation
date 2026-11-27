@@ -550,3 +550,34 @@ public demo.
 Walking a real book makes fills honest about size. Isolated margin and the caps keep a £100
 account from being wiped out by one position. Like the binary bot, the model is judged after
 costs with a confidence bound, so on most days it says "no trade".
+
+## ADR-051 Automatic AI futures bot with stop-loss and time exits
+**Decision.**
+- **Control.** A one-button bot per paper account (`GET/POST /futures/bot`, `POST /futures/bot/run`,
+  table `futures_bots`). Its defaults are BTC and ETH, 5% of equity as margin per trade (up to 20%),
+  and at most 3x leverage (up to 5x in the UI, never above the platform's 10x maximum).
+- **Entries.**
+  - Every 15 minutes (`AUREX_FUTURES_BOT_INTERVAL_SECONDS`) the worker asks the AI futures model
+    (ADR-050) about each market. The model's result is reused for 10 minutes.
+  - The bot opens a position only when the model's validation passes, through the normal
+    `FuturesService.open` path, so all nine risk checks, the order-book walk and the ledger apply.
+  - Side comes from the model. Leverage is the model's volatility-based suggestion, capped by the
+    bot's maximum.
+  - The bot holds at most one position per market.
+- **Exits.** Every bot position gets a stop-loss at the model's 2×ATR distance and a time exit at the
+  model's 4-hour horizon. The worker checks both on every pass, and also while the site is on hold,
+  because exits reduce risk. Liquidation still applies underneath, but with leverage sized to
+  volatility the stop comes first.
+- **Guards.** The bot pauses itself when:
+  - the risk engine blocks trading (halt, kill switch, daily-loss or drawdown breaker);
+  - after 8 closed trades, the optimistic end of the 95% range of its average return on margin is
+    below zero;
+  - after 20 closed trades, its average return on margin is negative.
+
+  The emergency stop and closing the user account stop it.
+- **Transparency.** Every cycle is recorded as a risk event, showing for each market whether the bot
+  opened a trade (with leverage, margin and stop), found no trade (with the model's reason), is
+  holding a position, or was refused by risk. The demo port runs the same logic in the browser.
+**Why.** The product owner asked for a futures AI bot that trades automatically. Fixed exits and
+statistical guards keep an automatic, leveraged strategy from running on when it has no edge, which
+is what went wrong with the first binary bot.

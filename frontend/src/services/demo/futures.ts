@@ -43,6 +43,9 @@ export async function book(symbol: string, live: boolean, bid: number, ask: numb
   return b;
 }
 
+/** The last book fetched for a symbol, for exits that run inside the synchronous price poll. */
+export const cachedBook = (symbol: string) => cache.get(symbol)?.book ?? null;
+
 export function walk(levels: Level[], qty: number): Fill | null {
   if (!levels.length || qty <= 0) return null;
   let left = qty, cost = 0, used = 0, worst = levels[0]![0];

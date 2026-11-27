@@ -14,6 +14,7 @@ from app.models import (
     BinaryBot,
     BinaryContract,
     Execution,
+    FuturesBot,
     Order,
     Position,
     RiskProfile,
@@ -133,6 +134,7 @@ async def close_my_account(data: AccountClose, principal: Principal = Depends(ge
     if ids:
         await db.execute(update(TradingAccount).where(TradingAccount.id.in_(ids)).values(status="CLOSED"))
         await db.execute(update(BinaryBot).where(BinaryBot.account_id.in_(ids)).values(status="STOPPED"))
+        await db.execute(update(FuturesBot).where(FuturesBot.account_id.in_(ids)).values(status="STOPPED"))
         await db.execute(update(RiskProfile).where(RiskProfile.account_id.in_(ids)).values(autopilot_status="STOPPED"))
     await AuditService(db).record(ctx, "user.account.close", resource_type="user", resource_id=user.id,
                                   details={"paper_accounts_closed": len(ids)})

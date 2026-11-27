@@ -7,6 +7,7 @@ import { EmptyState, ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Stat } from "@/components/ui/stat";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { FuturesBotPanel } from "@/features/futures/FuturesBotPanel";
 import { useCloseFutures, useFuturesBook, useFuturesConfig, useFuturesPositions, useFuturesPreview, useFuturesSignal, useOpenFutures } from "@/features/futures/hooks";
 import { useMarketOverview } from "@/features/markets/hooks";
 import { usePortfolio } from "@/features/trading/hooks";
@@ -114,7 +115,8 @@ function PositionRows({ rows, ccy, onClose, closing }: { rows: FuturesPosition[]
           return (
             <Tr key={p.id} data-testid={onClose ? "futures-open-row" : "futures-closed-row"}>
               <Td className="font-medium">{p.symbol}<div className="text-[11px] text-subtle">{formatDateTime(p.opened_at)}</div></Td>
-              <Td><Badge tone={p.side === "LONG" ? "positive" : "negative"}>{p.side} {p.leverage}x</Badge></Td>
+              <Td><Badge tone={p.side === "LONG" ? "positive" : "negative"}>{p.side} {p.leverage}x</Badge>
+                {p.source === "bot" && <div className="mt-1 text-[11px] text-accent" title="Opened by the AI futures bot">AI bot{onClose && p.stop_price != null ? ` · stop ${formatPrice(p.stop_price, p.price_decimals)}` : ""}{onClose && p.exit_due_at ? ` · exits ${formatDateTime(p.exit_due_at)}` : ""}</div>}</Td>
               <Td className="num text-right">{Number(p.quantity).toFixed(6)}</Td>
               <Td className="num text-right">{formatPrice(p.entry_price, p.price_decimals)}</Td>
               <Td className="num text-right">{formatPrice(onClose ? p.mark_price : p.exit_price, p.price_decimals)}</Td>
@@ -125,7 +127,7 @@ function PositionRows({ rows, ccy, onClose, closing }: { rows: FuturesPosition[]
                 {pnl == null ? "—" : formatMoney(pnl, ccy)}{onClose && p.roe_pct != null && <div className="text-[11px]">{p.roe_pct >= 0 ? "+" : ""}{p.roe_pct.toFixed(1)}% ROE</div>}
               </Td>
               <Td>{onClose ? <Button size="sm" variant="secondary" disabled={closing === p.id} onClick={() => onClose(p.id)}>Close</Button>
-                : <Badge tone={STATUS_TONE[p.status]}>{p.status === "LIQUIDATED" ? "Liquidated" : "Closed"}</Badge>}</Td>
+                : <Badge tone={STATUS_TONE[p.status]}>{p.status === "LIQUIDATED" ? "Liquidated" : p.exit_reason === "stop" ? "Stop-loss" : p.exit_reason === "time" ? "Time exit" : "Closed"}</Badge>}</Td>
             </Tr>
           );
         })}
@@ -180,6 +182,7 @@ export function FuturesPage() {
           </Select>)}
       </div>
       <Disclaimer notice={cfg.data?.notice} />
+      {account && <FuturesBotPanel accountId={account.id} currency={ccy} />}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Equity" value={formatMoney(equity, ccy)} sub="including futures margin and open P&L" />

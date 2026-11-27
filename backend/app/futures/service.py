@@ -230,6 +230,10 @@ class FuturesService:
 
     async def close(self, user: User, position_id: uuid.UUID) -> FuturesPosition:
         pos = await self.owned(user, position_id)
+        return await self.close_position(pos, user.id, "manual")
+
+    async def close_position(self, pos: FuturesPosition, actor, reason: str) -> FuturesPosition:
+        """Close at market by walking the book (manual close, or the bot's stop-loss / time exit)."""
         if pos.status != FuturesStatus.OPEN:
             raise BusinessRuleViolation("position is already closed")
         acct = await self.db.get(TradingAccount, pos.account_id)
@@ -239,7 +243,8 @@ class FuturesService:
             raise BusinessRuleViolation("not enough liquidity on the order book to close right now; try again shortly")
         fx = await self._fx(inst, acct)
         fee = (fill.avg_price * pos.quantity * Decimal(str(config()["taker_fee"])) * fx).quantize(CENT)
-        await self._settle(pos, fill.avg_price, FuturesStatus.CLOSED, fee, fx, user.id)
+        pos.exit_reason = reason
+        await self._settle(pos, fill.avg_price, FuturesStatus.CLOSED, fee, fx, actor)
         return pos
 
     async def mark(self, inst: Instrument) -> Decimal | None:
@@ -258,6 +263,7 @@ class FuturesService:
             if m is None:
                 continue
             if (pos.side == "LONG" and m <= pos.liquidation_price) or (pos.side == "SHORT" and m >= pos.liquidation_price):
+                pos.exit_reason = "liquidated"
                 await self._settle(pos, pos.liquidation_price, FuturesStatus.LIQUIDATED, Decimal(0), pos.fx_open, None)
                 n += 1
         return n
@@ -304,7 +310,8 @@ class FuturesService:
         m = await self.mark(inst) if pos.status == FuturesStatus.OPEN else None
         out = {c: getattr(pos, c) for c in ("id", "account_id", "symbol", "side", "quantity", "entry_price", "leverage", "margin",
                                             "liquidation_price", "fees", "funding", "slippage_bps", "book_source", "status",
-                                            "exit_price", "realised_pnl", "source", "opened_at", "closed_at")}
+                                            "exit_price", "realised_pnl", "source", "opened_at", "closed_at",
+                                            "stop_price", "exit_due_at", "exit_reason", "signal")}
         out["price_decimals"] = inst.price_decimals
         out["mark_price"] = m
         if m is not None:

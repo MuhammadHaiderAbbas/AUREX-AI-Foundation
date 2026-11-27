@@ -54,7 +54,8 @@ interface DBinary { id: string; account_id: string; user_id: string; symbol: str
 interface DAlert { id: string; user_id: string; symbol: string; direction: "ABOVE" | "BELOW"; price: string; note: string | null; status: "ACTIVE" | "TRIGGERED" | "CANCELLED"; created_at: string; updated_at: string; triggered_at: string | null; triggered_price: string | null; seen_at: string | null }
 interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
-interface DFutures { id: string; account_id: string; user_id: string; symbol: string; side: "LONG" | "SHORT"; quantity: number; entry_price: number; leverage: number; margin: number; margin_usd: number; fx_open: number; liquidation_price: number; fees: number; funding: number; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: number | null; realised_pnl: number | null; source: string; client_id: string | null; opened_at: string; closed_at: string | null; last_funding_at: string }
+interface DFutures { id: string; account_id: string; user_id: string; symbol: string; side: "LONG" | "SHORT"; quantity: number; entry_price: number; leverage: number; margin: number; margin_usd: number; fx_open: number; liquidation_price: number; fees: number; funding: number; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: number | null; realised_pnl: number | null; source: string; client_id: string | null; opened_at: string; closed_at: string | null; last_funding_at: string; stop_price?: number | null; exit_due_at?: string | null; exit_reason?: string | null; signal?: Record<string, unknown> | null }
+interface DFBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
@@ -77,6 +78,7 @@ interface State {
   maintenance?: { enabled: boolean; message: string | null; until: string | null; since: string | null };
   alerts?: DAlert[];
   futures?: DFutures[];
+  futuresBots?: Record<string, DFBot>;
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -519,6 +521,8 @@ function blockReason(s: State, p: DRisk): string | null {
 function pauseBot(s: State, accountId: string, reason: string) {
   const b = s.binaryBots?.[accountId];
   if (b?.status === "RUNNING") { b.status = "PAUSED"; b.paused_reason = reason; riskEvent(s, accountId, "BINARY_BOT_PAUSED", `Binary bot paused: ${reason}`); }
+  const fb = s.futuresBots?.[accountId];
+  if (fb?.status === "RUNNING") { fb.status = "PAUSED"; fb.paused_reason = reason; riskEvent(s, accountId, "FUTURES_BOT_PAUSED", `Futures bot paused: ${reason}`); }
 }
 function trip(s: State, a: DAccount, p: DRisk, type: string, message: string, detail: Record<string, unknown>) {
   const cancelled = cancelOpen(s, a.id, `risk: ${message}`);
@@ -1161,7 +1165,23 @@ function futuresTick(s: State) {
       f.liquidation_price = fut.liquidationPrice(f.side, f.entry_price, f.quantity, f.margin_usd);
       f.last_funding_at = new Date(due + 8 * 3600e3 * (periods - 1)).toISOString();
     }
+    if (f.source === "bot") {
+      const why = f.exit_due_at && Date.parse(f.exit_due_at) <= nowMs ? "time"
+        : f.stop_price != null && ((f.side === "LONG" && m <= f.stop_price) || (f.side === "SHORT" && m >= f.stop_price)) ? "stop" : null;
+      if (why) {
+        const i = instOf(f.symbol), q = mkt.quote(i), b = fut.cachedBook(f.symbol) ?? fut.syntheticBook(+q.bid, +q.ask);
+        const fl = fut.walk(f.side === "LONG" ? b.bids : b.asks, f.quantity);
+        if (fl) {
+          const a = s.accounts.find((x) => x.id === f.account_id)!, fx = fxRate(i.quote_currency, a.base_currency) ?? f.fx_open;
+          f.exit_reason = why;
+          futSettle(s, f, fl.avg_price, "CLOSED", +(fl.avg_price * f.quantity * fut.CONFIG.taker_fee * fx).toFixed(2), fx, f.user_id);
+          riskEvent(s, f.account_id, "FUTURES_BOT_EXIT", `Futures bot closed ${f.side} ${f.symbol} (${why === "stop" ? "stop-loss" : "time exit"}): P&L ${(f.realised_pnl! >= 0 ? "+" : "")}${f.realised_pnl!.toFixed(2)}`);
+          continue;
+        }
+      }
+    }
     if ((f.side === "LONG" && m <= f.liquidation_price) || (f.side === "SHORT" && m >= f.liquidation_price)) {
+      f.exit_reason = "liquidated";
       futSettle(s, f, f.liquidation_price, "LIQUIDATED", 0, f.fx_open, f.user_id);
       riskEvent(s, f.account_id, "FUTURES_LIQUIDATED", `${f.side} ${f.symbol} ${f.leverage}x was liquidated at ${f.liquidation_price.toFixed(2)}: the margin is lost`);
     }
@@ -1170,7 +1190,7 @@ function futuresTick(s: State) {
 function futRead(s: State, f: DFutures) {
   const i = instOf(f.symbol), a = s.accounts.find((x) => x.id === f.account_id)!;
   const { user_id: _u, client_id: _c, margin_usd: _m, fx_open: _f, last_funding_at: _l, ...rest } = f;
-  const out: Record<string, unknown> = { ...rest, price_decimals: i.price_decimals, mark_price: null };
+  const out: Record<string, unknown> = { stop_price: null, exit_due_at: null, exit_reason: null, signal: null, ...rest, price_decimals: i.price_decimals, mark_price: null };
   if (f.status === "OPEN") {
     const m = futMark(f.symbol);
     if (m != null) {
@@ -1195,41 +1215,17 @@ async function futPreview(a: DAccount, sym: string, side: string, margin: number
     fee: +(fl.avg_price * qty * fut.CONFIG.taker_fee * fx).toFixed(2), liquidation_price: fut.liquidationPrice(side, fl.avg_price, qty, margin / fx) });
   return out;
 }
-const futuresRoutes: [string, RegExp, Handler][] = [
-  ["GET", /^\/futures\/config$/, (c) => { authUser(c); return json(200, { ...fut.CONFIG, next_funding_at: new Date(fut.nextFunding(Date.now())).toISOString(), notice: FUT_NOTICE }); }],
-  ["GET", /^\/futures\/book$/, async (c) => {
-    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD"), d = Math.min(50, Number(c.query.get("depth") ?? 12));
-    const b = await futBook(i);
-    return json(200, { symbol: i.symbol, source: b.source, bids: b.bids.slice(0, d).map(([p, q]) => [String(p), String(q)]), asks: b.asks.slice(0, d).map(([p, q]) => [String(p), String(q)]) });
-  }],
-  ["GET", /^\/futures\/preview$/, async (c) => {
-    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
-    return json(200, await futPreview(a, c.query.get("symbol") ?? "", c.query.get("side") ?? "LONG", Number(c.query.get("margin") ?? 0), Number(c.query.get("leverage") ?? 1)));
-  }],
-  ["GET", /^\/futures\/signal$/, async (c) => {
-    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD");
-    await live.ensureCandles(i.symbol, "1h", fut.SIGNAL_BARS);
-    const bars = hourBars(i, fut.SIGNAL_BARS);
-    return json(200, { ...fut.computeSignal(bars), symbol: i.symbol, bars: bars.length, timeframe: "1h", data_mode: mkt.candleSource(i, "1h", fut.SIGNAL_BARS) });
-  }],
-  ["GET", /^\/futures\/positions$/, (c) => {
-    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? ""); processOpen(c.s); save();
-    const st = c.query.get("status");
-    return json(200, (c.s.futures ?? []).filter((f) => f.account_id === a.id && (!st || (st === "open" ? f.status === "OPEN" : f.status !== "OPEN")))
-      .slice().reverse().slice(0, 100).map((f) => futRead(c.s, f)));
-  }],
-  ["POST", /^\/futures\/positions$/, async (c) => {
-    const { user } = authUser(c); const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
-    const s = c.s; s.futures ??= [];
-    const cid = c.body.client_id == null ? null : String(c.body.client_id);
-    if (cid) { const ex = s.futures.find((f) => f.account_id === a.id && f.client_id === cid); if (ex) return json(200, futRead(s, ex)); }
-    const side = c.body.side, lev = Number(c.body.leverage), mStr = String(c.body.margin ?? "");
+async function openFutures(s: State, user: DUser, a: DAccount, body: Record<string, unknown>, source = "manual") {
+    s.futures ??= [];
+    const cid = body.client_id == null ? null : String(body.client_id);
+    if (cid) { const ex = s.futures.find((f) => f.account_id === a.id && f.client_id === cid); if (ex) return { f: ex, replay: true, checks: [] as risk.Check[] }; }
+    const side = body.side, lev = Number(body.leverage), mStr = String(body.margin ?? "");
     if (side !== "LONG" && side !== "SHORT") throw bad("side must be LONG or SHORT", "side");
     if (!Number.isInteger(lev) || lev < 1 || lev > 20) throw bad("leverage must be an integer from 1 to 20", "leverage");
     if (!/^\d+(\.\d{1,2})?$/.test(mStr) || +mStr <= 0) throw bad("margin must be positive with at most 2 decimals", "margin");
     const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
     if (lev > fut.CONFIG.max_leverage) throw rule(`leverage must be between 1 and ${fut.CONFIG.max_leverage}`);
-    const i = futInst(String(c.body.symbol ?? "")), q = mkt.quote(i), margin = +mStr;
+    const i = futInst(String(body.symbol ?? "")), q = mkt.quote(i), margin = +mStr;
     processOpen(s);
     const p = profile(s, a.id), pf = portfolio(s, a); metrics(s, a, pf);
     const equity = +pf.equity, avail = +pf.available_cash;
@@ -1264,12 +1260,148 @@ const futuresRoutes: [string, RegExp, Handler][] = [
     const t = now();
     const f: DFutures = { id: uuid(), account_id: a.id, user_id: user.id, symbol: i.symbol, side, quantity: pv.quantity, entry_price: pv.avg_price, leverage: lev, margin,
       margin_usd: margin / pv.fx, fx_open: pv.fx, liquidation_price: pv.liquidation_price, fees: fee, funding: 0, slippage_bps: pv.slippage_bps, book_source: pv.book_source,
-      status: "OPEN", exit_price: null, realised_pnl: null, source: "manual", client_id: cid, opened_at: t, closed_at: null, last_funding_at: t };
+      status: "OPEN", exit_price: null, realised_pnl: null, source, client_id: cid, opened_at: t, closed_at: null, last_funding_at: t };
     s.futures.push(f);
     s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, proposal_id: null, source: "futures", symbol: i.symbol, side: dside, approved: true, reason: null, checks, created_at: t });
     snapshot(s, a, "futures");
     await audit(s, user.id, "futures.open", { type: "futures_position", id: f.id, details: { symbol: f.symbol, side, leverage: lev, margin: M, entry: f.entry_price, liquidation: f.liquidation_price } });
-    return json(201, { ...futRead(s, f), checks });
+    return { f, replay: false, checks };
+}
+
+// ---- automatic futures bot (mirror of backend app/futures/bot.py) ---------------------------
+const FBOT_INTERVAL_S = 900, FBOT_EARLY = 8, FBOT_LATE = 20, FSIG_TTL = 600_000;
+const fsigCache = new Map<string, { at: number; sig: Record<string, any> }>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+async function futSignal(sym: string): Promise<Record<string, any>> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const i = futInst(sym), hit = fsigCache.get(i.symbol);
+  if (hit && Date.now() - hit.at < FSIG_TTL) return hit.sig;
+  await live.ensureCandles(i.symbol, "1h", fut.SIGNAL_BARS);
+  const bars = hourBars(i, fut.SIGNAL_BARS);
+  const sig = { ...fut.computeSignal(bars), symbol: i.symbol, bars: bars.length, timeframe: "1h", data_mode: mkt.candleSource(i, "1h", fut.SIGNAL_BARS) };
+  fsigCache.set(i.symbol, { at: Date.now(), sig });
+  return sig;
+}
+function getFBot(s: State, accountId: string): DFBot {
+  s.futuresBots ??= {};
+  return (s.futuresBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: ["BTC-USD", "ETH-USD"], margin_pct: 5, max_leverage: 3, started_at: null, last_cycle_at: null, paused_reason: null });
+}
+function fbotStats(s: State, bot: DFBot) {
+  const rows = (s.futures ?? []).filter((f) => f.account_id === bot.account_id && f.source === "bot" && (!bot.started_at || f.opened_at >= bot.started_at));
+  const closed = rows.filter((f) => f.status !== "OPEN"), rets = closed.map((f) => (f.margin ? (f.realised_pnl ?? 0) / f.margin : -1));
+  const n = rets.length, mean = n ? rets.reduce((a, x) => a + x, 0) / n : null;
+  const sd = n > 1 ? Math.sqrt(rets.reduce((a, x) => a + (x - mean!) ** 2, 0) / (n - 1)) : 0;
+  return { trades: rows.length, open: rows.length - n, closed: n, wins: rets.filter((r) => r > 0).length, losses: rets.filter((r) => r <= 0).length,
+    liquidated: closed.filter((f) => f.status === "LIQUIDATED").length, stopped: closed.filter((f) => f.exit_reason === "stop").length,
+    timed_out: closed.filter((f) => f.exit_reason === "time").length, net_pnl: closed.reduce((t, f) => t + (f.realised_pnl ?? 0), 0),
+    fees: rows.reduce((t, f) => t + f.fees, 0), avg_return_on_margin: mean, return_upper: n > 1 ? mean! + (1.96 * sd) / Math.sqrt(n) : null };
+}
+function fbotPause(s: State, bot: DFBot, reason: string) {
+  if (bot.status === "RUNNING") { bot.status = "PAUSED"; bot.paused_reason = reason; riskEvent(s, bot.account_id, "FUTURES_BOT_PAUSED", `Futures bot paused: ${reason}`); }
+}
+async function fbotCycle(s: State, a: DAccount, bot: DFBot) {
+  const out: Record<string, any> = { at: now(), results: [] as Record<string, unknown>[] }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  bot.last_cycle_at = now();
+  processOpen(s);
+  const block = blockReason(s, profile(s, a.id));
+  if (block) { fbotPause(s, bot, block); out.skipped = block; return out; }
+  const st = fbotStats(s, bot), pc = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+  const guard = st.closed >= FBOT_EARLY && st.return_upper != null && st.return_upper < 0
+    ? `edge guard: ${st.closed} closed trades averaged ${pc(st.avg_return_on_margin!)} on margin; even the optimistic end of the 95% range (${pc(st.return_upper)}) is below zero`
+    : st.closed >= FBOT_LATE && st.avg_return_on_margin! < 0 ? `edge guard: ${st.closed} closed trades averaged ${pc(st.avg_return_on_margin!)} on margin` : null;
+  if (guard) { fbotPause(s, bot, guard); out.skipped = guard; return out; }
+  const user = s.users.find((u) => u.id === a.owner_id)!;
+  for (const sym of bot.symbols) {
+    if ((s.futures ?? []).some((f) => f.account_id === a.id && f.source === "bot" && f.symbol === sym && f.status === "OPEN")) {
+      out.results.push({ symbol: sym, outcome: "holding", detail: "the bot already holds a position here; it exits on its stop or after 4 hours" }); continue;
+    }
+    let sig;
+    try { sig = await futSignal(sym); } catch (e) { out.results.push({ symbol: sym, outcome: "error", detail: e instanceof HttpError ? e.message : String(e) }); continue; }
+    const brief = Object.fromEntries(["direction", "p_up", "confidence", "trades", "hit_rate", "mean_return", "return_lower", "folds", "folds_profitable", "suggested_leverage", "stop_distance_pct"].map((k) => [k, sig[k]]));
+    if (!sig.trade) { out.results.push({ symbol: sym, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
+    const margin = Math.max(Math.floor(+portfolio(s, a).equity * bot.margin_pct) / 100, 1), lev = Math.max(1, Math.min(sig.suggested_leverage ?? 1, bot.max_leverage));
+    try {
+      const { f } = await openFutures(s, user, a, { symbol: sym, side: sig.direction, margin: margin.toFixed(2), leverage: lev, client_id: `bot-${uuid()}` }, "bot");
+      const d = sig.stop_distance_pct / 100;
+      f.stop_price = f.entry_price * (f.side === "LONG" ? 1 - d : 1 + d);
+      f.exit_due_at = new Date(Date.now() + 4 * 3600e3).toISOString();
+      f.signal = { ...brief, reason: sig.reason };
+      out.results.push({ symbol: sym, outcome: "opened", position_id: f.id, side: f.side, leverage: lev, margin: margin.toFixed(2), stop_price: f.stop_price.toFixed(2), detail: sig.reason, signal: brief });
+    } catch (e) { out.results.push({ symbol: sym, outcome: "risk_rejected", detail: e instanceof HttpError ? e.message : String(e), signal: brief }); }
+  }
+  const n = out.results.filter((r: Record<string, unknown>) => r.outcome === "opened").length;
+  riskEvent(s, a.id, "FUTURES_BOT_CYCLE", `Futures bot: ${out.results.length} markets checked, ${n} positions opened`, { results: out.results });
+  return out;
+}
+async function dueFuturesBots(s: State) {
+  for (const bot of Object.values(s.futuresBots ?? {})) {
+    if (bot.status !== "RUNNING" || (bot.last_cycle_at && Date.now() - Date.parse(bot.last_cycle_at) < FBOT_INTERVAL_S * 1000)) continue;
+    const a = s.accounts.find((x) => x.id === bot.account_id);
+    if (a && a.status === "ACTIVE") await fbotCycle(s, a, bot);
+  }
+}
+function fbotRead(s: State, bot: DFBot) {
+  const recent = s.riskEvents.filter((e) => e.account_id === bot.account_id && ["FUTURES_BOT_CYCLE", "FUTURES_BOT_PAUSED", "FUTURES_BOT_CONTROL", "FUTURES_BOT_EXIT"].includes(e.type))
+    .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] }));
+  return { ...bot, interval_seconds: FBOT_INTERVAL_S, horizon_hours: 4, stats: fbotStats(s, bot), recent };
+}
+const futuresBotRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/futures\/bot$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    processOpen(c.s); await dueFuturesBots(c.s); save();
+    return json(200, fbotRead(c.s, getFBot(c.s, a.id)));
+  }],
+  ["POST", /^\/futures\/bot$/, async (c) => {
+    const { user } = authUser(c); const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const bot = getFBot(c.s, a.id), action = String(c.body.action ?? "");
+    if (!["start", "pause", "stop"].includes(action)) throw bad("action must be start, pause or stop", "action");
+    if (Array.isArray(c.body.symbols)) {
+      if (!c.body.symbols.length || c.body.symbols.length > 4) throw bad("choose 1 to 4 markets", "symbols");
+      bot.symbols = [...new Set((c.body.symbols as string[]).map((x) => futInst(String(x)).symbol))];
+    }
+    if (c.body.margin_pct != null) { const v = Number(c.body.margin_pct); if (!(v > 0 && v <= 20)) throw bad("margin_pct must be > 0 and ≤ 20", "margin_pct"); bot.margin_pct = v; }
+    if (c.body.max_leverage != null) { const v = Number(c.body.max_leverage); if (!Number.isInteger(v) || v < 1 || v > 10) throw bad("max_leverage must be 1 to 10", "max_leverage"); bot.max_leverage = v; }
+    const old = bot.status;
+    if (action === "start") { bot.status = "RUNNING"; bot.paused_reason = null; if (old === "STOPPED" || !bot.started_at) bot.started_at = now(); }
+    else { bot.status = action === "pause" ? "PAUSED" : "STOPPED"; bot.paused_reason = action === "pause" ? "paused by you" : null; }
+    riskEvent(c.s, a.id, "FUTURES_BOT_CONTROL", action === "stop" ? "Futures bot stopped" : `Futures bot ${action}ed`, { symbols: bot.symbols });
+    await audit(c.s, user.id, `futures.bot.${action}`, { type: "trading_account", id: a.id, details: { symbols: bot.symbols, margin_pct: bot.margin_pct, max_leverage: bot.max_leverage } });
+    if (action === "start") await fbotCycle(c.s, a, bot);
+    return json(200, fbotRead(c.s, bot));
+  }],
+  ["POST", /^\/futures\/bot\/run$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    const bot = getFBot(c.s, a.id);
+    if (bot.status !== "RUNNING") throw new HttpError(422, "business_rule_violation", "Start the bot first");
+    return json(200, await fbotCycle(c.s, a, bot));
+  }],
+];
+
+const futuresRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/futures\/config$/, (c) => { authUser(c); return json(200, { ...fut.CONFIG, next_funding_at: new Date(fut.nextFunding(Date.now())).toISOString(), notice: FUT_NOTICE }); }],
+  ["GET", /^\/futures\/book$/, async (c) => {
+    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD"), d = Math.min(50, Number(c.query.get("depth") ?? 12));
+    const b = await futBook(i);
+    return json(200, { symbol: i.symbol, source: b.source, bids: b.bids.slice(0, d).map(([p, q]) => [String(p), String(q)]), asks: b.asks.slice(0, d).map(([p, q]) => [String(p), String(q)]) });
+  }],
+  ["GET", /^\/futures\/preview$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    return json(200, await futPreview(a, c.query.get("symbol") ?? "", c.query.get("side") ?? "LONG", Number(c.query.get("margin") ?? 0), Number(c.query.get("leverage") ?? 1)));
+  }],
+  ["GET", /^\/futures\/signal$/, async (c) => {
+    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD");
+    await live.ensureCandles(i.symbol, "1h", fut.SIGNAL_BARS);
+    const bars = hourBars(i, fut.SIGNAL_BARS);
+    return json(200, { ...fut.computeSignal(bars), symbol: i.symbol, bars: bars.length, timeframe: "1h", data_mode: mkt.candleSource(i, "1h", fut.SIGNAL_BARS) });
+  }],
+  ["GET", /^\/futures\/positions$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? ""); processOpen(c.s); save();
+    const st = c.query.get("status");
+    return json(200, (c.s.futures ?? []).filter((f) => f.account_id === a.id && (!st || (st === "open" ? f.status === "OPEN" : f.status !== "OPEN")))
+      .slice().reverse().slice(0, 100).map((f) => futRead(c.s, f)));
+  }],
+  ["POST", /^\/futures\/positions$/, async (c) => {
+    const { user } = authUser(c); const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const { f, replay, checks } = await openFutures(c.s, user, a, c.body);
+    return replay ? json(200, futRead(c.s, f)) : json(201, { ...futRead(c.s, f), checks });
   }],
   ["POST", /^\/futures\/positions\/([\w-]+)\/close$/, async (c) => {
     const { user } = authUser(c);
@@ -1329,6 +1461,7 @@ const tradingRoutes: [string, RegExp, Handler][] = [
     processOpen(c.s);
     await dueAutopilot(c.s, a);
     await dueBots(c.s);
+    await dueFuturesBots(c.s);
     const last = c.s.snapshots.filter((x) => x.account_id === a.id).at(-1);
     if (!last || Date.now() - Date.parse(last.taken_at) > 3600e3) snapshot(c.s, a, "periodic");
     save();
@@ -1427,6 +1560,8 @@ const tradingRoutes: [string, RegExp, Handler][] = [
     p.autopilot_status = "STOPPED";
     const bot = c.s.binaryBots?.[a.id];
     if (bot) { bot.status = "STOPPED"; bot.paused_reason = reason; }
+    const fb = c.s.futuresBots?.[a.id];
+    if (fb) { fb.status = "STOPPED"; fb.paused_reason = reason; }
     if (!p.kill_switch) engageKill(c.s, a, p, reason);
     let cancelled = cancelOpen(c.s, a.id, "emergency stop", (o) => o.side === "BUY" || o.source !== "protective");
     const flattened: Record<string, unknown>[] = [];
@@ -1765,6 +1900,7 @@ const opsRoutes: [string, RegExp, Handler][] = [
 const routes: [string, RegExp, Handler][] = [
   ...tradingRoutes,
   ...binaryRoutes,
+  ...futuresBotRoutes,
   ...futuresRoutes,
   ...opsRoutes,
   ...analyticsRoutes,
@@ -2003,6 +2139,7 @@ const routes: [string, RegExp, Handler][] = [
     for (const a of accts) {
       a.status = "CLOSED";
       const bot = c.s.binaryBots?.[a.id]; if (bot) bot.status = "STOPPED";
+      const fb = c.s.futuresBots?.[a.id]; if (fb) fb.status = "STOPPED";
       const prof = c.s.riskProfiles[a.id] as { autopilot_status?: string } | undefined; if (prof) prof.autopilot_status = "STOPPED";
     }
     await audit(c.s, user.id, "user.account.close", { type: "user", id: user.id, details: { paper_accounts_closed: accts.length } });

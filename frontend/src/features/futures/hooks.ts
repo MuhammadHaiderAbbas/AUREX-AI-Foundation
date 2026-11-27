@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type FuturesBook, type FuturesConfig, type FuturesPosition, type FuturesPreview, type FuturesSide, type FuturesSignal } from "@/services/api";
+import { api, type FuturesBook, type FuturesBot, type FuturesConfig, type FuturesPosition, type FuturesPreview, type FuturesSide, type FuturesSignal } from "@/services/api";
 
 export const useFuturesConfig = () =>
   useQuery({ queryKey: ["futures", "config"], queryFn: () => api<FuturesConfig>("/futures/config"), staleTime: 60_000 });
@@ -32,4 +32,23 @@ export function useOpenFutures() {
 export function useCloseFutures() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api<FuturesPosition>(`/futures/positions/${id}/close`, { method: "POST" }), onSettled: () => invalidate(qc) });
+}
+
+export const useFuturesBot = (accountId: string | undefined) =>
+  useQuery({ queryKey: ["futures", accountId, "bot"], enabled: !!accountId, refetchInterval: 5000,
+    queryFn: () => api<FuturesBot>(`/futures/bot?account_id=${accountId}`) });
+
+export function useFuturesBotControl() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; margin_pct?: number; max_leverage?: number }) =>
+      api<FuturesBot>("/futures/bot", { method: "POST", json: v }),
+    onSuccess: (b) => qc.setQueryData(["futures", b.account_id, "bot"], b),
+    onSettled: () => invalidate(qc),
+  });
+}
+
+export function useFuturesBotRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (accountId: string) => api<unknown>(`/futures/bot/run?account_id=${accountId}`, { method: "POST" }), onSettled: () => invalidate(qc) });
 }
