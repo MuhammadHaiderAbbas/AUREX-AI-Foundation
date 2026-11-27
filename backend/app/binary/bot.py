@@ -31,17 +31,15 @@ from app.binary.service import BinaryRequest, BinaryService, config
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.market.service import MarketService
-from app.market.types import TIMEFRAMES
 from app.ml.features import WARMUP, build_dataset, latest_features
 from app.models import BinaryBot, BinaryContract, BinaryStatus, RiskEvent, TradingAccount, User
 from app.risk.service import RiskService
 
 # expiry seconds -> (bar timeframe, bars ahead)
-EXPIRY_BARS = {30: ("30s", 1), 60: ("1m", 1), 300: ("5m", 1), 900: ("15m", 1), 3600: ("1h", 1), 86400: ("1h", 24)}
+EXPIRY_BARS = {60: ("1m", 1), 300: ("5m", 1), 900: ("15m", 1), 3600: ("1h", 1), 86400: ("1h", 24)}
 DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"]          # real Coinbase prices, 1-minute contracts by default
 HISTORY_BARS = 1000
 MIN_HOLDOUT = 30          # confident out-of-sample predictions needed before trusting the hit rate
-MIN_BARS = 280            # 80 feature warm-up bars + 200 usable
 CENT = Decimal("0.01")
 
 
@@ -98,18 +96,6 @@ def compute_signal(times: list[datetime], high: list[float], low: list[float], c
     return out
 
 
-def latest_unbroken(bars: list, timeframe: str) -> list:
-    """Recorded 30-second bars can have gaps (server restart, dropped connection): features and labels must
-    not span one, so keep only the newest unbroken run. Other timeframes come from the provider as served."""
-    if timeframe != "30s" or not bars:
-        return bars
-    step = TIMEFRAMES[timeframe]
-    i = len(bars) - 1
-    while i > 0 and (bars[i].open_time - bars[i - 1].open_time).total_seconds() <= step * 1.5:
-        i -= 1
-    return bars[i:]
-
-
 def cycle_interval(bot: BinaryBot) -> float:
     """Short contracts need frequent cycles or the bot sits idle between them."""
     return min(get_settings().binary_bot_interval_seconds, max(10.0, bot.expiry_seconds / 3))
@@ -119,15 +105,11 @@ async def signal_for(db: AsyncSession, symbol: str, expiry_seconds: int, bot: Bi
     tf, horizon = EXPIRY_BARS[expiry_seconds]
     svc = MarketService(db)
     inst = await svc.get(symbol)
-    bars = latest_unbroken(await svc.candles(inst, tf, HISTORY_BARS), tf)
+    bars = await svc.candles(inst, tf, HISTORY_BARS)
     cfg = config()
     sig = compute_signal([b.open_time for b in bars], [float(b.high) for b in bars], [float(b.low) for b in bars],
                          [float(b.close) for b in bars], horizon, payout=cfg["payout_rate"],
                          min_confidence=bot.min_confidence if bot else 0.6, edge_margin=bot.edge_margin if bot else 0.02)
-    if tf == "30s" and not sig["trade"] and len(bars) < MIN_BARS:
-        mins = -(-(MIN_BARS - len(bars)) * 30 // 60)
-        sig["reason"] = (f"collecting live 30-second bars: {len(bars)} of {MIN_BARS} recorded "
-                         f"(about {mins} min more; the server records them continuously)")
     return {**sig, "symbol": inst.symbol, "expiry_seconds": expiry_seconds, "timeframe": tf, "bars": len(bars),
             "data_mode": get_settings().market_data_mode}
 

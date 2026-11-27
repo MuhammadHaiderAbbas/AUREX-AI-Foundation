@@ -390,3 +390,13 @@ simulated prices, found three problems that are now fixed:
 **Why.** These only show up against real upstreams. The same run checked all 12 coins and 3
 FX pairs live and tradable, a 30-second contract settling on the live price, an FX market
 order filling, and the bot declining on real 1-minute data with no validated edge.
+
+## ADR-045 Remove the 30-second binary expiry (supersedes the 30-second part of ADR-043)
+**Decision.** The shortest binary expiry is 1 minute again, for manual contracts and the bot. The
+30-second timeframe, the server's 30-second bar recording and the browser's 30-second bar builder
+are removed. Migration 0017 moves bots set to 30 seconds to 1 minute and deletes recorded
+30-second bars. The live Coinbase ticker connection stays, because it supplies server-side quotes
+(ADR-044).
+**Why.** 30-second moves are mostly noise, so the model has little to learn. They also needed
+about 2 h 20 min of recording before the bot could judge an edge, and they encourage over-trading.
+The product owner asked for 1 minute as the shortest interval.

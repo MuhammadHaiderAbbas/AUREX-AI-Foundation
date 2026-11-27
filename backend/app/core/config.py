@@ -130,7 +130,7 @@ class Settings(BaseSettings):
     # Binary options simulator (paper only). A win returns the stake plus payout_rate x stake;
     # a loss forfeits the stake; an exact tie refunds it. Break-even win rate = 1 / (1 + rate).
     binary_payout_rate: float = 0.80
-    binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [30, 60, 300, 900, 3600, 86400])
+    binary_expiries: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [60, 300, 900, 3600, 86400])
     # Contracts whose settlement price cannot be observed this long after expiry are voided (refunded).
     binary_void_after_seconds: int = 600
     # Binary bot: longest gap between cycles for each RUNNING bot (short expiries cycle faster: expiry / 3).

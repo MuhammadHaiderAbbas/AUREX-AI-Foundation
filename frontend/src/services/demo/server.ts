@@ -813,7 +813,7 @@ async function runAnalysis(s: State, user: DUser, symbol: string, accountId: str
 }
 
 // ---- binary options (mirror of backend app/binary) ---------------------------------------
-const BINARY_PAYOUT = 0.8, BINARY_EXPIRIES = [30, 60, 300, 900, 3600, 86400], BINARY_VOID_AFTER_S = 600;
+const BINARY_PAYOUT = 0.8, BINARY_EXPIRIES = [60, 300, 900, 3600, 86400], BINARY_VOID_AFTER_S = 600;
 const BINARY_NOTICE = "Paper simulation only. Binary options are banned for retail customers in the UK (FCA, since April 2019) and restricted across the EU/EEA. The payout is below even money, so a forecaster who is right half the time loses money; you need to win more often than the break-even rate just to stand still.";
 const binaryConfig = () => ({ payout_rate: BINARY_PAYOUT, expiries: BINARY_EXPIRIES, break_even_win_rate: 1 / (1 + BINARY_PAYOUT),
   coin_flip_expected_return: 0.5 * BINARY_PAYOUT - 0.5, minimum_stake: MIN_ORDER_VALUE.toFixed(2), void_after_seconds: BINARY_VOID_AFTER_S });
@@ -940,6 +940,7 @@ function getBot(s: State, accountId: string): DBot {
   const old = s.binaryBots[accountId];
   // Bots saved with the earlier defaults (BTC, ETH, EUR/USD at 5 minutes) move to BTC and ETH at 1 minute while stopped.
   if (old && old.status !== "RUNNING" && old.symbols.join() === "BTC-USD,ETH-USD,EUR/USD") Object.assign(old, { symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 60 });
+  if (old && old.expiry_seconds < 60) old.expiry_seconds = 60;          // the 30-second expiry was removed
   return (s.binaryBots[accountId] ??= { account_id: accountId, status: "STOPPED", symbols: [...BOT_DEFAULT_SYMBOLS], expiry_seconds: 60, stake_pct: 1,
     min_confidence: 0.6, edge_margin: 0.02, guard_min_contracts: 20, started_at: null, last_cycle_at: null, paused_reason: null });
 }
@@ -949,7 +950,6 @@ async function botSignal(symbol: string, expiry: number, bot?: DBot) {
   await live.ensureCandles(inst.symbol, tf, 600);
   const bars = mkt.candles(inst, tf, 600).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
   const sig = bbot.computeSignal(bars, horizon, BINARY_PAYOUT, bot?.min_confidence ?? 0.6, bot?.edge_margin ?? 0.02);
-  if (!sig.trade && tf === "30s" && bars.length < bbot.MIN_BARS) sig.reason = bbot.collectingReason(bars.length, "keep this page open; bars are saved in this browser");
   return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: mkt.candleSource(inst, tf, 600) };
 }
 function botStats(s: State, bot: DBot) {

@@ -34,7 +34,7 @@ Keep the Key ID and Secret Key private.
    `docker compose exec backend python -m app.cli create-admin --email you@example.com --name "Your Name"`
 
 Stop with `docker compose stop`, start again with `docker compose start`. Your data is kept.
-While the computer sleeps, the bot does not run and live 30-second bars are not recorded.
+While the computer sleeps, the bot does not run.
 
 ## B. Oracle Cloud Always Free (24/7)
 
