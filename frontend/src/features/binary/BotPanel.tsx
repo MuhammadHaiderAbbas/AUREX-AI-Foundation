@@ -1,4 +1,5 @@
 import { Bot, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { app } from "@/lib/paths";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,7 @@ const OUTCOME = {
 
 function PauseHelp({ reason, accountId }: { reason: string; accountId: string }) {
   const r = reason.toLowerCase();
-  const risk = <Link to={`/risk?account=${accountId}`} className="underline">Risk Centre</Link>;
+  const risk = <Link to={app(`/risk?account=${accountId}`)} className="underline">Risk Centre</Link>;
   if (r.includes("daily loss")) return <>The daily loss limit protects the account; it resets at 00:00 UTC, or raise it (up to 5%) in the {risk}.</>;
   if (r.includes("drawdown")) return <>Review, then reset the drawdown breaker in the {risk}.</>;
   if (r.includes("kill switch")) return <>Release the kill switch in the {risk}, then resume.</>;

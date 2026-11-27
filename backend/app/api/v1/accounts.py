@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user, get_audit_context
+from app.api.deps import current_trader, get_audit_context
 from app.database.session import get_db
 from app.models import LedgerTransaction, TradingAccount, User
 from app.schemas.accounts import (
@@ -49,14 +49,14 @@ def _txn_read(txn: LedgerTransaction) -> LedgerTransactionRead:
 
 
 @router.get("", response_model=list[TradingAccountRead])
-async def list_accounts(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def list_accounts(user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     return await _with_balances(db, await AccountService(db).list_for_user(user))
 
 
 @router.post("", response_model=TradingAccountRead, status_code=status.HTTP_201_CREATED)
 async def create_paper_account(
     data: PaperAccountCreate,
-    user: User = Depends(current_user),
+    user: User = Depends(current_trader),
     ctx: AuditContext = Depends(get_audit_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -66,14 +66,14 @@ async def create_paper_account(
 
 
 @router.get("/{account_id}", response_model=TradingAccountRead)
-async def get_account(account_id: uuid.UUID, user: User = Depends(current_user),
+async def get_account(account_id: uuid.UUID, user: User = Depends(current_trader),
                       db: AsyncSession = Depends(get_db)):
     account = await AccountService(db).get_owned(user, account_id)
     return (await _with_balances(db, [account]))[0]
 
 
 @router.get("/{account_id}/balances", response_model=AccountBalances)
-async def get_balances(account_id: uuid.UUID, user: User = Depends(current_user),
+async def get_balances(account_id: uuid.UUID, user: User = Depends(current_trader),
                        db: AsyncSession = Depends(get_db)):
     account = await AccountService(db).get_owned(user, account_id)
     lines = (await LedgerService(db).balances([account.id]))[account.id]
@@ -91,7 +91,7 @@ async def get_ledger(
     account_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: User = Depends(current_user),
+    user: User = Depends(current_trader),
     db: AsyncSession = Depends(get_db),
 ):
     account = await AccountService(db).get_owned(user, account_id)
@@ -113,7 +113,7 @@ async def _movement(method, account_id, data, user, ctx, db, key, response):
 async def deposit(
     account_id: uuid.UUID, data: CashMovement, response: Response,
     idempotency_key: str | None = IdempotencyKey,
-    user: User = Depends(current_user), ctx: AuditContext = Depends(get_audit_context),
+    user: User = Depends(current_trader), ctx: AuditContext = Depends(get_audit_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Add *virtual* cash. No real money is ever moved by this platform in Stage 1."""
@@ -126,7 +126,7 @@ async def deposit(
 async def withdraw(
     account_id: uuid.UUID, data: CashMovement, response: Response,
     idempotency_key: str | None = IdempotencyKey,
-    user: User = Depends(current_user), ctx: AuditContext = Depends(get_audit_context),
+    user: User = Depends(current_trader), ctx: AuditContext = Depends(get_audit_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove *virtual* cash from a paper account."""

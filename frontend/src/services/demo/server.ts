@@ -23,6 +23,8 @@ import * as totp from "./totp";
 // users, accounts and trades from v1 are removed on the next visit).
 const KEY = "aurex-demo-v2";
 const OLD_KEYS = ["aurex-demo-v1"];
+/** The demo's administrator is a separate account (the "Explore the admin console" button); everyone else is a trader. */
+const DEMO_ADMIN_EMAIL = "admin@aurex.example";
 const REFRESH_KEY = "aurex-demo-refresh";
 const MAX_BALANCE = toUnits("10000000");
 const MIN_ORDER_VALUE = 1;   // account currency; entry orders only (mirrors AUREX_MIN_ORDER_VALUE)
@@ -68,6 +70,7 @@ interface State {
   riskEvents: { id: string; account_id: string | null; type: string; message: string; detail: Record<string, unknown>; created_at: string }[];
   binaries?: DBinary[];
   binaryBots?: Record<string, DBot>;
+  maintenance?: { enabled: boolean; message: string | null; until: string | null; since: string | null };
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -223,6 +226,26 @@ function admin(c: Ctx) {
   if (a.user.role !== "admin") throw new HttpError(403, "forbidden", "Administrator role required");
   return a;
 }
+// ---- separation of duties and maintenance (mirrors backend deps.current_trader and app.ops.maintenance) ----
+const OFF = { enabled: false, message: null, until: null, since: null };
+const maintenanceState = (s: State) => s.maintenance ?? OFF;
+function onHoldFor(s: State, u: DUser | undefined) {
+  const m = maintenanceState(s);
+  if (m.enabled && u?.role !== "admin") throw new HttpError(503, "maintenance", m.message || "AUREX is temporarily on hold for maintenance.", { until: m.until });
+}
+const TRADER_ONLY = /^\/(accounts|trading|binary|risk\/accounts|risk\/decisions|risk\/events)(\/|$)/;
+const OPEN_DURING_HOLD = /^\/(system|auth\/(login|logout|refresh|register|mfa\/verify))(\/|$)/;
+function guard(s: State, path: string, headers: Headers) {
+  const t = headers.get("Authorization")?.replace(/^Bearer /, "");
+  const session = t ? s.sessions.find((x) => x.access === t && !x.revoked) : undefined;
+  const user = session && s.users.find((u) => u.id === session.user_id);
+  if (!user) return;
+  if (!OPEN_DURING_HOLD.test(path)) onHoldFor(s, user);
+  if (user.role === "admin" && TRADER_ONLY.test(path)) {
+    throw new HttpError(403, "admin_cannot_trade", "Administrators manage the platform and cannot trade. Sign in with a trader account to trade.");
+  }
+}
+
 function ownedAccount(c: Ctx, id: string) {
   const { user } = authUser(c);
   const a = c.s.accounts.find((x) => x.id === id && x.owner_id === user.id);
@@ -1557,7 +1580,7 @@ const routes: [string, RegExp, Handler][] = [
   ...opsRoutes,
   ...analyticsRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],
-  ["GET", /^\/system\/info$/, () => json(200, { name: "AUREX AI", version: "0.2.0-demo", environment: "demo", trading_mode: "PAPER", live_trading_enabled: false, registration_open: true, supported_currencies: CURRENCIES })],
+  ["GET", /^\/system\/info$/, (c) => json(200, { maintenance: maintenanceState(c.s), name: "AUREX AI", version: "0.2.0-demo", environment: "demo", trading_mode: "PAPER", live_trading_enabled: false, registration_open: true, supported_currencies: CURRENCIES })],
 
   ["POST", /^\/auth\/register$/, async ({ s, body }) => {
     const email = String(body.email ?? "").trim().toLowerCase();
@@ -1568,9 +1591,10 @@ const routes: [string, RegExp, Handler][] = [
     if (s.users.some((u) => u.email === email)) throw new HttpError(409, "conflict", "An account with this email already exists");
     const salt = token().slice(0, 16);
     // First account in this browser becomes the administrator so every screen can be explored.
-    const user: DUser = { id: uuid(), email, full_name: name, pw: await sha256(salt + body.password), salt, role: s.users.length === 0 ? "admin" : "user", is_active: true, created_at: now(), last_login_at: null };
+    const user: DUser = { id: uuid(), email, full_name: name, pw: await sha256(salt + body.password), salt, role: email === DEMO_ADMIN_EMAIL ? "admin" : "user", is_active: true, created_at: now(), last_login_at: null };
     s.users.push(user);
     await audit(s, user.id, "auth.register", { type: "user", id: user.id });
+    if (!s.docs.some((d) => d.is_sample)) await loadSamples(s);        // the Research Lab starts with a sample library
     return json(201, userRead(user));
   }],
   ["POST", /^\/auth\/login$/, async ({ s, body }) => {
@@ -1589,6 +1613,7 @@ const routes: [string, RegExp, Handler][] = [
       return json(200, { mfa_required: true, mfa_token: t, expires_in: 300 });
     }
     u.last_login_at = now();
+    onHoldFor(s, u);
     const res = issue(s, u);
     await audit(s, u.id, "auth.login", { type: "user", id: u.id, details: { method: "password" } });
     return json(200, res);
@@ -1645,6 +1670,7 @@ const routes: [string, RegExp, Handler][] = [
     if (!sess || sess.revoked) throw new HttpError(401, "unauthorized", "Invalid refresh token");
     const user = s.users.find((u) => u.id === sess.user_id);
     if (!user?.is_active) throw new HttpError(401, "unauthorized", "Account unavailable");
+    onHoldFor(s, user);
     sess.revoked = now(); sess.reason = "rotated";
     return json(200, issue(s, user, sess.family));
   }],
@@ -1719,6 +1745,14 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^\/accounts\/([\w-]+)\/deposits$/, (c) => movement(c, "VIRTUAL_DEPOSIT")],
   ["POST", /^\/accounts\/([\w-]+)\/withdrawals$/, (c) => movement(c, "VIRTUAL_WITHDRAWAL")],
 
+  ["POST", /^\/admin\/maintenance$/, async (c) => {
+    const { user } = admin(c);
+    const enabled = !!c.body.enabled;
+    const until = enabled && c.body.until ? new Date(String(c.body.until)).toISOString() : null;
+    c.s.maintenance = { enabled, message: enabled ? (String(c.body.message ?? "").slice(0, 300) || null) : null, until, since: enabled ? now() : null };
+    await audit(c.s, user.id, `admin.maintenance.${enabled ? "on" : "off"}`, { type: "platform", details: { message: c.s.maintenance.message, until } });
+    return json(200, c.s.maintenance);
+  }],
   ["GET", /^\/admin\/users$/, (c) => { admin(c); return json(200, { items: c.s.users.map(userRead), total: c.s.users.length, limit: 200, offset: 0 }); }],
   ["PATCH", /^\/admin\/users\/([\w-]+)$/, async (c) => {
     const { user: me } = admin(c);
@@ -2117,6 +2151,7 @@ export async function demoFetch(input: string, init: RequestInit = {}): Promise<
       if (!match) continue;
       const body = typeof init.body === "string" && init.body ? JSON.parse(init.body) : {};
       const form = init.body instanceof FormData ? init.body : undefined;
+      guard(s, path, new Headers(init.headers));
       const res = await handler({ s, body, form, headers: new Headers(init.headers), params: match.slice(1), query: url.searchParams });
       if (method !== "GET" || path.startsWith("/markets/watchlist") || path.startsWith("/users/me/settings")) save();
       return res;

@@ -43,14 +43,15 @@ async def test_training_is_admin_only_and_never_auto_promotes(client):
 
 async def test_promotion_lifecycle_and_ml_agent(client):
     ah = await admin_headers(client)
-    acct = (await client.post(f"{API}/accounts", headers=ah, json={"name": "Paper"})).json()
+    th = await auth_headers(client, email="quant@example.com")          # administrators do not trade: a trader runs the desk
+    acct = (await client.post(f"{API}/accounts", headers=th, json={"name": "Paper"})).json()
     v1 = (await client.post(f"{API}/ml/train", headers=ah, json=TRAIN)).json()
     await force_eligible(v1["id"])
     r = await client.post(f"{API}/ml/versions/{v1['id']}/promote", headers=ah)
     assert r.status_code == 200 and r.json()["status"] == "champion"
     assert (await client.post(f"{API}/ml/versions/{v1['id']}/promote", headers=ah)).status_code == 422
 
-    run = (await client.post(f"{API}/ai/run", headers=ah, json={"symbol": "BTC-USD", "account_id": acct["id"]})).json()
+    run = (await client.post(f"{API}/ai/run", headers=th, json={"symbol": "BTC-USD", "account_id": acct["id"]})).json()
     ml = next(f for f in run["findings"] if f["agent"] == "ml")
     assert ml["status"] == "ok" and "P(up over 4h)" in ml["summary"]
     assert run["weights"]["ml"] == 0.0          # advisory until an admin assigns weight

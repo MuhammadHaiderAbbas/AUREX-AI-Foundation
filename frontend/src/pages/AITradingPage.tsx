@@ -80,7 +80,7 @@ function RunHistory({ selected, onSelect }: { selected: string | null; onSelect:
   );
 }
 
-function AgentConfig() {
+export function AgentConfig() {
   const agents = useAgents();
   const update = useUpdateAgent();
   const { user } = useAuth();
@@ -140,7 +140,7 @@ export function AITradingPage() {
   return (
     <div className="space-y-4">
       <div className="flex gap-1 rounded-md bg-surface p-1" role="tablist" style={{ width: "fit-content" }}>
-        {[["desk", "Agent desk"], ["proposals", "Proposals"], ["agents", "Agents"]].map(([k, label]) => (
+        {[["desk", "Agent desk"], ["proposals", "Proposals"]].map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams({ tab: k! })}
             className={cn("rounded px-4 py-1.5 text-sm", tab === k ? "bg-surface-3 text-fg" : "text-muted hover:text-fg")}>{label}</button>
         ))}
@@ -158,7 +158,6 @@ export function AITradingPage() {
         </div>
       )}
       {tab === "proposals" && <ProposalsTab />}
-      {tab === "agents" && <AgentConfig />}
     </div>
   );
 }

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import ORMModel
 
@@ -32,3 +32,9 @@ class AdminUserUpdate(BaseModel):
     is_active: bool | None = None
     # Lost device and recovery codes: an administrator can reset two-factor authentication.
     reset_mfa: bool = False
+
+
+class MaintenanceUpdate(BaseModel):
+    enabled: bool
+    message: str | None = Field(default=None, max_length=300)
+    until: datetime | None = None

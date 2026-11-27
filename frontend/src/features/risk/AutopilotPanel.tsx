@@ -1,4 +1,5 @@
 import { OctagonX, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { app } from "@/lib/paths";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -88,7 +89,7 @@ export function AutopilotPanel({ accountId: fixed }: { accountId?: string }) {
                 <span className="w-20 font-medium">{r.symbol}</span>
                 <Badge tone={OUTCOME[r.outcome]?.tone}>{OUTCOME[r.outcome]?.label ?? r.outcome}</Badge>
                 <span className="min-w-0 flex-1 truncate text-muted" title={r.detail}>{r.detail}</span>
-                {r.order_id && <Link className="text-accent hover:underline" to={`/history?account=${id}&order=${r.order_id}`}>order</Link>}
+                {r.order_id && <Link className="text-accent hover:underline" to={app(`/history?account=${id}&order=${r.order_id}`)}>order</Link>}
               </li>
             ))}
           </ul>

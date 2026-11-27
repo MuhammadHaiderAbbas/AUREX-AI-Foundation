@@ -22,9 +22,11 @@ async def health(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/info")
-async def info():
+async def info(db: AsyncSession = Depends(get_db)):
+    from app.ops import maintenance
     s = get_settings()
     return {
+        "maintenance": await maintenance.state(db),
         "name": s.app_name,
         "version": __version__,
         "environment": s.environment,

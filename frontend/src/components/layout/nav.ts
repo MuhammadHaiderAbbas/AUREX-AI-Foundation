@@ -1,32 +1,43 @@
 import {
-  BarChart3, Bot, FlaskConical, BrainCircuit, CandlestickChart, History, LayoutDashboard,
-  Server, Settings, Timer, ShieldAlert, ShieldCheck, Wallet, Workflow, type LucideIcon, PieChart,
+  BarChart3, Bot, BrainCircuit, CandlestickChart, FlaskConical, History, LayoutDashboard, Library, PieChart, PauseCircle,
+  Server, ShieldAlert, ShieldCheck, SlidersHorizontal, Timer, Users, Wallet, Workflow, type LucideIcon,
 } from "lucide-react";
+import { admin, app } from "@/lib/paths";
 
-export interface NavItem {
-  to: string;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  phase?: number; // module delivered in a later phase
-  adminOnly?: boolean;
-}
+export interface NavItem { to: string; label: string; description: string; icon: LucideIcon; end?: boolean }
 
-export const NAV: NavItem[] = [
-  { to: "/", label: "Overview", description: "Market and portfolio overview", icon: LayoutDashboard },
-  { to: "/markets", label: "Markets", description: "Crypto, Forex, Stocks and ETFs", icon: CandlestickChart },
-  { to: "/ai-trading", label: "AI Trading", description: "Agent department and trade proposals", icon: Bot },
-  { to: "/research", label: "AI Research Lab", description: "Agents and research reports", icon: BrainCircuit },
-  { to: "/strategies", label: "Model Lab", description: "Models, walk-forward validation and registry", icon: Workflow },
-  { to: "/backtests", label: "Backtesting", description: "Event-driven strategy simulation and out-of-sample evaluation", icon: FlaskConical },
-  { to: "/binary", label: "Binary Options", description: "Paper HIGHER/LOWER fixed-payout contracts", icon: Timer },
-  { to: "/portfolio", label: "Portfolio", description: "Positions and performance", icon: PieChart },
-  { to: "/risk", label: "Risk Centre", description: "Exposure and safety limits", icon: ShieldAlert },
-  { to: "/wallet", label: "Wallet", description: "Virtual account and ledger", icon: Wallet },
-  { to: "/history", label: "Trade History", description: "Orders, executions and decisions", icon: History },
-  { to: "/analytics", label: "Analytics", description: "Performance and reports", icon: BarChart3 },
-  { to: "/settings", label: "Settings", description: "Accounts and configurations", icon: Settings },
-  { to: "/operations", label: "Operations", description: "Health, backups, audit anchoring and go-live gates", icon: Server, adminOnly: true },
-  { to: "/admin", label: "Administration", description: "Users and audit trail", icon: ShieldCheck, adminOnly: true },
+/** Trading app: primary items in the top bar, the rest under "More". */
+export const APP_NAV: NavItem[] = [
+  { to: app(), end: true, label: "Dashboard", description: "Your accounts, equity and activity", icon: LayoutDashboard },
+  { to: app("/trade"), label: "Trade", description: "Charts, order book and orders", icon: CandlestickChart },
+  { to: app("/ai"), label: "AI Desk", description: "Agent analysis, proposals and autopilot", icon: Bot },
+  { to: app("/research"), label: "Research", description: "Ask questions about the research library", icon: BrainCircuit },
+  { to: app("/portfolio"), label: "Portfolio", description: "Positions and closed trades", icon: PieChart },
+  { to: app("/analytics"), label: "Analytics", description: "Performance and reports", icon: BarChart3 },
+];
+export const APP_MORE: NavItem[] = [
+  { to: app("/history"), label: "Orders & history", description: "Orders, executions and decisions", icon: History },
+  { to: app("/wallet"), label: "Wallet", description: "Virtual deposits and the ledger", icon: Wallet },
+  { to: app("/risk"), label: "Risk limits", description: "Your safety limits and circuit breakers", icon: ShieldAlert },
+  { to: app("/backtests"), label: "Backtesting", description: "Test strategies on history", icon: FlaskConical },
+  { to: app("/binary"), label: "Binary options", description: "Paper HIGHER/LOWER contracts and the AI bot", icon: Timer },
 ];
 
+/** Admin console: platform management only, no trading. */
+export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
+  { group: "Platform", items: [
+    { to: admin(), end: true, label: "Overview", description: "Platform health, backups and go-live gates", icon: Server },
+    { to: admin("/controls"), label: "Trading controls", description: "Kill switch and maintenance (site on hold)", icon: PauseCircle },
+  ] },
+  { group: "People", items: [
+    { to: admin("/users"), label: "Users & audit", description: "Accounts, roles and the tamper-evident audit trail", icon: Users },
+  ] },
+  { group: "AI", items: [
+    { to: admin("/models"), label: "Model Lab", description: "Train, validate, promote and retire models", icon: Workflow },
+    { to: admin("/agents"), label: "Agents", description: "Agent weights and availability", icon: SlidersHorizontal },
+    { to: admin("/research"), label: "Research library", description: "Documents the Research Lab and agents read", icon: Library },
+  ] },
+];
+
+export const ALL_NAV = [...APP_NAV, ...APP_MORE, ...ADMIN_NAV.flatMap((g) => g.items)];
+export const ADMIN_ICON = ShieldCheck;

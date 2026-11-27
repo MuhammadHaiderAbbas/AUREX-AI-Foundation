@@ -1,4 +1,5 @@
 import { Briefcase, CandlestickChart, PieChart, Plus } from "lucide-react";
+import { app } from "@/lib/paths";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PortfolioChart } from "@/charts/PortfolioChart";
@@ -55,7 +56,7 @@ export function PortfolioPage() {
             </Select>
           </Field>
         </div>
-        <Link to="/markets"><Button variant="secondary"><CandlestickChart />Trade from Markets</Button></Link>
+        <Link to={app("/trade")}><Button variant="secondary"><CandlestickChart />Trade now</Button></Link>
         <Badge tone="accent" className="ml-auto">Paper trading · virtual capital</Badge>
       </div>
       <ErrorBanner error={summary.error ?? history.error} />
@@ -107,7 +108,7 @@ export function PortfolioPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Closed positions" description="Most recent first" action={<Link to={`/history?account=${account.id}`} className="text-xs text-accent hover:underline">Full trade history</Link>} />
+        <CardHeader title="Closed positions" description="Most recent first" action={<Link to={app(`/history?account=${account.id}`)} className="text-xs text-accent hover:underline">Full trade history</Link>} />
         {(closed.data?.length ?? 0) === 0 ? <EmptyState title="No closed positions" /> : (
           <Table>
             <thead><tr><Th>Instrument</Th><Th>Opened</Th><Th>Closed</Th><Th className="text-right">Fees</Th><Th className="text-right">Realised P&L</Th></tr></thead>

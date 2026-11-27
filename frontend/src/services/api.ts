@@ -184,6 +184,8 @@ export interface SystemInfo {
   trading_mode: "PAPER";
   live_trading_enabled: boolean;
   registration_open: boolean;
+  /** Admin-controlled "site on hold": traders cannot sign in or use the app while enabled. */
+  maintenance?: { enabled: boolean; message: string | null; until: string | null; since: string | null };
   supported_currencies: string[];
 }
 

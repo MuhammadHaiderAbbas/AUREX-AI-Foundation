@@ -12,7 +12,7 @@ from app.models import Role, User
 from app.schemas.audit import AuditLogRead, AuditVerifyResult
 from app.schemas.auth import UserRead
 from app.schemas.common import Page
-from app.schemas.users import AdminUserUpdate
+from app.schemas.users import AdminUserUpdate, MaintenanceUpdate
 from app.services.audit_service import AuditContext, AuditService, export_lines
 from app.services.auth_service import AuthService
 
@@ -87,3 +87,16 @@ async def export_audit(from_id: int = Query(1, ge=1), _: User = Depends(current_
 @router.get("/audit/verify", response_model=AuditVerifyResult)
 async def verify_audit(db: AsyncSession = Depends(get_db)):
     return await AuditService(db).verify_chain()
+
+
+@router.post("/maintenance")
+async def set_maintenance(data: MaintenanceUpdate, admin: User = Depends(require_admin),
+                          ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
+    """Put the whole site on hold (traders locked out, bots and autopilot paused) or bring it back."""
+    from app.ops import maintenance
+    value = await maintenance.set_state(db, data.enabled, data.message, data.until, admin.id)
+    action = "admin.maintenance." + ("on" if data.enabled else "off")
+    details = {"message": data.message, "until": value["until"]}
+    await AuditService(db).record(ctx, action, resource_type="platform", details=details)
+    await db.commit()
+    return value

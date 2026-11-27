@@ -29,9 +29,31 @@ async function cg<T>(path: string): Promise<T> {
 }
 
 export const useCryptoGlobal = () => useQuery({ queryKey: ["coingecko", "global"], queryFn: () => cg<CgGlobal>("/global"), refetchInterval: 120_000, staleTime: 60_000, retry: 1 });
+/** If CoinGecko is unavailable (its free API rate-limits per IP), list our 12 coins from Coinbase instead. */
+const CB_COINS: [string, string][] = [["btc", "Bitcoin"], ["eth", "Ethereum"], ["xrp", "XRP"], ["sol", "Solana"], ["doge", "Dogecoin"], ["ada", "Cardano"],
+  ["link", "Chainlink"], ["avax", "Avalanche"], ["bch", "Bitcoin Cash"], ["ltc", "Litecoin"], ["dot", "Polkadot"], ["paxg", "PAX Gold"]];
+async function coinbaseFallback(): Promise<CgCoin[]> {
+  const out: CgCoin[] = [];
+  for (let i = 0; i < CB_COINS.length; i += 4) {           // a few at a time: Coinbase allows ~10 requests/second
+    const part = await Promise.all(CB_COINS.slice(i, i + 4).map(async ([sym, name]) => {
+      const r = await fetch(`https://api.exchange.coinbase.com/products/${sym.toUpperCase()}-USD/stats`);
+      if (!r.ok) return null;
+      const st = (await r.json()) as { open: string; last: string; volume: string };
+      const last = Number(st.last), open = Number(st.open);
+      return { id: sym, symbol: sym, name, image: "", current_price: last, market_cap: 0, market_cap_rank: 0, total_volume: Number(st.volume) * last,
+        price_change_percentage_1h_in_currency: null, price_change_percentage_24h_in_currency: open ? (last / open - 1) * 100 : null,
+        price_change_percentage_7d_in_currency: null } as CgCoin;
+    }));
+    out.push(...part.filter((x): x is CgCoin => !!x));
+  }
+  if (!out.length) throw new Error("market data unavailable");
+  return out.sort((a, b) => b.total_volume - a.total_volume).map((c, k) => ({ ...c, market_cap_rank: k + 1 }));
+}
+
 export const useCryptoMarkets = () => useQuery({
-  queryKey: ["coingecko", "markets"], refetchInterval: 120_000, staleTime: 60_000, retry: 1,
-  queryFn: () => cg<CgCoin[]>("/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true&price_change_percentage=1h,24h,7d"),
+  queryKey: ["coingecko", "markets"], refetchInterval: 120_000, staleTime: 60_000, retry: 0,
+  queryFn: () => cg<CgCoin[]>("/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true&price_change_percentage=1h,24h,7d")
+    .catch(() => coinbaseFallback()),
 });
 
 // Stablecoins sit at $1 and never move: keep them in the table, not in the headline cards.
@@ -83,7 +105,7 @@ export function CryptoOverview({ instruments, quotes, onSelect, part }: {
             <button key={c.id} type="button" onClick={() => lp.inst && onSelect(lp.inst.slug)} disabled={!lp.inst}
               className="min-w-0 rounded-lg border border-border bg-surface p-3 text-left hover:border-border-strong disabled:cursor-default">
               <div className="flex min-w-0 items-center gap-2">
-                <img src={c.image} alt="" className="size-6 shrink-0 rounded-full" loading="lazy" />
+                {c.image ? <img src={c.image} alt="" className="size-6 shrink-0 rounded-full" loading="lazy" /> : <span className="size-6 shrink-0 rounded-full flex shrink-0 items-center justify-center bg-surface-3 text-[10px] font-semibold uppercase">{c.symbol.slice(0, 3)}</span>}
                 <span className="text-sm font-semibold uppercase">{c.symbol}</span>
                 <span className="min-w-0 truncate text-xs text-subtle">{c.name}</span>
               </div>
@@ -137,7 +159,7 @@ export function CryptoOverview({ instruments, quotes, onSelect, part }: {
                   return (
                     <Tr key={c.id} className={cn(lp.inst && "cursor-pointer")} onClick={() => lp.inst && onSelect(lp.inst.slug)}>
                       <Td className="num text-xs text-subtle">{c.market_cap_rank}</Td>
-                      <Td><div className="flex items-center gap-2"><img src={c.image} alt="" className="size-5 rounded-full" loading="lazy" />
+                      <Td><div className="flex items-center gap-2">{c.image ? <img src={c.image} alt="" className="size-5 rounded-full" loading="lazy" /> : <span className="size-5 rounded-full flex shrink-0 items-center justify-center bg-surface-3 text-[10px] font-semibold uppercase">{c.symbol.slice(0, 3)}</span>}
                         <span className="font-medium">{c.name}</span><span className="text-xs uppercase text-subtle">{c.symbol}</span>
                         {lp.inst && <Badge tone={lp.live ? "positive" : "accent"}>{lp.live ? "Live · tradable" : "Tradable"}</Badge>}</div></Td>
                       <Td className="num text-right">{price(lp.price)}</Td>

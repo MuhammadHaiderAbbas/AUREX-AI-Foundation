@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user, get_audit_context
+from app.api.deps import current_trader, get_audit_context
 from app.api.v1.trading import ORDERS_PER_MINUTE, _owned_account_ids, order_limiter
 from app.binary.bot import EXPIRY_BARS, bot_stats, cycle_interval, get_bot, recent_cycles, run_bot_cycle, signal_for
 from app.binary.service import BinaryRejected, BinaryRequest, BinaryService, config
@@ -30,12 +30,12 @@ NOTICE = ("Paper simulation only. Binary options are banned for retail customers
 
 
 @router.get("/binary/config", response_model=BinaryConfig)
-async def binary_config(user: User = Depends(current_user)):
+async def binary_config(user: User = Depends(current_trader)):
     return {**config(), "notice": NOTICE}
 
 
 @router.post("/binary/contracts", response_model=BinaryRead, status_code=status.HTTP_201_CREATED)
-async def open_contract(data: BinaryCreate, response: Response, user: User = Depends(current_user),
+async def open_contract(data: BinaryCreate, response: Response, user: User = Depends(current_trader),
                         ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Open a paper binary contract. Risk rejections are recorded and returned as 422 with the checks."""
     if not await order_limiter.hit(str(user.id), ORDERS_PER_MINUTE, 60):
@@ -65,7 +65,7 @@ async def open_contract(data: BinaryCreate, response: Response, user: User = Dep
 @router.get("/binary/contracts", response_model=Page[BinaryRead])
 async def list_contracts(account_id: uuid.UUID | None = None, status_: str | None = Query(None, alias="status"),
                          limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                         user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+                         user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     ids = await _owned_account_ids(db, user, account_id)
     svc = BinaryService(db)
     for aid in ids:                                   # settle anything due before answering
@@ -80,7 +80,7 @@ async def list_contracts(account_id: uuid.UUID | None = None, status_: str | Non
 
 
 @router.get("/binary/contracts/{contract_id}", response_model=BinaryRead)
-async def get_contract(contract_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def get_contract(contract_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     svc = BinaryService(db)
     c = await svc.owned(user, contract_id)
     if c.status == "OPEN":
@@ -91,7 +91,7 @@ async def get_contract(contract_id: uuid.UUID, user: User = Depends(current_user
 
 
 @router.get("/binary/stats", response_model=BinaryStats)
-async def binary_stats(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def binary_stats(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     svc = BinaryService(db)
     acct = await svc.trading._account(user, account_id)
     await svc.settle_due(acct.id)
@@ -113,7 +113,7 @@ async def _bot_read(db: AsyncSession, account_id: uuid.UUID) -> BotRead:
 
 
 @router.get("/binary/bot", response_model=BotRead)
-async def get_binary_bot(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def get_binary_bot(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     svc = BinaryService(db)
     acct = await svc.trading._account(user, account_id)
     out = await _bot_read(db, acct.id)
@@ -122,7 +122,7 @@ async def get_binary_bot(account_id: uuid.UUID, user: User = Depends(current_use
 
 
 @router.post("/binary/bot", response_model=BotRead)
-async def control_binary_bot(data: BotControl, user: User = Depends(current_user), ctx: AuditContext = Depends(get_audit_context),
+async def control_binary_bot(data: BotControl, user: User = Depends(current_trader), ctx: AuditContext = Depends(get_audit_context),
                              db: AsyncSession = Depends(get_db)):
     """Start, pause or stop the bot (start may also change its settings). Starting runs a first cycle at once."""
     svc = BinaryService(db)
@@ -163,7 +163,7 @@ async def control_binary_bot(data: BotControl, user: User = Depends(current_user
 
 
 @router.post("/binary/bot/run")
-async def run_binary_bot(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def run_binary_bot(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     """Run one bot cycle now (the background worker also runs it every minute)."""
     if not await bot_run_limiter.hit(str(user.id), 12, 60):
         raise RateLimited("Too many manual bot cycles; it also runs on its own every minute")
@@ -178,7 +178,7 @@ async def run_binary_bot(account_id: uuid.UUID, user: User = Depends(current_use
 
 
 @router.get("/binary/signal")
-async def binary_signal(symbol: str, expiry_seconds: int = Query(300), user: User = Depends(current_user),
+async def binary_signal(symbol: str, expiry_seconds: int = Query(300), user: User = Depends(current_trader),
                         db: AsyncSession = Depends(get_db)):
     """What the bot would do right now for one instrument, with its out-of-sample evidence."""
     if expiry_seconds not in EXPIRY_BARS:

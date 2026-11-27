@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user, get_audit_context, require_admin
+from app.api.deps import current_trader, current_user, get_audit_context, require_admin
 from app.core.config import get_settings
 from app.core.errors import BusinessRuleViolation, RateLimited
 from app.core.rate_limit import SlidingWindowLimiter
@@ -66,14 +66,14 @@ async def system_status(_: User = Depends(current_user), db: AsyncSession = Depe
 
 
 @router.get("/risk/accounts/{account_id}", response_model=RiskOverview)
-async def overview(account_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def overview(account_id: uuid.UUID, user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     out = await _overview(db, user, account_id)
     await db.commit()
     return out
 
 
 @router.put("/risk/accounts/{account_id}/limits", response_model=RiskOverview)
-async def update_limits(account_id: uuid.UUID, data: RiskLimitsUpdate, user: User = Depends(current_user),
+async def update_limits(account_id: uuid.UUID, data: RiskLimitsUpdate, user: User = Depends(current_trader),
                         ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     ts, acct, prof = await _ctx(db, user, account_id)
     diff = await ts.risk.update_limits(acct, prof, data.model_dump(exclude_none=True), user.id)
@@ -86,7 +86,7 @@ async def update_limits(account_id: uuid.UUID, data: RiskLimitsUpdate, user: Use
 
 
 @router.post("/risk/accounts/{account_id}/kill-switch", response_model=RiskOverview)
-async def kill_switch(account_id: uuid.UUID, data: KillSwitchRequest, user: User = Depends(current_user),
+async def kill_switch(account_id: uuid.UUID, data: KillSwitchRequest, user: User = Depends(current_trader),
                       ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     ts, acct, prof = await _ctx(db, user, account_id)
     if data.engaged:
@@ -103,7 +103,7 @@ async def kill_switch(account_id: uuid.UUID, data: KillSwitchRequest, user: User
 
 
 @router.post("/risk/accounts/{account_id}/breakers/drawdown/reset", response_model=RiskOverview)
-async def reset_drawdown(account_id: uuid.UUID, user: User = Depends(current_user),
+async def reset_drawdown(account_id: uuid.UUID, user: User = Depends(current_trader),
                          ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     ts, acct, prof = await _ctx(db, user, account_id)
     await ts.risk.reset_drawdown(acct, prof, await ts.summary(acct, take_snapshot=False), user.id)
@@ -114,7 +114,7 @@ async def reset_drawdown(account_id: uuid.UUID, user: User = Depends(current_use
 
 
 @router.post("/risk/accounts/{account_id}/autopilot", response_model=RiskOverview)
-async def autopilot(account_id: uuid.UUID, data: AutopilotRequest, user: User = Depends(current_user),
+async def autopilot(account_id: uuid.UUID, data: AutopilotRequest, user: User = Depends(current_trader),
                     ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     ts, acct, prof = await _ctx(db, user, account_id)
     if data.symbols is not None:
@@ -140,7 +140,7 @@ async def autopilot(account_id: uuid.UUID, data: AutopilotRequest, user: User = 
 
 
 @router.post("/risk/accounts/{account_id}/autopilot/run")
-async def autopilot_run(account_id: uuid.UUID, user: User = Depends(current_user),
+async def autopilot_run(account_id: uuid.UUID, user: User = Depends(current_trader),
                         ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Run one autopilot cycle now (the background loop also runs it on its interval)."""
     ts, acct, prof = await _ctx(db, user, account_id)
@@ -157,7 +157,7 @@ async def autopilot_run(account_id: uuid.UUID, user: User = Depends(current_user
 
 
 @router.post("/risk/accounts/{account_id}/emergency-stop", response_model=RiskOverview)
-async def emergency_stop(account_id: uuid.UUID, data: EmergencyStopRequest, user: User = Depends(current_user),
+async def emergency_stop(account_id: uuid.UUID, data: EmergencyStopRequest, user: User = Depends(current_trader),
                          ctx: AuditContext = Depends(get_audit_context), db: AsyncSession = Depends(get_db)):
     """Stop the autopilot, engage the kill switch and cancel working entry orders. Protective
     stops stay in place unless `flatten` is set, in which case every position is sold at market."""
@@ -189,7 +189,7 @@ async def emergency_stop(account_id: uuid.UUID, data: EmergencyStopRequest, user
 
 @router.get("/risk/decisions", response_model=Page[RiskDecisionRead])
 async def decisions(account_id: uuid.UUID, approved: bool | None = None, limit: int = Query(50, ge=1, le=200),
-                    offset: int = Query(0, ge=0), user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+                    offset: int = Query(0, ge=0), user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     await TradingService(db)._account(user, account_id)
     base = select(RiskDecision).where(RiskDecision.account_id == account_id)
     if approved is not None:
@@ -201,7 +201,7 @@ async def decisions(account_id: uuid.UUID, approved: bool | None = None, limit: 
 
 @router.get("/risk/events", response_model=Page[RiskEventRead])
 async def events(account_id: uuid.UUID, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-                 user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+                 user: User = Depends(current_trader), db: AsyncSession = Depends(get_db)):
     """The account's risk events plus platform-wide ones (halts)."""
     await TradingService(db)._account(user, account_id)
     base = select(RiskEvent).where(or_(RiskEvent.account_id == account_id, RiskEvent.account_id.is_(None)))
