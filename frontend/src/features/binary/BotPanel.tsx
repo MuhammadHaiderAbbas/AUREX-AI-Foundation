@@ -40,20 +40,21 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
   const [expiry, setExpiry] = useState(60);
   const [stake, setStake] = useState("1");
   const [conf, setConf] = useState("0.6");
+  const [agree, setAgree] = useState(true);
   useEffect(() => {
     if (!b) return;
-    setSymbols(b.symbols); setExpiry(b.expiry_seconds); setStake(String(b.stake_pct)); setConf(String(b.min_confidence));
+    setSymbols(b.symbols); setExpiry(b.expiry_seconds); setStake(String(b.stake_pct)); setConf(String(b.min_confidence)); setAgree(b.require_futures_agreement ?? true);
   }, [b?.account_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!b) return <Card><CardBody className="flex h-32 items-center justify-center"><Spinner /></CardBody></Card>;
   const running = b.status === "RUNNING";
-  const start = () => control.mutate({ account_id: accountId, action: "start", symbols, expiry_seconds: expiry, stake_pct: Number(stake), min_confidence: Number(conf) });
+  const start = () => control.mutate({ account_id: accountId, action: "start", symbols, expiry_seconds: expiry, stake_pct: Number(stake), min_confidence: Number(conf), require_futures_agreement: agree });
   const s = b.stats;
   const beating = s.win_rate != null && s.win_rate >= b.break_even_win_rate;
   return (
     <Card data-testid="binary-bot">
       <CardHeader title={<span className="flex items-center gap-2"><Bot className="size-4 text-accent" />AI binary bot</span>}
-        description="One button. It trades only when its model beat the break-even rate on data it had not seen, and pauses itself when it stops winning."
+        description={`One button. It trades only when its model beat the break-even rate on data it had not seen${b.require_futures_agreement ? " and the futures model agrees with the direction" : ""}, and pauses itself when it stops winning.`}
         action={<Badge tone={running ? "positive" : b.status === "PAUSED" ? "warning" : "neutral"} data-testid="bot-status">{b.status}</Badge>} />
       <CardBody className="space-y-4">
         <ErrorBanner error={control.error ?? run.error} />
@@ -114,6 +115,11 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
                 <Field label="Stake % of equity" htmlFor="bot-stake"><Input id="bot-stake" inputMode="decimal" className="num" value={stake} onChange={(e) => setStake(e.target.value)} /></Field>
                 <Field label="Min confidence" htmlFor="bot-conf"><Input id="bot-conf" inputMode="decimal" className="num" value={conf} onChange={(e) => setConf(e.target.value)} /></Field>
               </div>
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+                <span><span className="font-medium text-fg">Only trade when the futures model agrees</span>
+                  <span className="block text-muted">HIGHER needs the futures model to say LONG, LOWER needs SHORT, each at 55% confidence or more (crypto only). Fewer trades, but only with the bigger trend.</span></span>
+              </label>
             </div>
           </details>
         )}

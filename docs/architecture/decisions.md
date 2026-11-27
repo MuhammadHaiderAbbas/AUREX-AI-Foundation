@@ -581,3 +581,24 @@ costs with a confidence bound, so on most days it says "no trade".
 **Why.** The product owner asked for a futures AI bot that trades automatically. Fixed exits and
 statistical guards keep an automatic, leveraged strategy from running on when it has no edge, which
 is what went wrong with the first binary bot.
+
+## ADR-052 The binary bot trades only when the futures model agrees
+**Decision.**
+- The binary bot has a new setting, `require_futures_agreement` (on by default, migration 0021). It
+  can be switched off under "Bot settings".
+- When the setting is on and the binary model's validated signal says HIGHER or LOWER, the bot also
+  asks the AI futures model (ADR-050: hourly bars, 4-hour horizon), reusing its result for up to 10
+  minutes.
+- It opens the contract only when the futures model points the same way (HIGHER needs LONG, LOWER
+  needs SHORT) with at least the futures model's own 55% confidence. The futures model does not
+  have to pass its own trade gate.
+- Otherwise the bot logs "no trade" with the reason: the models disagree, the futures model is not
+  confident enough, it is unavailable, or the market is not crypto (the futures model covers crypto
+  only).
+- The futures view (direction, confidence, whether it would trade) is stored with each contract's
+  signal. The backend and the demo port are kept in sync.
+**Why.** The product owner asked for the binary bot to trade only when the futures model agrees.
+Requiring the short-horizon call to go with the model's view of the bigger trend is a second,
+independent filter. Requiring both models to pass their full validation as well would mean the
+bot almost never trades on real data, so agreement means the same direction at the futures model's
+usual confidence threshold.

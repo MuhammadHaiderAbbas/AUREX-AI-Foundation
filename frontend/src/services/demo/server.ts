@@ -52,7 +52,7 @@ interface DOrder { id: string; account_id: string; user_id: string; symbol: stri
 interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
 interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null; source?: "manual" | "bot"; signal?: Record<string, unknown> | null }
 interface DAlert { id: string; user_id: string; symbol: string; direction: "ABOVE" | "BELOW"; price: string; note: string | null; status: "ACTIVE" | "TRIGGERED" | "CANCELLED"; created_at: string; updated_at: string; triggered_at: string | null; triggered_price: string | null; seen_at: string | null }
-interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
+interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; require_futures_agreement?: boolean }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DFutures { id: string; account_id: string; user_id: string; symbol: string; side: "LONG" | "SHORT"; quantity: number; entry_price: number; leverage: number; margin: number; margin_usd: number; fx_open: number; liquidation_price: number; fees: number; funding: number; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: number | null; realised_pnl: number | null; source: string; client_id: string | null; opened_at: string; closed_at: string | null; last_funding_at: string; stop_price?: number | null; exit_due_at?: string | null; exit_reason?: string | null; signal?: Record<string, unknown> | null }
 interface DFBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
@@ -1023,6 +1023,12 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
     const brief = { p_up: sig.p_up, confidence: sig.confidence, holdout_accuracy: sig.holdout_accuracy, holdout_n: sig.holdout_n,
       required_accuracy: sig.required_accuracy, expected_return: sig.expected_return, timeframe: sig.timeframe, data_mode: sig.data_mode };
     if (!sig.trade) { out.results.push({ symbol, outcome: "no_trade", detail: sig.reason, signal: brief }); continue; }
+    if (bot.require_futures_agreement ?? true) {
+      const [agrees, why, f] = await futuresAgreement(symbol, sig.direction!);
+      (brief as Record<string, unknown>).futures = f;
+      if (!agrees) { out.results.push({ symbol, outcome: "no_trade", detail: `${sig.reason}; skipped: ${why}`, signal: brief }); continue; }
+      sig.reason = `${sig.reason}; ${why}`;
+    }
     const equity = +portfolio(s, a).equity;
     const stake = Math.max(Math.floor(equity * bot.stake_pct) / 100, MIN_ORDER_VALUE).toFixed(2);
     try {
@@ -1042,9 +1048,22 @@ async function dueBots(s: State) {
     if (a) await botCycle(s, a, bot);
   }
 }
+/** Mirror of backend futures_agreement: the futures model must point the same way with at least 55% confidence. */
+async function futuresAgreement(symbol: string, direction: string): Promise<[boolean, string, Record<string, unknown> | null]> {
+  const i = findInst(symbol);
+  if (i.asset_class !== "CRYPTO") return [false, "the futures model covers crypto only, so it cannot confirm this market", null];
+  let f;
+  try { f = await futSignal(i.symbol); } catch (e) { return [false, `the futures model is unavailable (${(e as Error).message})`, null]; }
+  const fut = { direction: f.direction ?? null, confidence: f.confidence ?? null, trade: !!f.trade };
+  const want = direction === "HIGHER" ? "LONG" : "SHORT", pc = (v: number) => `${Math.round(v * 100)}%`;
+  if (f.direction == null || f.confidence == null) return [false, "the futures model has no view right now", fut];
+  if (f.direction !== want) return [false, `the futures model disagrees (${pc(f.confidence)} ${f.direction}, the binary model wants ${want})`, fut];
+  if (f.confidence < 0.55) return [false, `the futures model leans ${want} but only ${pc(f.confidence)} (needs 55%)`, fut];
+  return [true, `the futures model agrees (${pc(f.confidence)} ${want})`, fut];
+}
 function botRead(s: State, bot: DBot) {
   const allReal = live.liveStatus() === "live" && bot.symbols.every(live.isLiveSymbol);
-  return { ...bot, interval_seconds: botInterval(bot), data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
+  return { require_futures_agreement: true, ...bot, interval_seconds: botInterval(bot), data_mode: allReal ? "coinbase" : bot.symbols.some(live.isLiveSymbol) && live.liveStatus() === "live" ? "mixed" : "synthetic", break_even_win_rate: 1 / (1 + BINARY_PAYOUT), payout_rate: BINARY_PAYOUT,
     stats: botStats(s, bot), recent: s.riskEvents.filter((e) => e.account_id === bot.account_id && ["BINARY_BOT_CYCLE", "BINARY_BOT_PAUSED", "BINARY_BOT_CONTROL"].includes(e.type))
       .slice(-15).reverse().map((e) => ({ at: e.created_at, type: e.type, message: e.message, results: (e.detail.results as unknown[]) ?? [] })) };
 }
@@ -1072,6 +1091,7 @@ const binaryRoutes: [string, RegExp, Handler][] = [
     }
     if (c.body.stake_pct != null) { const v = Number(c.body.stake_pct); if (!(v > 0 && v <= 5)) throw bad("stake_pct must be > 0 and ≤ 5", "stake_pct"); bot.stake_pct = v; }
     if (c.body.min_confidence != null) { const v = Number(c.body.min_confidence); if (!(v >= 0.5 && v < 1)) throw bad("min_confidence must be in [0.5, 1)", "min_confidence"); bot.min_confidence = v; }
+    if (c.body.require_futures_agreement != null) bot.require_futures_agreement = !!c.body.require_futures_agreement;
     if (c.body.edge_margin != null) { const v = Number(c.body.edge_margin); if (!(v >= 0 && v <= 0.2)) throw bad("edge_margin must be in [0, 0.2]", "edge_margin"); bot.edge_margin = v; }
     const old = bot.status;
     if (action === "start") { bot.status = "RUNNING"; bot.paused_reason = null; if (old === "STOPPED" || !bot.started_at) bot.started_at = now(); }

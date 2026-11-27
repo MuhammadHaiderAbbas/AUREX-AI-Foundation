@@ -94,6 +94,7 @@ class BotControl(BaseModel):
     stake_pct: float | None = Field(default=None, gt=0, le=5)
     min_confidence: float | None = Field(default=None, ge=0.5, lt=1)
     edge_margin: float | None = Field(default=None, ge=0, le=0.2)
+    require_futures_agreement: bool | None = None
 
 
 class BotStats(BaseModel):
@@ -118,6 +119,7 @@ class BotRead(BaseModel):
     min_confidence: float
     edge_margin: float
     guard_min_contracts: int
+    require_futures_agreement: bool = True
     started_at: datetime | None
     last_cycle_at: datetime | None
     paused_reason: str | None
