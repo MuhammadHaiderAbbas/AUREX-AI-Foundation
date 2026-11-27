@@ -131,6 +131,7 @@ test("research lab: corpus, grounded report with citations", async ({ page }) =>
   await expect(page.getByText(/\d+ indexed/)).toBeVisible();
   await expect(page.getByText("Fictional sample").first()).toBeVisible();
   await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
 
   // a trader asks questions against the library
   await signUp(page, "Research User", `e2e-r-${Date.now()}@example.com`);
