@@ -158,6 +158,32 @@ async def signal_for(db: AsyncSession, symbol: str, expiry_seconds: int, bot: Bi
             "data_mode": get_settings().market_data_mode}
 
 
+FUTURES_SIDE = {"HIGHER": "LONG", "LOWER": "SHORT"}
+
+
+async def futures_agreement(db: AsyncSession, symbol: str, direction: str) -> tuple[bool, str, dict[str, Any] | None]:
+    """Does the AI futures model (hourly bars, 4-hour horizon) point the same way with at least its own
+    55% confidence? A trend filter: the short binary call must go with the bigger move, not against it."""
+    from app.futures import bot as fbot
+    from app.futures.signal import CONFIDENCE
+    try:
+        inst = await MarketService(db).get(symbol)
+        if inst.asset_class != "CRYPTO":
+            return False, "the futures model covers crypto only, so it cannot confirm this market", None
+        f = await fbot.signal_for(db, symbol)
+    except AppError as e:
+        return False, f"the futures model is unavailable ({e.message})", None
+    fut = {"direction": f.get("direction"), "confidence": f.get("confidence"), "trade": f.get("trade")}
+    want = FUTURES_SIDE[direction]
+    if f.get("direction") is None or f.get("confidence") is None:
+        return False, "the futures model has no view right now", fut
+    if f["direction"] != want:
+        return False, f"the futures model disagrees ({f['confidence']:.0%} {f['direction']}, the binary model wants {want})", fut
+    if f["confidence"] < CONFIDENCE:
+        return False, f"the futures model leans {want} but only {f['confidence']:.0%} (needs {CONFIDENCE:.0%})", fut
+    return True, f"the futures model agrees ({f['confidence']:.0%} {want})", fut
+
+
 async def get_bot(db: AsyncSession, account_id, lock: bool = False) -> BinaryBot:
     stmt = select(BinaryBot).where(BinaryBot.account_id == account_id)
     if lock:
@@ -245,6 +271,13 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: BinaryBot) 
         if not sig["trade"]:
             out["results"].append({"symbol": symbol, "outcome": "no_trade", "detail": sig["reason"], "signal": brief})
             continue
+        if bot.require_futures_agreement:
+            agrees, why, fut = await futures_agreement(db, symbol, sig["direction"])
+            brief["futures"] = fut
+            if not agrees:
+                out["results"].append({"symbol": symbol, "outcome": "no_trade", "detail": f"{sig['reason']}; skipped: {why}", "signal": brief})
+                continue
+            sig = {**sig, "reason": f"{sig['reason']}; {why}"}
         summary = await svc.trading.summary(acct, take_snapshot=False)
         stake = (summary["equity"] * Decimal(str(bot.stake_pct)) / 100).quantize(CENT, rounding=ROUND_DOWN)
         stake = max(stake, Decimal(config()["minimum_stake"]))    # small accounts stake the minimum; the gate still caps it

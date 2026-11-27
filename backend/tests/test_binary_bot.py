@@ -4,13 +4,27 @@ import math
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 from sqlalchemy import text
 
 from app.binary import bot as botmod
 from app.database.session import SessionLocal
+from app.futures import bot as fbot
 from tests.conftest import API, auth_headers, new_client
 from tests.test_binary import expire_all, small_account
 from tests.test_trading import fake_quotes, set_price  # noqa: F401  (autouse fixture)
+
+
+def _futures(direction="LONG", confidence=0.66, trade=False):
+    async def fake(db, symbol):
+        return {"direction": direction, "confidence": confidence, "trade": trade, "reason": "test"}
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def futures_agrees_by_default(monkeypatch):
+    """The binary tests' fake signal is HIGHER; the futures model agrees unless a test says otherwise."""
+    monkeypatch.setattr(fbot, "signal_for", _futures())
 
 
 def _series(closes: np.ndarray):
@@ -220,3 +234,51 @@ async def test_early_statistical_guard_pauses_a_clearly_losing_bot(client, monke
     run = (await client.post(f"{API}/binary/bot/run?account_id={aid}", headers=h)).json()
     assert "even the best case" in run["skipped"]
     assert (await client.get(f"{API}/binary/bot?account_id={aid}", headers=h)).json()["status"] == "PAUSED"
+
+
+async def _start_btc(client, h, aid, **kw):
+    r = await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "symbols": ["BTC-USD"], "expiry_seconds": 60, **kw})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_bot_trades_only_when_the_futures_model_agrees(client, monkeypatch):
+    monkeypatch.setattr(botmod, "signal_for", _fake_signal("HIGHER"))
+    h, aid = await small_account(client, email="agree@example.com")
+    set_price("BTC-USD", "50000", spread="0")
+
+    monkeypatch.setattr(fbot, "signal_for", _futures("SHORT", 0.70))            # disagrees
+    b = await _start_btc(client, h, aid)
+    r = b["recent"][0]["results"][0]
+    assert b["stats"]["contracts"] == 0 and r["outcome"] == "no_trade" and "futures model disagrees" in r["detail"]
+    assert r["signal"]["futures"]["direction"] == "SHORT"
+
+    monkeypatch.setattr(fbot, "signal_for", _futures("LONG", 0.52))             # agrees, but not confidently
+    r = (await client.post(f"{API}/binary/bot/run?account_id={aid}", headers=h)).json()["results"][0]
+    assert r["outcome"] == "no_trade" and "only 52%" in r["detail"]
+
+    monkeypatch.setattr(fbot, "signal_for", _futures("LONG", 0.64))             # agrees
+    r = (await client.post(f"{API}/binary/bot/run?account_id={aid}", headers=h)).json()["results"][0]
+    assert r["outcome"] == "opened" and "futures model agrees (64% LONG)" in r["detail"]
+    async with SessionLocal() as db:
+        sig = await db.scalar(text("SELECT signal FROM binary_contracts"))
+    assert sig["futures"] == {"direction": "LONG", "confidence": 0.64, "trade": False}
+
+
+async def test_lower_needs_a_short_and_the_check_can_be_switched_off(client, monkeypatch):
+    monkeypatch.setattr(botmod, "signal_for", _fake_signal("LOWER"))
+    h, aid = await small_account(client, email="agree2@example.com")
+    set_price("BTC-USD", "50000", spread="0")
+    b = await _start_btc(client, h, aid)                                        # futures stub says LONG
+    assert b["require_futures_agreement"] is True and b["stats"]["contracts"] == 0
+    await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "stop"})
+    b = await _start_btc(client, h, aid, require_futures_agreement=False)
+    assert b["require_futures_agreement"] is False and b["stats"]["contracts"] == 1
+
+
+async def test_non_crypto_markets_cannot_be_confirmed(client, monkeypatch):
+    monkeypatch.setattr(botmod, "signal_for", _fake_signal("HIGHER"))
+    h, aid = await small_account(client, email="agree3@example.com")
+    r = await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "symbols": ["GBP/USD"], "expiry_seconds": 60})
+    res = r.json()["recent"][0]["results"][0]
+    assert res["outcome"] == "no_trade" and "crypto only" in res["detail"]

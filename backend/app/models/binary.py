@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -101,6 +102,9 @@ class BinaryBot(Timestamps, Base):
     edge_margin: Mapped[float] = mapped_column(Float, nullable=False, default=0.02)
     guard_min_contracts: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     allow_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # trade only when the AI futures model (4-hour horizon) points the same way: a trend filter
+    require_futures_agreement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
+                                                            server_default=true())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_cycle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paused_reason: Mapped[str | None] = mapped_column(Text)

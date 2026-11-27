@@ -556,7 +556,7 @@ export interface BotCycleResult { symbol: string; outcome: "opened" | "no_trade"
   signal?: { p_up: number | null; confidence: number | null; holdout_accuracy: number | null; holdout_n: number; required_accuracy: number; expected_return: number | null; timeframe: string; data_mode: string } }
 export interface BinaryBot {
   account_id: string; status: BotStatus; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number;
-  guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number;
+  guard_min_contracts: number; require_futures_agreement: boolean; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number;
   data_mode: string; break_even_win_rate: number; payout_rate: number;
   stats: { contracts: number; open: number; won: number; lost: number; ties: number; void: number; win_rate: number | null; staked: string; net_pnl: string; return_on_stake: number | null };
   recent: { at: string; type: string; message: string; results: BotCycleResult[] }[];

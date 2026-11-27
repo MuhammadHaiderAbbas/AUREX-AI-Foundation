@@ -29,7 +29,7 @@ export const useBinaryBot = (accountId: string | undefined) =>
 export function useBotControl() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; expiry_seconds?: number; stake_pct?: number; min_confidence?: number }) =>
+    mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; expiry_seconds?: number; stake_pct?: number; min_confidence?: number; require_futures_agreement?: boolean }) =>
       api<BinaryBot>("/binary/bot", { method: "POST", json: v }),
     onSuccess: (b) => qc.setQueryData(["binary", b.account_id, "bot"], b),
     onSettled: () => { for (const k of ["binary", "portfolio", "risk"]) qc.invalidateQueries({ queryKey: [k] }); },
