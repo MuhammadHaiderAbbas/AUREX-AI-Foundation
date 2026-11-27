@@ -20,7 +20,10 @@ export function MaintenanceControl() {
   const set = useMutation({
     mutationFn: (enabled: boolean) => api<NonNullable<SystemInfo["maintenance"]>>("/admin/maintenance", {
       method: "POST", json: { enabled, message: message.trim() || null, until: until ? new Date(until).toISOString() : null } }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["system-info"] }); setMessage(""); setUntil(""); },
+    onSuccess: (value) => {
+      qc.setQueryData<SystemInfo>(["system-info"], (old) => (old ? { ...old, maintenance: value } : old));   // show the new state at once
+      void qc.invalidateQueries({ queryKey: ["system-info"] }); setMessage(""); setUntil("");
+    },
   });
   return (
     <Card data-testid="maintenance-control">

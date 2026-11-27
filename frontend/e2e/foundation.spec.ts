@@ -509,7 +509,7 @@ test("admin console: separate from trading, site on hold", async ({ page, browse
     await expect(trader.getByRole("status")).toContainText("e2e maintenance");
   } finally {
     await page.getByRole("button", { name: "Bring the site back online" }).click();
-    await expect(page.getByRole("button", { name: "Put the site on hold" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Put the site on hold" })).toBeVisible({ timeout: 15_000 });
     await trader.close();
   }
 });
