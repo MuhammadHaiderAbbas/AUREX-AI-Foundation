@@ -55,6 +55,7 @@ jobs:
       AUREX_E2E_ADMIN_EMAIL: admin@example.com
       AUREX_E2E_ADMIN_PASSWORD: Ci-Operator-Key-42!
       AUREX_REGISTRATIONS_PER_IP_PER_HOUR: "50"     # the browser suite signs up about ten users from one address
+      AUREX_API_RATE_LIMIT_PER_MINUTE: "3000"       # ...and every simulated user shares that one address (127.0.0.1)
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5

@@ -69,6 +69,15 @@ def provider_for(inst: Instrument) -> MarketDataProvider:
     return _providers[name]
 
 
+_backfilled: set[tuple] = set()
+
+
+def candle_source(inst: Instrument, timeframe: str) -> str:
+    """The `source` label the provider in use writes for this timeframe."""
+    p = provider_for(inst)
+    return p.source_for(timeframe) if hasattr(p, "source_for") else p.name
+
+
 # --- quote cache (in-process; Redis once the API runs multiple replicas) ---------
 _quote_cache: dict[str, tuple[float, RawQuote]] = {}
 
@@ -168,9 +177,13 @@ class MarketService:
             raise BusinessRuleViolation(f"Unsupported timeframe {timeframe}")
         limit = min(limit, MAX_CANDLES)
         await self.fill(inst, timeframe, limit)
+        # Only bars from the provider in use now: a server that once ran on simulated prices (or a
+        # provider fallback) must never mix those bars into real history. Mixed series contain
+        # fake price jumps that models "learn", producing edges that do not exist.
         rows = await self.db.scalars(
             select(MarketCandle).where(MarketCandle.instrument_id == inst.id,
-                                       MarketCandle.timeframe == timeframe)
+                                       MarketCandle.timeframe == timeframe,
+                                       MarketCandle.source == candle_source(inst, timeframe))
             .order_by(MarketCandle.open_time.desc()).limit(limit))
         return list(reversed(list(rows)))
 
@@ -186,7 +199,18 @@ class MarketService:
         now = datetime.now(UTC)
         tf = TIMEFRAMES[timeframe]
         last = await self.db.scalar(select(func.max(MarketCandle.open_time)).where(
-            MarketCandle.instrument_id == inst.id, MarketCandle.timeframe == timeframe))
+            MarketCandle.instrument_id == inst.id, MarketCandle.timeframe == timeframe,
+            MarketCandle.source == candle_source(inst, timeframe)))
+        key = (inst.id, timeframe, candle_source(inst, timeframe))
+        # too little history from this source: fetch the whole window again (once per run)
+        if last is not None and key not in _backfilled:
+            _backfilled.add(key)
+            have = await self.db.scalar(select(func.count()).select_from(MarketCandle).where(
+                MarketCandle.instrument_id == inst.id, MarketCandle.timeframe == timeframe,
+                MarketCandle.source == candle_source(inst, timeframe),
+                MarketCandle.open_time >= now - self._lookback(inst, timeframe, limit)))
+            if have < min(limit, MAX_CANDLES) * 0.9:
+                last = None
         start = now - self._lookback(inst, timeframe, limit)
         if last is not None:
             if now - last < timedelta(seconds=2 * tf):
@@ -207,8 +231,7 @@ class MarketService:
                                       details={"reason": str(e)})
         if not candles:
             return 0
-        p = provider_for(inst)
-        source = p.source_for(timeframe) if hasattr(p, "source_for") else p.name
+        source = candle_source(inst, timeframe)
         rows = [{
             "instrument_id": inst.id, "timeframe": timeframe, "open_time": c.open_time,
             "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume,

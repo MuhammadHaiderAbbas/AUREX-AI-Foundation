@@ -114,6 +114,24 @@ async def test_candles_are_stored_and_gap_filled(client):
     assert provider.candle_calls == calls  # served from storage, no refetch
 
 
+async def test_bars_from_another_source_are_never_mixed_in(client):
+    """A server that once ran on simulated prices must not blend those bars into real history
+    (that produced fake 30% "jumps" that the models learned as an edge)."""
+    h = await auth_headers(client)
+    market_service.set_provider("synthetic", CountingProvider())
+    r = await client.get(f"{API}/markets/instruments/BTC-USD/candles?timeframe=1h&limit=50", headers=h)
+    real = r.json()["candles"]
+    async with SessionLocal() as db:
+        inst_id = (await db.scalar(select(MarketCandle.instrument_id).limit(1)))
+        older = datetime.fromisoformat(real[0]["open_time"]) - timedelta(hours=1)
+        db.add(MarketCandle(instrument_id=inst_id, timeframe="1h", open_time=older, open=Decimal(1), high=Decimal(1),
+                            low=Decimal(1), close=Decimal(1), volume=Decimal(0), source="other_feed"))
+        await db.commit()
+    r = await client.get(f"{API}/markets/instruments/BTC-USD/candles?timeframe=1h&limit=60", headers=h)
+    closes = [c["close"] for c in r.json()["candles"]]
+    assert all(float(c) != 1.0 for c in closes)                    # the foreign bar is ignored
+
+
 async def test_candle_validation(client):
     h = await auth_headers(client)
     base = f"{API}/markets/instruments/AAPL/candles"

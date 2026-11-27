@@ -602,3 +602,15 @@ Requiring the short-horizon call to go with the model's view of the bigger trend
 independent filter. Requiring both models to pass their full validation as well would mean the
 bot almost never trades on real data, so agreement means the same direction at the futures model's
 usual confidence threshold.
+
+## ADR-053 Price history is read from one data source only
+**Decision.** `MarketService.candles` serves only the bars written by the provider currently in use
+for that instrument and timeframe (`candle_source`), and the gap-fill looks for the latest bar from
+that source. If the stored history from that source covers less than 90% of the requested window,
+the whole window is fetched again, at most once per server run.
+**Why.** A scan of the live models showed impossible results on BTC and ETH: 72–78% hit rates and
++0.96% per futures trade. The stored hourly history was 4,411 simulated bars plus 2 real Coinbase
+bars, with fake 30% jumps where the two series met, and the models had learned those jumps. On clean
+real data the same models are at 48–54%, below the binary break-even (55.6%) and negative after costs
+for futures. A server that ever ran on simulated prices, or fell back to them, would have had the
+same problem.

@@ -31,6 +31,8 @@ export function useBotControl() {
   return useMutation({
     mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; expiry_seconds?: number; stake_pct?: number; min_confidence?: number; require_futures_agreement?: boolean }) =>
       api<BinaryBot>("/binary/bot", { method: "POST", json: v }),
+    // a status poll already in flight must not overwrite the new state with the old one
+    onMutate: (v) => qc.cancelQueries({ queryKey: ["binary", v.account_id, "bot"] }),
     onSuccess: (b) => qc.setQueryData(["binary", b.account_id, "bot"], b),
     onSettled: () => { for (const k of ["binary", "portfolio", "risk"]) qc.invalidateQueries({ queryKey: [k] }); },
   });
