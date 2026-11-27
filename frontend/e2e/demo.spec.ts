@@ -12,6 +12,24 @@ test("static demo: Launch demo opens a £100 GBP account", async ({ page }) => {
   await expect(page.getByText("US$100,000.00")).toHaveCount(0);
 });
 
+test("static demo: close my account", async ({ page }) => {
+  await page.goto("login");
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/?$/);
+  await page.goto("app/settings/profile");
+  await page.getByRole("button", { name: "Close account…" }).click();
+  await page.getByLabel("Confirm your password").fill("wrong-password");
+  await page.getByRole("button", { name: "Close my account" }).click();
+  await expect(page.getByText("Password is incorrect")).toBeVisible();
+  await page.getByLabel("Confirm your password").fill("Demo-Account-2026!");
+  await page.getByRole("button", { name: "Close my account" }).click();
+  await expect(page).toHaveURL(/\/login\/?$/);
+  await page.getByLabel("Email").fill("demo@aurex.example");
+  await page.getByLabel("Password").fill("Demo-Account-2026!");
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await expect(page.getByText("Invalid email or password")).toBeVisible();
+});
+
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -73,6 +91,15 @@ test("static demo: trader tour of the app", async ({ page }) => {
   await expect(page.getByTestId("sessions")).toContainText("This session");
   await page.getByRole("link", { name: "Profile" }).click();
   await expect(page.getByText("demo@aurex.example").first()).toBeVisible();
+  await page.getByLabel("Display name").fill("Demo Trader Pro");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("heading", { name: "Demo Trader Pro" }).or(page.getByText("Demo Trader Pro").first())).toBeVisible();
+  const myData = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download my data" }).click();
+  expect((await myData).suggestedFilename()).toMatch(/^aurex-my-data-.*\.json$/);
+  await page.getByLabel("Display name").fill("Demo Trader");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByText("Saved")).toBeVisible();
 
   // Research Lab: traders start with the fictional sample library
   await page.getByRole("link", { name: "Research", exact: true }).click();

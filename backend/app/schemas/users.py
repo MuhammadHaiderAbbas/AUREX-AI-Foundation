@@ -38,3 +38,19 @@ class MaintenanceUpdate(BaseModel):
     enabled: bool
     message: str | None = Field(default=None, max_length=300)
     until: datetime | None = None
+
+
+class ProfileUpdate(BaseModel):
+    full_name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("full_name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Name cannot be empty")
+        return v
+
+
+class AccountClose(BaseModel):
+    password: str = Field(min_length=1, max_length=256)

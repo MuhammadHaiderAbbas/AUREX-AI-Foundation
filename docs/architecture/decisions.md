@@ -433,3 +433,17 @@ Old links (`/wallet`, `/markets?...` in the app sense, etc.) redirect into `/app
 gets its own `index.html` on GitHub Pages so deep links answer 200.
 **Why.** The product owner asked for a real product front door, a professional trading UI, a
 proper settings area and an admin who manages the platform rather than trading on it.
+
+## ADR-047 Self-service profile: edit name, export my data, close my account
+**Decision.** Settings → Profile lets a trader do three things:
+- **Edit their display name** (`PATCH /users/me`, audited).
+- **Download everything held about them** as one JSON file (`GET /users/me/export`): profile,
+  settings, paper accounts, orders, executions, positions, binary contracts and their own audit
+  events.
+- **Close their account** (`POST /users/me/close`, password required). Closing deactivates the
+  user, revokes every session, closes their paper accounts, stops bots and autopilot, clears
+  two-factor secrets and replaces the name and email with anonymous values, so the email can be
+  used again. The ledger, trades and audit trail are append-only and stay, linked to the
+  anonymous id. Administrators cannot close their own account.
+**Why.** The product owner asked for a complete settings area, and the privacy page promises
+data export and account closure.
