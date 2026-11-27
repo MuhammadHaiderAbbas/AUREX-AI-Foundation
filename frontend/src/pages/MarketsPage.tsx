@@ -8,7 +8,9 @@ import { EmptyState, ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Input, Select } from "@/components/ui/form";
 import { useAccounts } from "@/features/accounts/hooks";
 import { useCandles, useLiveQuotes, useMarketOverview, useWatchlist, useWatchlistToggle } from "@/features/markets/hooks";
+import { AlertPanel } from "@/features/alerts/AlertPanel";
 import { OrderTicket } from "@/features/trading/OrderTicket";
+import { useAutoTour } from "@/features/tour/GuidedTour";
 import { useOrders, usePortfolio } from "@/features/trading/hooks";
 import { app } from "@/lib/paths";
 import { cn, formatDateTime, formatMoney, formatPct, formatPrice } from "@/lib/utils";
@@ -66,7 +68,7 @@ function AccountPanel({ accountId, onTrade }: { accountId: string | undefined; o
   const positions = pf.data?.positions ?? [];
   const working = (orders.data?.items ?? []).filter((o) => WORKING.includes(o.status));
   return (
-    <div className={panel} data-testid="terminal-account">
+    <div className={panel} data-testid="terminal-account" data-tour="positions">
       <div className="flex items-center gap-1 border-b border-border px-3 pt-2" role="tablist">
         {([["positions", `Positions (${positions.length})`], ["orders", `Open orders (${working.length})`]] as const).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
@@ -140,6 +142,7 @@ export function MarketsPage() {
   const sq = selected ? quoteOf(selected) : null;
   const liveTick = useMemo(() => (sq && sq.market_open ? { price: Number(sq.last), at: sq.as_of } : null), [sq?.last, sq?.as_of, sq?.market_open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useAutoTour("trade", !overview.isLoading);
   if (overview.isLoading) return <Spinner className="mx-auto mt-16" />;
   const inst = selected?.instrument;
   const d = inst?.price_decimals ?? 2;
@@ -180,7 +183,7 @@ export function MarketsPage() {
 
       <div className="grid gap-2 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
         {/* Watchlist */}
-        <div className={cn(panel, "flex min-w-0 flex-col xl:max-h-[calc(100vh-190px)]")}>
+        <div className={cn(panel, "flex min-w-0 flex-col xl:max-h-[calc(100vh-190px)]")} data-tour="watchlist">
           <div className="flex gap-1 overflow-x-auto border-b border-border px-2 pt-2" role="tablist">
             {TABS.map((t) => (
               <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
@@ -224,7 +227,7 @@ export function MarketsPage() {
 
         {/* Chart */}
         <div className="min-w-0 space-y-2">
-          <div className={panel}>
+          <div className={panel} data-tour="chart">
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2">
               <div className="flex rounded-lg bg-surface-2 p-0.5" role="group" aria-label="Timeframe">
                 {TIMEFRAMES.map((tf) => (
@@ -258,7 +261,7 @@ export function MarketsPage() {
         {/* Trade panel */}
         {inst && (
           <div className="space-y-2">
-            <div className={cn(panel, "p-4")} data-testid="trade-panel">
+            <div className={cn(panel, "p-4")} data-testid="trade-panel" data-tour="trade-panel">
               <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Trade {inst.symbol}</h2>
                 {sq && !sq.tradable && <Badge tone="warning" title="Orders on closed markets or stale prices are rejected; limit and stop orders wait for the market.">Not tradable now</Badge>}</div>
               {(accounts.data?.length ?? 0) > 1 && (
@@ -276,7 +279,8 @@ export function MarketsPage() {
               </div>
               <p className="mt-3 text-[11px] text-subtle">Every order passes the independent risk gate. Paper money only.</p>
             </div>
-            <Link to={app(`/ai?symbol=${encodeURIComponent(inst.symbol)}`)} className={cn(panel, "flex items-center gap-3 p-4 hover:border-accent/50")}>
+            <AlertPanel symbol={inst.symbol} last={sq ? Number(sq.last) : null} decimals={d} />
+            <Link to={app(`/ai?symbol=${encodeURIComponent(inst.symbol)}`)} data-tour="ai-link" className={cn(panel, "flex items-center gap-3 p-4 hover:border-accent/50")}>
               <span className="flex size-9 items-center justify-center rounded-lg bg-accent/15 text-accent"><Bot className="size-4" /></span>
               <span><span className="block text-sm font-medium">Ask the AI desk</span><span className="block text-xs text-subtle">Eight agents analyse {inst.symbol}</span></span>
             </Link>

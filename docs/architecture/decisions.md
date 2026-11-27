@@ -447,3 +447,24 @@ proper settings area and an admin who manages the platform rather than trading o
   anonymous id. Administrators cannot close their own account.
 **Why.** The product owner asked for a complete settings area, and the privacy page promises
 data export and account closure.
+
+## ADR-048 Price alerts, a beginner tour, and an unlisted admin sign-in
+**Decision.**
+- **Price alerts:** `price_alerts` table (migration 0018) and `/alerts` endpoints. Alerts are
+  trader-only: list, create (`ABOVE`/`BELOW` a level, optional note, at most 50 active), cancel,
+  and mark seen.
+  - The worker checks active alerts every pass on fresh, open-market quotes only; stale or closed
+    markets never trigger.
+  - The app shows a header bell with an unread count and a "Price alert" box on the Trade screen,
+    plus a desktop notification when one triggers, if the browser allows it.
+  - The demo checks alerts whenever they are polled.
+- **Guided tour:** a spotlight tour of the Dashboard (9 steps) that hands off to the Trade screen
+  (7 steps). It starts by itself on the first visit to each page (remembered per browser) and can
+  be replayed from the account menu ("Take the tour"). It does not start by itself in automated
+  browsers (`navigator.webdriver`), so tests start it explicitly.
+- **Admin sign-in:** the admin entrance is removed from the public login page. Administrators use
+  the unlisted `/admin/login` (in the demo, "Open the demo admin console" is only there), and the
+  admin console redirects there when signed out. Administrators can still sign in at `/login`
+  with their own credentials.
+**Why.** The product owner asked for alerts and a beginner tour, and for the admin login to be
+reachable only by link.

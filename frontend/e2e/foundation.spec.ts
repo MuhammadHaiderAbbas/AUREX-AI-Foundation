@@ -454,6 +454,18 @@ async function signUp(page: import("@playwright/test").Page, name: string, email
   await expect(page.getByRole("heading", { name })).toBeVisible();
 }
 
+test("price alerts trigger from the server worker", async ({ page }) => {
+  await signUp(page, "Alert User", `e2e-alert-${Date.now()}@example.com`);
+  await page.goto("app/trade?symbol=BTC-USD");
+  const panel = page.getByTestId("alert-panel");
+  await panel.getByLabel("Alert when price").selectOption("BELOW");
+  await panel.getByLabel("Alert price").fill("100000000");
+  await panel.getByRole("button", { name: "Set alert" }).click();
+  await expect(page.getByRole("button", { name: /Price alerts, 1 new/ })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("alert-bell").click();
+  await expect(page.getByTestId("alert-triggered").first()).toContainText("BTC-USD fell below 100000000");
+});
+
 test("admin console: separate from trading, site on hold", async ({ page, browser }) => {
   test.skip(!process.env.AUREX_E2E_ADMIN_EMAIL, "needs an admin");
   await page.goto("/login");

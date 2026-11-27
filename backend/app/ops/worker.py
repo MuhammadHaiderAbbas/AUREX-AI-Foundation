@@ -66,6 +66,7 @@ state = {"passes": 0, "last_error": None, "leader": False}
 
 async def one_pass() -> dict:
     """A single leader pass. Separated from the loop so it can be tested directly."""
+    from app.alerts import check_all as check_alerts
     from app.binary.bot import due_bots, run_bot_cycle
     from app.binary.service import BinaryService
     from app.ops import maintenance
@@ -80,6 +81,9 @@ async def one_pass() -> dict:
         await db.commit()
     async with SessionLocal() as db:
         binaries = await BinaryService(db).settle_due()
+        await db.commit()
+    async with SessionLocal() as db:
+        alerts_fired = await check_alerts(db)
         await db.commit()
     async with SessionLocal() as db:
         on_hold = (await maintenance.state(db, fresh=True))["enabled"]     # site on hold: AI bots and autopilot pause
@@ -101,7 +105,7 @@ async def one_pass() -> dict:
                 await anchoring.anchor_now(db)
                 await db.commit()
                 anchored = True
-    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold}
+    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold, "alerts": alerts_fired}
 
 
 async def heartbeat(error: str | None = None) -> None:

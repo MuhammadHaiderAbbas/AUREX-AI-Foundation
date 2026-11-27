@@ -11,7 +11,7 @@ import { AdminPage } from "@/pages/AdminPage";
 import { AdminResearchPage } from "@/pages/AdminResearchPage";
 import { AgentConfig, AITradingPage } from "@/pages/AITradingPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
-import { LoginPage, RegisterPage } from "@/pages/AuthPages";
+import { AdminLoginPage, LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { BacktestPage } from "@/pages/BacktestPage";
 import { BinaryPage } from "@/pages/BinaryPage";
 import { HistoryPage } from "@/pages/HistoryPage";
@@ -44,7 +44,7 @@ function RequireTrader({ children }: { children: React.ReactNode }) {
 function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { status, user } = useAuth();
   if (status === "loading") return <Loading />;
-  if (status === "anonymous") return <Navigate to="/login" replace />;
+  if (status === "anonymous") return <Navigate to={`${ADMIN}/login`} replace />;
   if (user?.role !== "admin") return <Navigate to={APP} replace />;
   return <>{children}</>;
 }
@@ -72,6 +72,7 @@ export default function App() {
       </Route>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path={`${ADMIN}/login`} element={<AdminLoginPage />} />
 
       <Route path={APP} element={<RequireTrader><AppShell /></RequireTrader>}>
         <Route index element={<OverviewPage />} />

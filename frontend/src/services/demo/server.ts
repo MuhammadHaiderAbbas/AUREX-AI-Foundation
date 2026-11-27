@@ -49,6 +49,7 @@ interface DAudit { id: number; occurred_at: string; actor_user_id: string | null
 interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[]; stop_loss: string | null; take_profit: string | null; parent_order_id: string | null; oco_group: string | null; proposal_id: string | null }
 interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
 interface DBinary { id: string; account_id: string; user_id: string; symbol: string; direction: "HIGHER" | "LOWER"; stake: string; currency: string; payout_rate: number; strike: string; expiry_seconds: number; opened_at: string; expires_at: string; status: "OPEN" | "WON" | "LOST" | "TIE" | "VOID"; settle_price: string | null; settle_price_at: string | null; settled_at: string | null; returned: string | null; pnl: string | null; void_reason: string | null; client_id: string | null; source?: "manual" | "bot"; signal?: Record<string, unknown> | null }
+interface DAlert { id: string; user_id: string; symbol: string; direction: "ABOVE" | "BELOW"; price: string; note: string | null; status: "ACTIVE" | "TRIGGERED" | "CANCELLED"; created_at: string; updated_at: string; triggered_at: string | null; triggered_price: string | null; seen_at: string | null }
 interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
@@ -71,6 +72,7 @@ interface State {
   binaries?: DBinary[];
   binaryBots?: Record<string, DBot>;
   maintenance?: { enabled: boolean; message: string | null; until: string | null; since: string | null };
+  alerts?: DAlert[];
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -233,7 +235,7 @@ function onHoldFor(s: State, u: DUser | undefined) {
   const m = maintenanceState(s);
   if (m.enabled && u?.role !== "admin") throw new HttpError(503, "maintenance", m.message || "AUREX is temporarily on hold for maintenance.", { until: m.until });
 }
-const TRADER_ONLY = /^\/(accounts|trading|binary|risk\/accounts|risk\/decisions|risk\/events)(\/|$)/;
+const TRADER_ONLY = /^\/(accounts|trading|binary|alerts|risk\/accounts|risk\/decisions|risk\/events)(\/|$)/;
 const OPEN_DURING_HOLD = /^\/(system|auth\/(login|logout|refresh|register|mfa\/verify))(\/|$)/;
 function guard(s: State, path: string, headers: Headers) {
   const t = headers.get("Authorization")?.replace(/^Bearer /, "");
@@ -1708,6 +1710,51 @@ const routes: [string, RegExp, Handler][] = [
     Object.assign(cur, changes, { updated_at: now() });
     if (Object.keys(changes).length) await audit(c.s, user.id, "user.settings.update", { type: "user", id: user.id, details: changes });
     return json(200, cur);
+  }],
+  // ---- price alerts (mirrors backend app/alerts.py; checked whenever alerts are polled) ----
+  ["GET", /^\/alerts$/, (c) => {
+    const { user } = authUser(c);
+    c.s.alerts ??= [];
+    let fired = false;
+    for (const a of c.s.alerts.filter((x) => x.status === "ACTIVE")) {
+      const q = mkt.quote(findInst(a.symbol));
+      if (q.stale || !q.market_open) continue;
+      const last = +q.last;
+      if (a.direction === "ABOVE" ? last >= +a.price : last <= +a.price) {
+        a.status = "TRIGGERED"; a.triggered_at = now(); a.triggered_price = q.last; a.updated_at = now(); fired = true;
+      }
+    }
+    if (fired) save();
+    const mine = c.s.alerts.filter((a) => a.user_id === user.id)
+      .sort((x, y) => (x.status === "ACTIVE" ? 0 : 1) - (y.status === "ACTIVE" ? 0 : 1) || y.updated_at.localeCompare(x.updated_at));
+    return json(200, mine.slice(0, 100).map(({ user_id: _u, updated_at: _t, ...a }) => a));
+  }],
+  ["POST", /^\/alerts$/, (c) => {
+    const { user } = authUser(c);
+    const inst = findInst(String(c.body.symbol ?? ""));
+    const direction = String(c.body.direction ?? "");
+    if (direction !== "ABOVE" && direction !== "BELOW") throw new HttpError(422, "validation_error", "direction must be ABOVE or BELOW");
+    const price = Number(c.body.price);
+    if (!(price > 0)) throw new HttpError(422, "validation_error", "price must be greater than 0");
+    c.s.alerts ??= [];
+    if (c.s.alerts.filter((a) => a.user_id === user.id && a.status === "ACTIVE").length >= 50) throw new HttpError(422, "business_rule_violation", "You can have at most 50 active alerts");
+    const a: DAlert = { id: uuid(), user_id: user.id, symbol: inst.symbol, direction, price: String(c.body.price), note: String(c.body.note ?? "").slice(0, 140) || null,
+      status: "ACTIVE", created_at: now(), updated_at: now(), triggered_at: null, triggered_price: null, seen_at: null };
+    c.s.alerts.push(a);
+    const { user_id: _u, updated_at: _t, ...out } = a;
+    return json(201, out);
+  }],
+  ["DELETE", /^\/alerts\/([\w-]+)$/, (c) => {
+    const { user } = authUser(c);
+    const a = (c.s.alerts ?? []).find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!a) throw new HttpError(404, "not_found", "Alert not found");
+    if (a.status === "ACTIVE") { a.status = "CANCELLED"; a.updated_at = now(); }
+    return new Response(null, { status: 204 });
+  }],
+  ["POST", /^\/alerts\/seen$/, (c) => {
+    const { user } = authUser(c);
+    for (const a of c.s.alerts ?? []) if (a.user_id === user.id && a.status === "TRIGGERED" && !a.seen_at) a.seen_at = now();
+    return new Response(null, { status: 204 });
   }],
   ["PATCH", /^\/users\/me$/, async (c) => {
     const { user } = authUser(c);

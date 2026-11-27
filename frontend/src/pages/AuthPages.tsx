@@ -114,10 +114,44 @@ export function LoginPage() {
             <p className="text-center text-xs text-subtle">Or explore without signing up</p>
             <DemoLaunch onError={setError} onChallenge={setMfaToken} onBusy={setLaunching} />
             <DemoLaunch large onError={setError} onChallenge={setMfaToken} onBusy={setLaunching} />
-            <DemoLaunch admin onError={setError} onChallenge={setMfaToken} onBusy={setLaunching} />
           </div>
         )}
         <p className="text-center text-sm text-muted">New to AUREX? <Link to="/register" className="font-medium text-accent hover:underline">Create an account</Link></p>
+      </form>
+    </AuthLayout>
+  );
+}
+
+/** Unlisted administrator sign-in (/admin/login): not linked from the public site or the trader login page. */
+export function AdminLoginPage() {
+  const { login, status, user } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  if (status === "authenticated" && !launching) return <Navigate to={homeFor(user?.role)} replace />;
+  if (mfaToken) return <SecondFactor mfaToken={mfaToken} onCancel={() => { setMfaToken(null); setPassword(""); }} />;
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try { const challenge = await login(email, password); if (challenge) setMfaToken(challenge.mfaToken); }
+    catch (err) { setError(err); }
+    finally { setBusy(false); }
+  }
+  return (
+    <AuthLayout title="Administrator sign-in" subtitle="Platform management. Traders sign in on the normal login page.">
+      <form onSubmit={submit} className="space-y-4" aria-label="Administrator sign-in">
+        <ErrorBanner error={error} />
+        <Field label="Email" htmlFor="email"><Input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="Password" htmlFor="password"><Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <Button type="submit" className="w-full" disabled={busy}>{busy && <Spinner className="text-accent-fg" />}Log in</Button>
+        {isDemo && (
+          <div className="space-y-2 border-t border-border pt-4">
+            <DemoLaunch admin onError={setError} onChallenge={setMfaToken} onBusy={setLaunching} />
+          </div>
+        )}
       </form>
     </AuthLayout>
   );
@@ -188,9 +222,9 @@ function DemoLaunch({ onError, onChallenge, onBusy, large = false, admin = false
       }
     } catch (e) { onError(e); } finally { setBusy(false); onBusy(false); }
   }
-  const label = admin ? "Explore the admin console" : large ? "Launch demo with US$100,000" : "Launch demo";
+  const label = admin ? "Open the demo admin console" : large ? "Launch demo with US$100,000" : "Launch demo";
   return (
-    <Button type="button" variant={admin ? "ghost" : large ? "outline" : "secondary"} className="w-full" onClick={launch} disabled={busy}>
+    <Button type="button" variant={admin ? "secondary" : large ? "outline" : "secondary"} className="w-full" onClick={launch} disabled={busy}>
       {busy && <Spinner />}{label}
     </Button>
   );
