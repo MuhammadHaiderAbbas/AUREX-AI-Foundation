@@ -14,6 +14,7 @@ import { AnalyticsPage } from "@/pages/AnalyticsPage";
 import { AdminLoginPage, LoginPage, RegisterPage } from "@/pages/AuthPages";
 import { BacktestPage } from "@/pages/BacktestPage";
 import { BinaryPage } from "@/pages/BinaryPage";
+import { FuturesPage } from "@/pages/FuturesPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { ModelLabPage } from "@/pages/ModelLabPage";
@@ -86,6 +87,7 @@ export default function App() {
         <Route path="risk" element={<RiskPage />} />
         <Route path="backtests" element={<BacktestPage />} />
         <Route path="binary" element={<BinaryPage />} />
+        <Route path="futures" element={<FuturesPage />} />
         <Route path="settings" element={<Navigate to={app("/settings/profile")} replace />} />
         <Route path="settings/:section" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to={APP} replace />} />

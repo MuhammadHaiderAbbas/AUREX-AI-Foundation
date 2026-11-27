@@ -69,6 +69,7 @@ async def one_pass() -> dict:
     from app.alerts import check_all as check_alerts
     from app.binary.bot import due_bots, run_bot_cycle
     from app.binary.service import BinaryService
+    from app.futures.service import FuturesService
     from app.ops import maintenance
     from app.risk.autopilot import due_accounts, run_cycle
     from app.risk.service import RiskService
@@ -84,6 +85,11 @@ async def one_pass() -> dict:
         await db.commit()
     async with SessionLocal() as db:
         alerts_fired = await check_alerts(db)
+        await db.commit()
+    async with SessionLocal() as db:
+        futures_svc = FuturesService(db)
+        liquidated = await futures_svc.check_liquidations()
+        funded = await futures_svc.apply_funding()
         await db.commit()
     async with SessionLocal() as db:
         on_hold = (await maintenance.state(db, fresh=True))["enabled"]     # site on hold: AI bots and autopilot pause
@@ -105,7 +111,7 @@ async def one_pass() -> dict:
                 await anchoring.anchor_now(db)
                 await db.commit()
                 anchored = True
-    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold, "alerts": alerts_fired}
+    return {"matcher": stats, "binary": binaries, "anchored": anchored, "on_hold": on_hold, "alerts": alerts_fired, "futures": {"liquidated": liquidated, "funded": funded}}
 
 
 async def heartbeat(error: str | None = None) -> None:

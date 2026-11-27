@@ -3,7 +3,7 @@
 import { copyFileSync, mkdirSync } from "node:fs";
 
 const PUBLIC = ["markets", "ai-trading", "security", "about", "legal/terms", "legal/privacy", "legal/risk", "login", "register"];
-const APP = ["", "trade", "ai", "research", "portfolio", "history", "analytics", "wallet", "risk", "backtests", "binary",
+const APP = ["", "trade", "ai", "research", "portfolio", "history", "analytics", "wallet", "risk", "backtests", "binary", "futures",
   "settings", "settings/profile", "settings/security", "settings/accounts"].map((r) => (r ? `app/${r}` : "app"));
 const ADMIN = ["", "login", "controls", "users", "models", "agents", "research"].map((r) => (r ? `admin/${r}` : "admin"));
 const LEGACY = ["wallet", "portfolio", "history", "risk", "analytics", "settings", "backtests", "binary", "research", "strategies", "operations"];

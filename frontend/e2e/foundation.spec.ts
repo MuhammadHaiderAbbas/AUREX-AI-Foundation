@@ -466,6 +466,28 @@ test("price alerts trigger from the server worker", async ({ page }) => {
   await expect(page.getByTestId("alert-triggered").first()).toContainText("BTC-USD fell below 100000000");
 });
 
+test("paper futures on the server: live order book, risk gate, open and close", async ({ page }) => {
+  await signUp(page, "Futures User", `e2e-futures-${Date.now()}@example.com`);
+  await page.getByRole("button", { name: "New paper account" }).click();
+  await page.getByLabel("Account name").fill("Futures hundred");
+  await page.locator("dialog").getByRole("button", { name: "Create account" }).click();   // £100 GBP
+  await expect(page.getByRole("link", { name: "Futures hundred" })).toBeVisible();
+  await page.goto("app/futures");
+  await expect(page.getByRole("note", { name: "Leverage warning" })).toBeVisible();
+  await expect(page.getByTestId("order-book")).toContainText("Spread", { timeout: 20_000 });
+  await expect(page.getByTestId("futures-liq")).not.toHaveText("—", { timeout: 20_000 });
+  await page.getByLabel("Margin (GBP)").fill("30.00");
+  await page.getByRole("button", { name: /^Open long/ }).click();
+  await expect(page.getByText(/margin above 20% of equity/).first()).toBeVisible();
+  await page.getByLabel("Margin (GBP)").fill("5.00");
+  await page.getByRole("button", { name: /^Open long/ }).click();
+  const row = page.getByTestId("futures-open-row");
+  await expect(row).toHaveCount(1, { timeout: 15_000 });
+  await expect(row).toContainText("LONG 3x");
+  await row.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByTestId("futures-closed-row").first()).toContainText("Closed", { timeout: 15_000 });
+});
+
 test("admin console: separate from trading, site on hold", async ({ page, browser }) => {
   test.skip(!process.env.AUREX_E2E_ADMIN_EMAIL, "needs an admin");
   await page.goto("/login");

@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     # Binary bot: longest gap between cycles for each RUNNING bot (short expiries cycle faster: expiry / 3).
     binary_bot_interval_seconds: float = 60.0
 
+    # Paper perpetual futures (crypto). Isolated margin; fills walk the live order book.
+    futures_max_leverage: int = 10
+    futures_taker_fee: float = 0.0005            # 0.05% of notional per side
+    futures_maintenance_margin: float = 0.005    # 0.5% of notional
+    futures_funding_rate: float = 0.0001         # per 8 hours; longs pay shorts when positive
+    futures_max_margin_pct: float = 20.0         # one position's margin, % of equity
+    futures_max_total_margin_pct: float = 50.0   # all futures margin, % of equity
+    futures_max_open: int = 5
+
     # Paper order matcher: seconds between passes over open LIMIT/STOP orders (0 = disabled).
     order_matcher_interval_seconds: float = 1.0
     # Autopilot: minimum seconds between cycles for an account whose autopilot is RUNNING.

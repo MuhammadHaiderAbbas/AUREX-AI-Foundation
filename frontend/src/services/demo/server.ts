@@ -16,6 +16,7 @@ import * as bt from "./backtest";
 import * as risk from "./risk";
 import * as bbot from "./binarybot";
 import * as coachmod from "./coach";
+import * as fut from "./futures";
 import * as live from "./live";
 import * as an from "./analytics";
 import * as totp from "./totp";
@@ -53,6 +54,7 @@ interface DBinary { id: string; account_id: string; user_id: string; symbol: str
 interface DAlert { id: string; user_id: string; symbol: string; direction: "ABOVE" | "BELOW"; price: string; note: string | null; status: "ACTIVE" | "TRIGGERED" | "CANCELLED"; created_at: string; updated_at: string; triggered_at: string | null; triggered_price: string | null; seen_at: string | null }
 interface DBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; expiry_seconds: number; stake_pct: number; min_confidence: number; edge_margin: number; guard_min_contracts: number; started_at: string | null; last_cycle_at: string | null; paused_reason: string | null }
 interface DDecision { id: string; account_id: string; order_id: string | null; binary_id?: string | null; proposal_id: string | null; source: string; symbol: string; side: string; approved: boolean; reason: string | null; checks: risk.Check[]; created_at: string }
+interface DFutures { id: string; account_id: string; user_id: string; symbol: string; side: "LONG" | "SHORT"; quantity: number; entry_price: number; leverage: number; margin: number; margin_usd: number; fx_open: number; liquidation_price: number; fees: number; funding: number; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: number | null; realised_pnl: number | null; source: string; client_id: string | null; opened_at: string; closed_at: string | null; last_funding_at: string }
 interface DPosition { id: string; account_id: string; symbol: string; quantity: string; avg_price: string; cost_basis: string; realised_pnl: string; fees: string; status: "OPEN" | "CLOSED"; opened_at: string; closed_at: string | null }
 interface State {
   users: DUser[]; sessions: DSession[]; accounts: DAccount[]; txns: DTxn[]; audit: DAudit[];
@@ -74,6 +76,7 @@ interface State {
   binaryBots?: Record<string, DBot>;
   maintenance?: { enabled: boolean; message: string | null; until: string | null; since: string | null };
   alerts?: DAlert[];
+  futures?: DFutures[];
   orders: DOrder[]; executions: Record<string, any>[]; positions: DPosition[]; snapshots: { account_id: string; taken_at: string; cash: string; market_value: string; equity: string; reason: string }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   reports: { id: string; user_id: string; question: string; symbols: string[]; engine: string; confidence: number; insufficient_evidence: boolean; created_at: string; latency_ms: number; body: unknown }[];
 }
@@ -236,7 +239,7 @@ function onHoldFor(s: State, u: DUser | undefined) {
   const m = maintenanceState(s);
   if (m.enabled && u?.role !== "admin") throw new HttpError(503, "maintenance", m.message || "AUREX is temporarily on hold for maintenance.", { until: m.until });
 }
-const TRADER_ONLY = /^\/(accounts|trading|binary|alerts|risk\/accounts|risk\/decisions|risk\/events)(\/|$)/;
+const TRADER_ONLY = /^\/(accounts|trading|binary|futures|alerts|risk\/accounts|risk\/decisions|risk\/events)(\/|$)/;
 const OPEN_DURING_HOLD = /^\/(system|auth\/(login|logout|refresh|register|mfa\/verify))(\/|$)/;
 function guard(s: State, path: string, headers: Headers) {
   const t = headers.get("Authorization")?.replace(/^Bearer /, "");
@@ -467,15 +470,18 @@ function portfolio(s: State, a: DAccount) {
       price_as_of: q.as_of, stale: q.stale, price_decimals: i.price_decimals, _mv: mv };
   });
   const atRisk = (s.binaries ?? []).filter((b) => b.account_id === a.id && b.status === "OPEN").reduce((acc, b) => acc + toUnits(b.stake), 0n);
-  const mv = rows.reduce((acc, r) => acc + r._mv, 0n) + atRisk;   // open binaries are carried at their stake
+  const fv = futuresValue(s, a);
+  const mv = rows.reduce((acc, r) => acc + r._mv, 0n) + atRisk + u8(fv.margin + fv.upnl);   // binaries at their stake, futures at margin + P&L
   const cash = line("CASH"), equity = cash + mv;
   const alloc: Record<string, number> = {};
   for (const r of rows) alloc[r.asset_class] = (alloc[r.asset_class] ?? 0) + (equity ? Number(r._mv) / Number(equity) : 0);
   if (atRisk) alloc.BINARY = equity ? Number(atRisk) / Number(equity) : 0;
+  if (fv.margin) alloc.FUTURES = equity ? (fv.margin + fv.upnl) / Number(fromUnits(equity)) : 0;
   return { account_id: a.id, account_name: a.name, currency: a.base_currency, cash: fromUnits(cash), available_cash: fromUnits(cash - reservedUnits(s, a)),
     investments_at_cost: fromUnits(line("INVESTMENTS")), market_value: fromUnits(mv), equity: fromUnits(equity), unrealised_pnl: fromUnits(mv - line("INVESTMENTS")),
     realised_pnl: fromUnits(line("REALISED_PNL")), fees: fromUnits(line("FEES")), exposure: equity ? Number(mv) / Number(equity) : 0,
-    open_positions: rows.length, allocation: alloc, positions: rows.map(({ _mv, ...r }) => r), binary_at_risk: fromUnits(atRisk) };
+    open_positions: rows.length, allocation: alloc, positions: rows.map(({ _mv, ...r }) => r), binary_at_risk: fromUnits(atRisk),
+    futures_margin: fv.margin.toFixed(2), futures_unrealised_pnl: fv.upnl.toFixed(8) };
 }
 function snapshot(s: State, a: DAccount, reason: string) {
   const p = portfolio(s, a);
@@ -675,6 +681,7 @@ function processOpen(s: State) {
     stats[o.status === "FILLED" ? "filled" : "rejected"]++;
   }
   settleBinaries(s);
+  futuresTick(s);
   for (const a of s.accounts) if (s.positions.some((p) => p.account_id === a.id && p.status === "OPEN")) metrics(s, a);
   return stats;
 }
@@ -1104,6 +1111,179 @@ const binaryRoutes: [string, RegExp, Handler][] = [
   ["GET", /^\/binary\/stats$/, (c) => {
     authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? ""); processOpen(c.s); save();
     return json(200, binaryStats(c.s, a));
+  }],
+];
+
+
+// ---- paper futures (mirror of backend app/futures) ---------------------------------------
+const FUT_NOTICE = "Paper simulation only. Leverage multiplies gains and losses: at 10x a 10% move against you wipes out the margin. Most retail traders lose money on leveraged crypto products.";
+const futMark = (sym: string) => { const q = mkt.quote(instOf(sym)); return q.stale ? null : midOf(q); };
+function futuresValue(s: State, a: DAccount) {
+  let margin = 0, upnl = 0;
+  for (const f of (s.futures ?? []).filter((x) => x.account_id === a.id && x.status === "OPEN")) {
+    margin += f.margin;
+    const m = futMark(f.symbol); if (m == null) continue;
+    const fx = fxRate(instOf(f.symbol).quote_currency, a.base_currency) ?? f.fx_open;
+    upnl += Math.max((m - f.entry_price) * f.quantity * fut.sign(f.side) * fx, -f.margin);
+  }
+  return { margin, upnl };
+}
+function futSettle(s: State, f: DFutures, exit: number, status: DFutures["status"], fee: number, fx: number, actor: string) {
+  const a = s.accounts.find((x) => x.id === f.account_id)!;
+  const pnl = status === "LIQUIDATED" ? -f.margin : Math.max((exit - f.entry_price) * f.quantity * fut.sign(f.side) * fx, -f.margin);
+  const m8 = (v: number) => v.toFixed(8);
+  const legs: [string, "DEBIT" | "CREDIT", string][] = [];
+  const returned = f.margin + pnl;
+  if (returned > 1e-9) legs.push(["CASH", "DEBIT", m8(returned)]);
+  if (f.margin > 0) legs.push(["INVESTMENTS", "CREDIT", m8(f.margin)]);
+  if (pnl > 1e-9) legs.push(["REALISED_PNL", "CREDIT", m8(pnl)]); else if (pnl < -1e-9) legs.push(["REALISED_PNL", "DEBIT", m8(-pnl)]);
+  // re-balance rounding to 8 dp onto the P&L leg
+  const net = legs.reduce((t, l) => t + (l[1] === "DEBIT" ? toUnits(l[2]) : -toUnits(l[2])), 0n);
+  if (net !== 0n) { const pl = legs.find((l) => l[0] === "REALISED_PNL"); if (pl) pl[2] = fromUnits(toUnits(pl[2]) + (pl[1] === "CREDIT" ? net : -net)); else legs.push(["REALISED_PNL", net > 0n ? "CREDIT" : "DEBIT", fromUnits(net > 0n ? net : -net)]); }
+  if (fee > 0) legs.push(["FEES", "DEBIT", fee.toFixed(2)], ["CASH", "CREDIT", fee.toFixed(2)]);
+  post(s, a, "FUTURES_CLOSE", legs, actor, `Futures ${status.toLowerCase()} ${f.side} ${f.symbol} at ${exit}`);
+  Object.assign(f, { status, exit_price: exit, realised_pnl: +pnl.toFixed(8), closed_at: now(), fees: f.fees + fee });
+  metrics(s, a, snapshot(s, a, "futures"));
+}
+function futuresTick(s: State) {
+  const nowMs = Date.now();
+  for (const f of (s.futures ?? []).filter((x) => x.status === "OPEN")) {
+    const m = futMark(f.symbol); if (m == null) continue;
+    // funding: every 8 hours (00:00, 08:00, 16:00 UTC), longs pay shorts at a positive rate, through the margin
+    const due = fut.nextFunding(Date.parse(f.last_funding_at));
+    if (due <= nowMs) {
+      const periods = 1 + Math.floor((nowMs - due) / (8 * 3600e3));
+      const pay = Math.min(m * f.quantity * fut.CONFIG.funding_rate_8h * periods * fut.sign(f.side) * f.fx_open, f.margin);
+      const a = s.accounts.find((x) => x.id === f.account_id)!;
+      if (Math.abs(pay) >= 1e-8) post(s, a, "FUTURES_FUNDING", pay > 0 ? [["REALISED_PNL", "DEBIT", pay.toFixed(8)], ["INVESTMENTS", "CREDIT", pay.toFixed(8)]]
+        : [["INVESTMENTS", "DEBIT", (-pay).toFixed(8)], ["REALISED_PNL", "CREDIT", (-pay).toFixed(8)]], f.user_id, `Funding ${f.side} ${f.symbol} (${periods} period(s))`);
+      f.margin = +(f.margin - pay).toFixed(8); f.funding = +(f.funding - pay).toFixed(8); f.margin_usd = f.margin / f.fx_open;
+      f.liquidation_price = fut.liquidationPrice(f.side, f.entry_price, f.quantity, f.margin_usd);
+      f.last_funding_at = new Date(due + 8 * 3600e3 * (periods - 1)).toISOString();
+    }
+    if ((f.side === "LONG" && m <= f.liquidation_price) || (f.side === "SHORT" && m >= f.liquidation_price)) {
+      futSettle(s, f, f.liquidation_price, "LIQUIDATED", 0, f.fx_open, f.user_id);
+      riskEvent(s, f.account_id, "FUTURES_LIQUIDATED", `${f.side} ${f.symbol} ${f.leverage}x was liquidated at ${f.liquidation_price.toFixed(2)}: the margin is lost`);
+    }
+  }
+}
+function futRead(s: State, f: DFutures) {
+  const i = instOf(f.symbol), a = s.accounts.find((x) => x.id === f.account_id)!;
+  const { user_id: _u, client_id: _c, margin_usd: _m, fx_open: _f, last_funding_at: _l, ...rest } = f;
+  const out: Record<string, unknown> = { ...rest, price_decimals: i.price_decimals, mark_price: null };
+  if (f.status === "OPEN") {
+    const m = futMark(f.symbol);
+    if (m != null) {
+      const fx = fxRate(i.quote_currency, a.base_currency) ?? f.fx_open;
+      const upnl = Math.max((m - f.entry_price) * f.quantity * fut.sign(f.side) * fx, -f.margin);
+      Object.assign(out, { mark_price: m, unrealised_pnl: upnl, roe_pct: f.margin ? (upnl / f.margin) * 100 : 0, distance_to_liquidation_pct: (Math.abs(m - f.liquidation_price) / m) * 100 });
+    }
+  }
+  return out;
+}
+const futInst = (sym: string) => { const i = findInst(sym); if (i.asset_class !== "CRYPTO") throw new HttpError(422, "business_rule_violation", "futures are available on crypto markets only"); return i; };
+const futBook = (i: mkt.DemoInstrument) => { const q = mkt.quote(i); return fut.book(i.symbol, live.isLiveSymbol(i.symbol) && live.liveStatus() === "live", +q.bid, +q.ask); };
+async function futPreview(a: DAccount, sym: string, side: string, margin: number, leverage: number) {
+  const i = futInst(sym), q = mkt.quote(i), fx = fxRate(i.quote_currency, a.base_currency);
+  if (!fx) throw new HttpError(422, "business_rule_violation", `no exchange rate from ${i.quote_currency} to ${a.base_currency}`);
+  const lot = +i.lot_size, notionalQ = (margin * leverage) / fx, ref = side === "LONG" ? +q.ask : +q.bid;
+  const qty = +(Math.floor(notionalQ / ref / lot) * lot).toFixed(10);
+  const b = await futBook(i);
+  const fl = qty > 0 ? fut.walk(side === "LONG" ? b.asks : b.bids, qty) : null;
+  const out: Record<string, any> = { symbol: i.symbol, side, leverage, margin: margin.toFixed(2), quantity: qty, fx, book_source: b.source, quote: { bid: q.bid, ask: q.ask, tradable: q.tradable } }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (fl) Object.assign(out, { avg_price: fl.avg_price, slippage_bps: fl.slippage_bps, levels: fl.levels, notional: fl.avg_price * qty,
+    fee: +(fl.avg_price * qty * fut.CONFIG.taker_fee * fx).toFixed(2), liquidation_price: fut.liquidationPrice(side, fl.avg_price, qty, margin / fx) });
+  return out;
+}
+const futuresRoutes: [string, RegExp, Handler][] = [
+  ["GET", /^\/futures\/config$/, (c) => { authUser(c); return json(200, { ...fut.CONFIG, next_funding_at: new Date(fut.nextFunding(Date.now())).toISOString(), notice: FUT_NOTICE }); }],
+  ["GET", /^\/futures\/book$/, async (c) => {
+    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD"), d = Math.min(50, Number(c.query.get("depth") ?? 12));
+    const b = await futBook(i);
+    return json(200, { symbol: i.symbol, source: b.source, bids: b.bids.slice(0, d).map(([p, q]) => [String(p), String(q)]), asks: b.asks.slice(0, d).map(([p, q]) => [String(p), String(q)]) });
+  }],
+  ["GET", /^\/futures\/preview$/, async (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? "");
+    return json(200, await futPreview(a, c.query.get("symbol") ?? "", c.query.get("side") ?? "LONG", Number(c.query.get("margin") ?? 0), Number(c.query.get("leverage") ?? 1)));
+  }],
+  ["GET", /^\/futures\/signal$/, async (c) => {
+    authUser(c); const i = futInst(c.query.get("symbol") ?? "BTC-USD");
+    await live.ensureCandles(i.symbol, "1h", fut.SIGNAL_BARS);
+    const bars = hourBars(i, fut.SIGNAL_BARS);
+    return json(200, { ...fut.computeSignal(bars), symbol: i.symbol, bars: bars.length, timeframe: "1h", data_mode: mkt.candleSource(i, "1h", fut.SIGNAL_BARS) });
+  }],
+  ["GET", /^\/futures\/positions$/, (c) => {
+    authUser(c); const { a } = ownedAccount(c, c.query.get("account_id") ?? ""); processOpen(c.s); save();
+    const st = c.query.get("status");
+    return json(200, (c.s.futures ?? []).filter((f) => f.account_id === a.id && (!st || (st === "open" ? f.status === "OPEN" : f.status !== "OPEN")))
+      .slice().reverse().slice(0, 100).map((f) => futRead(c.s, f)));
+  }],
+  ["POST", /^\/futures\/positions$/, async (c) => {
+    const { user } = authUser(c); const { a } = ownedAccount(c, String(c.body.account_id ?? ""));
+    const s = c.s; s.futures ??= [];
+    const cid = c.body.client_id == null ? null : String(c.body.client_id);
+    if (cid) { const ex = s.futures.find((f) => f.account_id === a.id && f.client_id === cid); if (ex) return json(200, futRead(s, ex)); }
+    const side = c.body.side, lev = Number(c.body.leverage), mStr = String(c.body.margin ?? "");
+    if (side !== "LONG" && side !== "SHORT") throw bad("side must be LONG or SHORT", "side");
+    if (!Number.isInteger(lev) || lev < 1 || lev > 20) throw bad("leverage must be an integer from 1 to 20", "leverage");
+    if (!/^\d+(\.\d{1,2})?$/.test(mStr) || +mStr <= 0) throw bad("margin must be positive with at most 2 decimals", "margin");
+    const rule = (m: string) => new HttpError(422, "business_rule_violation", m);
+    if (lev > fut.CONFIG.max_leverage) throw rule(`leverage must be between 1 and ${fut.CONFIG.max_leverage}`);
+    const i = futInst(String(c.body.symbol ?? "")), q = mkt.quote(i), margin = +mStr;
+    processOpen(s);
+    const p = profile(s, a.id), pf = portfolio(s, a); metrics(s, a, pf);
+    const equity = +pf.equity, avail = +pf.available_cash;
+    const open = s.futures.filter((f) => f.account_id === a.id && f.status === "OPEN"), used = open.reduce((t, f) => t + f.margin, 0);
+    const pv = await futPreview(a, i.symbol, side, margin, lev);
+    const block = blockReason(s, p), cfg = fut.CONFIG, maxOne = (equity * cfg.max_margin_pct) / 100, maxAll = (equity * cfg.max_total_margin_pct) / 100;
+    const f2 = (v: number) => v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const chk = (name: string, label: string, ok: boolean, value: string, limit: string, msg: string): risk.Check => ({ name, label, passed: ok, value, limit, message: ok ? "" : msg });
+    const checks = [
+      chk("trading_allowed", "Trading allowed", !block, block ?? "yes", "no halt, kill switch or breaker", block ?? ""),
+      chk("market", "Market open, fresh price", q.tradable, q.tradable ? "open" : "stale", "tradable", q.market_open ? "quote is stale" : "market is closed"),
+      chk("minimum", "Minimum margin", margin >= 1, f2(margin), "1.00", "margin below the 1.00 minimum"),
+      chk("cash", "Available cash", margin + (pv.fee ?? 0) <= avail, f2(avail), `${f2(margin)} + fee`, `insufficient cash: margin ${f2(margin)} plus fee, available ${f2(avail)}`),
+      chk("margin_pct", "Margin per position", margin <= maxOne + 1e-9, f2(margin), `${f2(maxOne)} (${cfg.max_margin_pct}% of equity)`, `margin above ${cfg.max_margin_pct}% of equity`),
+      chk("total_margin", "Total futures margin", used + margin <= maxAll + 1e-9, f2(used + margin), `${f2(maxAll)} (${cfg.max_total_margin_pct}% of equity)`, `total futures margin above ${cfg.max_total_margin_pct}% of equity`),
+      chk("open", "Open futures positions", open.length + 1 <= cfg.max_open, String(open.length + 1), String(cfg.max_open), `at most ${cfg.max_open} open futures positions`),
+      chk("size", "Size above the minimum lot", pv.quantity > 0, String(pv.quantity), i.lot_size, "position is smaller than the minimum size"),
+      chk("liquidity", "Order-book liquidity", pv.quantity > 0 && pv.avg_price != null, `${pv.levels ?? 0} levels`, "fills within the book", "not enough liquidity on the order book for this size"),
+    ];
+    const reason = checks.find((x) => !x.passed)?.message;
+    const dside = side === "LONG" ? "BUY" : "SELL";
+    if (reason) {
+      s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, proposal_id: null, source: "futures", symbol: i.symbol, side: dside, approved: false, reason, checks, created_at: now() });
+      await audit(s, user.id, "futures.open", { type: "trading_account", id: a.id, outcome: "failure", details: { symbol: i.symbol, side, reason } });
+      save();
+      throw new HttpError(422, "risk_rejected", `risk: ${reason}`, { checks });
+    }
+    const fee = pv.fee as number, M = margin.toFixed(2);
+    const legs: [string, "DEBIT" | "CREDIT", string][] = [["INVESTMENTS", "DEBIT", M], ["CASH", "CREDIT", M]];
+    if (fee > 0) legs.push(["FEES", "DEBIT", fee.toFixed(2)], ["CASH", "CREDIT", fee.toFixed(2)]);
+    post(s, a, "FUTURES_OPEN", legs, user.id, `Futures ${side} ${i.symbol} ${lev}x, margin ${M}`);
+    const t = now();
+    const f: DFutures = { id: uuid(), account_id: a.id, user_id: user.id, symbol: i.symbol, side, quantity: pv.quantity, entry_price: pv.avg_price, leverage: lev, margin,
+      margin_usd: margin / pv.fx, fx_open: pv.fx, liquidation_price: pv.liquidation_price, fees: fee, funding: 0, slippage_bps: pv.slippage_bps, book_source: pv.book_source,
+      status: "OPEN", exit_price: null, realised_pnl: null, source: "manual", client_id: cid, opened_at: t, closed_at: null, last_funding_at: t };
+    s.futures.push(f);
+    s.riskDecisions.push({ id: uuid(), account_id: a.id, order_id: null, proposal_id: null, source: "futures", symbol: i.symbol, side: dside, approved: true, reason: null, checks, created_at: t });
+    snapshot(s, a, "futures");
+    await audit(s, user.id, "futures.open", { type: "futures_position", id: f.id, details: { symbol: f.symbol, side, leverage: lev, margin: M, entry: f.entry_price, liquidation: f.liquidation_price } });
+    return json(201, { ...futRead(s, f), checks });
+  }],
+  ["POST", /^\/futures\/positions\/([\w-]+)\/close$/, async (c) => {
+    const { user } = authUser(c);
+    const f = (c.s.futures ?? []).find((x) => x.id === c.params[0] && x.user_id === user.id);
+    if (!f) throw new HttpError(404, "not_found", "Position not found");
+    processOpen(c.s);
+    if (f.status !== "OPEN") throw new HttpError(422, "business_rule_violation", "position is already closed");
+    const i = instOf(f.symbol), a = c.s.accounts.find((x) => x.id === f.account_id)!;
+    const b = await futBook(i), fl = fut.walk(f.side === "LONG" ? b.bids : b.asks, f.quantity);
+    if (!fl) throw new HttpError(422, "business_rule_violation", "not enough liquidity on the order book to close right now; try again shortly");
+    const fx = fxRate(i.quote_currency, a.base_currency) ?? f.fx_open;
+    futSettle(c.s, f, fl.avg_price, "CLOSED", +(fl.avg_price * f.quantity * fut.CONFIG.taker_fee * fx).toFixed(2), fx, user.id);
+    await audit(c.s, user.id, "futures.close", { type: "futures_position", id: f.id, details: { exit: f.exit_price, pnl: f.realised_pnl } });
+    return json(200, futRead(c.s, f));
   }],
 ];
 
@@ -1585,6 +1765,7 @@ const opsRoutes: [string, RegExp, Handler][] = [
 const routes: [string, RegExp, Handler][] = [
   ...tradingRoutes,
   ...binaryRoutes,
+  ...futuresRoutes,
   ...opsRoutes,
   ...analyticsRoutes,
   ["GET", /^\/system\/health$/, () => json(200, { status: "ok", database: "ok" })],

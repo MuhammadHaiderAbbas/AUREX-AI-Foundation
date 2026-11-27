@@ -76,6 +76,37 @@ test("static demo: guided tour and price alerts", async ({ page }) => {
   await expect(page.getByTestId("coach-answer").last()).toContainText("£100 paper account is worth");
 });
 
+test("static demo: paper futures with an order book, liquidation price and the AI model", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto("login");
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/?$/);
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Futures" }).click();
+  await expect(page).toHaveURL(/\/app\/futures/);
+  await expect(page.getByRole("heading", { name: "Futures", exact: true })).toBeVisible();
+  await expect(page.getByTestId("order-book")).toContainText("Spread", { timeout: 20_000 });
+  await expect(page.getByTestId("futures-liq")).not.toHaveText("—", { timeout: 20_000 });
+
+  // too much margin for a £100 account: the risk engine refuses and shows why
+  await page.getByLabel("Margin (GBP)").fill("30.00");
+  await page.getByRole("button", { name: /^Open long/ }).click();
+  await expect(page.getByText(/margin above 20% of equity/).first()).toBeVisible();
+
+  await page.getByLabel("Margin (GBP)").fill("5.00");
+  await page.getByRole("button", { name: "Short" }).click();
+  await page.getByRole("button", { name: /^Open short/ }).click();
+  const row = page.getByTestId("futures-open-row");
+  await expect(row).toHaveCount(1, { timeout: 15_000 });
+  await expect(row).toContainText("SHORT 3x");
+  await row.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByTestId("futures-open-row")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId("futures-closed-row").first()).toContainText("Closed");
+
+  await page.getByRole("button", { name: "Analyse BTC-USD" }).click();
+  await expect(page.getByTestId("futures-signal-verdict")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("futures-signal")).toContainText("Out-of-sample trades");
+});
+
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));

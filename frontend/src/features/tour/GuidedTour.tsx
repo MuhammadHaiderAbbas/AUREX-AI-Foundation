@@ -10,13 +10,13 @@ import { app } from "@/lib/paths";
  * browser), and can be replayed from the account menu ("Take the tour"). It does not start on its
  * own in automated browsers (navigator.webdriver), so end-to-end tests start it explicitly.
  */
-export type TourName = "dashboard" | "trade";
+export type TourName = "dashboard" | "trade" | "futures";
 interface Step { target?: string; title: string; body: ReactNode; next?: { label: string; tour: TourName; path: string } }
 
 const TOURS: Record<TourName, Step[]> = {
   dashboard: [
     { title: "Welcome to AUREX", body: "This one-minute tour shows you around. Everything here uses virtual money, so nothing you do can lose real money." },
-    { target: "nav", title: "The main menu", body: "Dashboard is home. Trade has charts and orders, AI Desk asks the AI agents, Research answers questions, and Portfolio and Analytics show how you are doing. More holds your wallet, risk limits, backtesting and binary options." },
+    { target: "nav", title: "The main menu", body: "Dashboard is home. Trade has charts and orders, Futures lets you go long or short with leverage, AI Desk asks the AI agents, Research answers questions, and Portfolio and Analytics show how you are doing. More holds your wallet, risk limits, backtesting and binary options." },
     { target: "ticker", title: "Live prices", body: "Crypto and forex prices update live. Click any of them to open it on the Trade screen." },
     { target: "stats", title: "Your account at a glance", body: "Equity is what your account is worth right now, cash is what you can still spend, and drawdown is how far you are below your best value. The risk engine stops trading if losses get too big." },
     { target: "equity", title: "Live equity chart", body: "This line moves as prices move, once you hold something. With only cash it stays flat, which is normal." },
@@ -33,6 +33,14 @@ const TOURS: Record<TourName, Step[]> = {
     { target: "alert-panel", title: "Set a price alert", body: "Choose “rises above” or “falls below”, type a price and press Set alert. You'll get a notification when it happens, even on another page of the app." },
     { target: "ai-link", title: "Ask the AI", body: "Eight AI agents look at this market from different angles and explain whether they would trade, and why. Often the honest answer is “no trade”." },
     { target: "positions", title: "Your positions and orders", body: "What you hold, its profit or loss, and orders waiting to fill. Close a position with one click." },
+    { title: "Next: futures", body: "Go long or short with leverage, see the real order book and ask the AI futures model.", next: { label: "Show me Futures", tour: "futures", path: "/futures" } },
+  ],
+  futures: [
+    { target: "futures-ticket", title: "Long, short and leverage", body: "Long gains when the price rises, short gains when it falls. Leverage multiplies both: at 5x a 1% move is 5% of your margin. Isolated margin means the most you can lose on a position is the margin you put in." },
+    { target: "futures-preview", title: "Liquidation price", body: "If the price reaches this level your margin is used up and the position is closed automatically (liquidated). Higher leverage moves it closer to the current price." },
+    { target: "order-book", title: "Real liquidity", body: "This is the live order book. Your order is filled level by level, so a bigger order gets a slightly worse average price (slippage), and an order bigger than the book is refused." },
+    { target: "futures-ai", title: "The AI futures model", body: "It is trained on hourly history and tested on data it never saw, after fees and funding. It only says LONG or SHORT when the tested edge is clearly positive; most of the time it says no trade." },
+    { target: "futures-positions", title: "Positions and funding", body: "Every 8 hours longs pay shorts a small funding fee (or the other way round), taken from or added to the margin. Close a position at any time with one click." },
     { title: "You're ready", body: "That's the tour. Take it again any time from the account menu (your initials, top right). Happy paper trading!" },
   ],
 };

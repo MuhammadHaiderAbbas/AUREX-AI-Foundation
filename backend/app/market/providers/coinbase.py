@@ -74,6 +74,18 @@ class CoinbaseProvider:
         self._stats_cache[product] = (time.monotonic(), stats)
         return stats
 
+    async def get_book(self, inst: InstrumentRef, depth: int = 50) -> dict:
+        """Live level-2 order book: {"bids": [(price, size)], "asks": [(price, size)]}, best first."""
+        data = await self._get(f"/products/{inst.provider_symbol}/book", {"level": 2})
+        try:
+            bids = [(Decimal(p), Decimal(q)) for p, q, *_ in data["bids"][:depth]]
+            asks = [(Decimal(p), Decimal(q)) for p, q, *_ in data["asks"][:depth]]
+        except (KeyError, ValueError, ArithmeticError, TypeError) as e:
+            raise ProviderError("coinbase book: unexpected payload") from e
+        if not bids or not asks:
+            raise ProviderError("coinbase book: empty")
+        return {"bids": bids, "asks": asks}
+
     async def get_quote(self, inst: InstrumentRef) -> RawQuote:
         from app.market.tickbars import latest_ticker
         m = latest_ticker(inst.provider_symbol)

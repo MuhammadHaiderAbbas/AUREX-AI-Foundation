@@ -71,7 +71,7 @@ def changed_topics(before: dict[str, Any] | None, after: dict[str, Any]) -> list
 
 def valuation(summary: dict[str, Any]) -> dict[str, Any]:
     keys = ("equity", "cash", "available_cash", "market_value", "unrealised_pnl", "realised_pnl", "fees", "exposure",
-            "binary_at_risk", "open_positions")
+            "binary_at_risk", "futures_margin", "futures_unrealised_pnl", "open_positions")
     return {
         **{k: summary.get(k) for k in keys},
         "as_of": datetime.now(UTC),
