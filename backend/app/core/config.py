@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-opus-5-5"
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     llm_timeout_seconds: float = 120.0
+    # "Explain it to me" coach: "builtin" (offline templates) or "claude" (needs an Anthropic API key on the server).
+    coach_engine: Literal["builtin", "claude"] = "builtin"
+    coach_asks_per_hour: int = 60
     research_top_k: int = 8
     research_asks_per_hour: int = 30
     # Hosts that admins may ingest from by URL/RSS. Empty = URL ingestion disabled.

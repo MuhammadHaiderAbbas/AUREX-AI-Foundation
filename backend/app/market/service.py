@@ -22,7 +22,7 @@ from app.models import Instrument, MarketCandle
 # A quote older than this while its market is open is stale and must not be traded on.
 STALE_AFTER = {AssetClass.CRYPTO: 60, AssetClass.FX: 60, AssetClass.STOCK: 120,
                AssetClass.ETF: 120}
-MAX_CANDLES = 1000
+MAX_CANDLES = 3000                  # API requests are capped at 1,000 separately
 
 
 class ProviderUnavailable(AppError):

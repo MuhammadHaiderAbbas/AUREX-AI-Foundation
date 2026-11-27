@@ -11,6 +11,7 @@ import { app } from "@/lib/paths";
 import { cn, formatPct, formatPrice } from "@/lib/utils";
 import { isDemo } from "@/services/api";
 import { AlertBell } from "@/features/alerts/AlertBell";
+import { CoachDrawer } from "@/features/coach/CoachDrawer";
 import { TourProvider, useTour } from "@/features/tour/GuidedTour";
 import { APP_MORE, APP_NAV, type NavItem } from "./nav";
 
@@ -192,6 +193,7 @@ export function AppShell() {
         <div className={cn("mx-auto", wide ? "max-w-none p-2 lg:p-3" : "max-w-[1440px] p-4 lg:p-6")}><Outlet /></div>
       </main>
       <MobileTabs />
+      <CoachDrawer />
     </div>
     </TourProvider>
   );

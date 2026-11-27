@@ -181,3 +181,42 @@ async def test_migration_moves_bots_on_old_defaults(client):
 def test_signal_with_no_history_does_not_crash():
     sig = botmod.compute_signal([], [], [], [], 1, payout=0.8, min_confidence=0.6, edge_margin=0.02)
     assert not sig["trade"] and sig["reason"].startswith("not enough history")
+
+
+def test_wilson_bounds_need_evidence():
+    lo, hi = botmod.wilson_bounds(1, 5)          # the screenshot's record: 1 win in 5
+    assert lo < 0.06 and hi > 0.6                # five contracts say almost nothing either way
+    lo, hi = botmod.wilson_bounds(70, 100)
+    assert 0.6 < lo < 0.7 < hi < 0.8
+    assert botmod.wilson_bounds(0, 0) == (0.0, 1.0)
+
+
+def test_a_lucky_small_sample_does_not_pass_the_gate():
+    """Noise with an occasional streak: the old single-split check could pass; the walk-forward + confidence bound must not."""
+    passed = 0
+    for seed in range(12):
+        rng = np.random.default_rng(100 + seed)
+        closes = 100 * np.exp(np.cumsum(rng.normal(0, 0.0015, 2500)))
+        sig = botmod.compute_signal(*_series(closes), 1, payout=0.8, min_confidence=0.55, edge_margin=0.02)
+        passed += sig["trade"]
+        if sig["holdout_n"]:
+            assert sig["holdout_lower"] is not None and sig["folds"] >= 1
+    assert passed == 0
+
+
+async def test_early_statistical_guard_pauses_a_clearly_losing_bot(client, monkeypatch):
+    monkeypatch.setattr(botmod, "signal_for", _fake_signal())
+    h, aid = await small_account(client, email="early@example.com", balance="1000")
+    set_price("BTC-USD", "50000", spread="0")
+    await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "symbols": ["BTC-USD"],
+                                                              "expiry_seconds": 60, "stake_pct": 0.1})
+    for i in range(8):                            # eight straight losses: even the best case of that record is below break-even
+        if i:
+            assert (await client.post(f"{API}/binary/bot/run?account_id={aid}", headers=h)).json()["results"][0]["outcome"] == "opened"
+        await expire_all()
+        set_price("BTC-USD", "49900", spread="0")
+        await client.get(f"{API}/binary/contracts?account_id={aid}", headers=h)
+        set_price("BTC-USD", "50000", spread="0")
+    run = (await client.post(f"{API}/binary/bot/run?account_id={aid}", headers=h)).json()
+    assert "even the best case" in run["skipped"]
+    assert (await client.get(f"{API}/binary/bot?account_id={aid}", headers=h)).json()["status"] == "PAUSED"

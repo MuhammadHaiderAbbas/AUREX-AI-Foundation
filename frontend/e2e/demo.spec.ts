@@ -40,7 +40,7 @@ test("static demo: guided tour and price alerts", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Take the tour" }).click();
   const tour = page.getByTestId("tour");
   await expect(tour).toContainText("Welcome to AUREX");
-  for (const title of ["The main menu", "Live prices", "Your account at a glance", "Live equity chart", "Paper accounts", "Price alerts", "Profile, security and this tour", "Next: the Trade screen"]) {
+  for (const title of ["The main menu", "Live prices", "Your account at a glance", "Live equity chart", "Paper accounts", "Price alerts", "Profile, security and this tour", "Ask the coach", "Next: the Trade screen"]) {
     await tour.getByRole("button", { name: "Next" }).click();
     await expect(tour).toContainText(title);
   }
@@ -66,6 +66,14 @@ test("static demo: guided tour and price alerts", async ({ page }) => {
   await expect(page.getByTestId("alert-triggered").first()).toContainText("BTC-USD fell below 10000000");
   await page.getByRole("button", { name: /Cancel alert BTC-USD 10000000/ }).click();
   await expect(page.getByRole("dialog", { name: "Price alerts" })).toContainText("Active (0)");
+
+  // the coach explains things from the trader's own data
+  await page.getByTestId("coach-button").click();
+  await page.getByTestId("coach").getByRole("button", { name: "What is break-even win rate?" }).click();
+  await expect(page.getByTestId("coach-answer").last()).toContainText("55.6%");
+  await page.getByLabel("Ask the coach").fill("How am I doing?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByTestId("coach-answer").last()).toContainText("£100 paper account is worth");
 });
 
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {
