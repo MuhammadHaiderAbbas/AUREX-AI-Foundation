@@ -7,6 +7,8 @@ type Status = "loading" | "authenticated" | "anonymous";
 interface AuthContextValue {
   status: Status;
   user: User | null;
+  /** Replaces the signed-in user after a profile change. */
+  updateUser: (u: User) => void;
   /** Signs in, or returns an MFA token when the account needs a second factor. */
   login: (email: string, password: string) => Promise<{ mfaToken: string } | null>;
   verifyMfa: (mfaToken: string, code: string) => Promise<void>;
@@ -56,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async register(email, fullName, password) {
       await api<User>("/auth/register", { method: "POST", json: { email, full_name: fullName, password } });
     },
+    updateUser(u: User) { setUser(u); },
     async logout() {
       await api("/auth/logout", { method: "POST" }).catch(() => undefined);
       clear();

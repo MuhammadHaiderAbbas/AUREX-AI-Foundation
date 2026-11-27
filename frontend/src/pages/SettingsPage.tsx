@@ -196,11 +196,17 @@ function Sessions() {
 }
 
 function Profile() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const [name, setName] = useState(user?.full_name ?? "");
+  const save = useMutation({
+    mutationFn: () => api<User>("/users/me", { method: "PATCH", json: { full_name: name } }),
+    onSuccess: (u) => { updateUser(u); setName(u.full_name); },
+  });
   return (
     <Card>
       <CardHeader title="Profile" description="Your identity on AUREX" />
-      <CardBody className="flex flex-wrap items-center gap-5">
+      <CardBody className="space-y-5">
+      <div className="flex flex-wrap items-center gap-5">
         <span className="flex size-14 items-center justify-center rounded-full bg-accent/20 text-lg font-semibold text-accent">
           {(user?.full_name ?? "?").split(/\s+/).map((x) => x[0]).slice(0, 2).join("").toUpperCase()}
         </span>
@@ -209,6 +215,63 @@ function Profile() {
           <div><dt className="text-xs text-muted">Email</dt><dd className="mt-0.5 font-medium">{user?.email}</dd></div>
           <div><dt className="text-xs text-muted">Member since</dt><dd className="mt-0.5 font-medium">{user?.created_at ? formatDateTime(user.created_at) : "—"}</dd></div>
         </dl>
+      </div>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <div className="min-w-60 flex-1"><Field label="Display name" htmlFor="profile-name">
+          <Input id="profile-name" maxLength={200} required value={name} onChange={(e) => setName(e.target.value)} />
+        </Field></div>
+        <Button type="submit" disabled={save.isPending || !name.trim() || name.trim() === user?.full_name}>Save name</Button>
+        {save.isSuccess && <span className="flex items-center gap-1 text-xs text-positive"><CheckCircle2 className="size-3.5" />Saved</span>}
+      </form>
+      <ErrorBanner error={save.error} />
+      </CardBody>
+    </Card>
+  );
+}
+
+function YourData() {
+  const { logout } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [closing, setClosing] = useState(false);
+  const [password, setPassword] = useState("");
+  async function exportData() {
+    setBusy(true); setError(null);
+    try {
+      const data = await api<unknown>("/users/me/export");
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `aurex-my-data-${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z.json`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError(e); } finally { setBusy(false); }
+  }
+  const close = useMutation({
+    mutationFn: () => api("/users/me/close", { method: "POST", json: { password } }),
+    onSuccess: () => { void logout(); },
+  });
+  return (
+    <Card>
+      <CardHeader title="Your data" description="Download everything AUREX holds about you, or close your account" />
+      <CardBody className="space-y-5">
+        <ErrorBanner error={error ?? close.error} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">Profile, settings, paper accounts, orders, trades, binary contracts and your activity, as one JSON file.</p>
+          <Button variant="secondary" onClick={exportData} disabled={busy}>{busy && <Spinner />}Download my data</Button>
+        </div>
+        <div className="rounded-lg border border-negative/30 p-4" data-testid="close-account">
+          <div className="text-sm font-medium text-negative">Close account</div>
+          <p className="mt-1 text-sm text-muted">Signs you out everywhere, stops your bots and autopilot, closes your paper accounts and removes your name and email.
+            Trading records and the audit trail are kept under an anonymous id so the ledger stays verifiable. This cannot be undone.</p>
+          {closing ? (
+            <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); close.mutate(); }}>
+              <div className="min-w-60 flex-1"><Field label="Confirm your password" htmlFor="close-pw">
+                <Input id="close-pw" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              </Field></div>
+              <Button type="submit" variant="danger" disabled={!password || close.isPending}>Close my account</Button>
+              <Button type="button" variant="ghost" onClick={() => { setClosing(false); setPassword(""); }}>Cancel</Button>
+            </form>
+          ) : <Button className="mt-3" variant="danger" onClick={() => setClosing(true)}>Close account…</Button>}
+        </div>
       </CardBody>
     </Card>
   );
@@ -283,7 +346,7 @@ export function SettingsPage() {
         </nav>
       </aside>
       <div className="min-w-0 space-y-6">
-        {section === "profile" && <><Profile /><Preferences /><Activity /></>}
+        {section === "profile" && <><Profile /><Preferences /><Activity /><YourData /></>}
         {section === "security" && <><ChangePassword /><TwoFactor /><Sessions /></>}
         {section === "accounts" && <Accounts />}
       </div>

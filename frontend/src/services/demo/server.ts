@@ -44,7 +44,7 @@ interface DUser { id: string; email: string; full_name: string; pw: string; salt
 interface DSession { id: string; user_id: string; access: string; refresh: string; family: string; revoked: string | null; reason: string | null; created_at?: string; user_agent?: string }
 interface DEntry { ledger_code: string; direction: "DEBIT" | "CREDIT"; amount: string; currency: string }
 interface DTxn { id: string; account_id: string; type: string; description: string; created_at: string; created_by: string; idem: string | null; entries: DEntry[] }
-interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE"; created_at: string }
+interface DAccount { id: string; owner_id: string; name: string; mode: "PAPER"; base_currency: string; status: "ACTIVE" | "CLOSED"; created_at: string }
 interface DAudit { id: number; occurred_at: string; actor_user_id: string | null; action: string; resource_type: string | null; resource_id: string | null; outcome: string; ip_address: string | null; request_id: string | null; details: Record<string, unknown>; prev_hash: string; hash: string }
 interface DOrder { id: string; account_id: string; user_id: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT" | "STOP"; quantity: string; limit_price: string | null; stop_price: string | null; time_in_force: "GTC" | "DAY"; status: string; filled_qty: string; avg_fill_price: string | null; client_order_id: string | null; source: string; reject_reason: string | null; expires_at: string | null; created_at: string; updated_at: string; events: { type: string; detail: Record<string, unknown>; created_at: string }[]; stop_loss: string | null; take_profit: string | null; parent_order_id: string | null; oco_group: string | null; proposal_id: string | null }
 interface DRisk extends risk.Limits { kill_switch: boolean; kill_reason: string | null; kill_engaged_at: string | null; daily_halt_date: string | null; drawdown_halted: boolean; drawdown_halted_at: string | null; peak_pnl_equity: number | null; day_date: string | null; day_start_pnl_equity: number | null; day_start_equity: number | null; autopilot_status: "STOPPED" | "RUNNING" | "PAUSED"; autopilot_symbols: string[]; autopilot_last_cycle_at: string | null; binary_enabled?: boolean }
@@ -1708,6 +1708,41 @@ const routes: [string, RegExp, Handler][] = [
     Object.assign(cur, changes, { updated_at: now() });
     if (Object.keys(changes).length) await audit(c.s, user.id, "user.settings.update", { type: "user", id: user.id, details: changes });
     return json(200, cur);
+  }],
+  ["PATCH", /^\/users\/me$/, async (c) => {
+    const { user } = authUser(c);
+    const name = String(c.body.full_name ?? "").split(/\s+/).filter(Boolean).join(" ");
+    if (!name || name.length > 200) throw new HttpError(422, "validation_error", "Name cannot be empty");
+    const old = user.full_name; user.full_name = name;
+    await audit(c.s, user.id, "user.profile.update", { type: "user", id: user.id, details: { full_name: { from: old, to: name } } });
+    return json(200, userRead(user));
+  }],
+  ["GET", /^\/users\/me\/export$/, (c) => {
+    const { user } = authUser(c);
+    const accts = c.s.accounts.filter((a) => a.owner_id === user.id), ids = accts.map((a) => a.id);
+    const mine = <T extends { account_id: string }>(xs: T[]) => xs.filter((x) => ids.includes(x.account_id));
+    return json(200, {
+      exported_at: now(),
+      profile: { id: user.id, email: user.email, full_name: user.full_name, role: user.role, created_at: user.created_at, mfa_enabled: !!user.mfa_enabled },
+      settings: c.s.settings[user.id] ?? null, accounts: accts, orders: mine(c.s.orders), executions: mine(c.s.executions as { account_id: string }[]),
+      positions: mine(c.s.positions), binary_contracts: mine(c.s.binaries ?? []),
+      activity: c.s.audit.filter((a) => a.actor_user_id === user.id),
+    });
+  }],
+  ["POST", /^\/users\/me\/close$/, async (c) => {
+    const { user } = authUser(c);
+    if ((await sha256(user.salt + String(c.body.password ?? ""))) !== user.pw) throw new HttpError(403, "invalid_password", "Password is incorrect");
+    if (user.role === "admin") throw new HttpError(403, "forbidden", "Administrators cannot close their own account; ask another administrator to disable it");
+    const accts = c.s.accounts.filter((a) => a.owner_id === user.id);
+    for (const a of accts) {
+      a.status = "CLOSED";
+      const bot = c.s.binaryBots?.[a.id]; if (bot) bot.status = "STOPPED";
+      const prof = c.s.riskProfiles[a.id] as { autopilot_status?: string } | undefined; if (prof) prof.autopilot_status = "STOPPED";
+    }
+    await audit(c.s, user.id, "user.account.close", { type: "user", id: user.id, details: { paper_accounts_closed: accts.length } });
+    user.is_active = false; user.email = `closed-${user.id}@closed.invalid`; user.full_name = "Closed account";
+    for (const x of c.s.sessions) if (x.user_id === user.id && !x.revoked) { x.revoked = now(); x.reason = "account_closed"; }
+    return new Response(null, { status: 204 });
   }],
   ["GET", /^\/users\/me\/activity$/, (c) => {
     const { user } = authUser(c);
