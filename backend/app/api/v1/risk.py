@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import BusinessRuleViolation, RateLimited
 from app.core.rate_limit import SlidingWindowLimiter
 from app.database.session import get_db
-from app.models import AutopilotStatus, BinaryBot, Order, Position, RiskDecision, RiskEvent, User
+from app.models import AutopilotStatus, BinaryBot, FuturesBot, Order, Position, RiskDecision, RiskEvent, User
 from app.risk import engine
 from app.risk.autopilot import run_cycle
 from app.risk.service import RiskService, limits_of
@@ -167,6 +167,9 @@ async def emergency_stop(account_id: uuid.UUID, data: EmergencyStopRequest, user
     bot = await db.get(BinaryBot, acct.id)
     if bot is not None:
         bot.status, bot.paused_reason = "STOPPED", reason
+    fbot = await db.get(FuturesBot, acct.id)
+    if fbot is not None:
+        fbot.status, fbot.paused_reason = "STOPPED", reason
     if not prof.kill_switch:
         await ts.risk.engage_kill_switch(acct, prof, reason, actor=user.id)
     cancelled = await ts._cancel_where("emergency stop", Order.account_id == acct.id,

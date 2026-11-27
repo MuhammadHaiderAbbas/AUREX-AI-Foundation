@@ -16,6 +16,7 @@ from app.core.errors import BusinessRuleViolation
 from app.models import (
     AutopilotStatus,
     BinaryBot,
+    FuturesBot,
     Order,
     OrderEvent,
     OrderStatus,
@@ -146,6 +147,10 @@ class RiskService:
         if bot is not None and bot.status == "RUNNING":
             bot.status, bot.paused_reason = "PAUSED", reason
             self.event(account_id, "BINARY_BOT_PAUSED", f"Binary bot paused: {reason}")
+        fbot = await self.db.get(FuturesBot, account_id)
+        if fbot is not None and fbot.status == "RUNNING":
+            fbot.status, fbot.paused_reason = "PAUSED", reason
+            self.event(account_id, "FUTURES_BOT_PAUSED", f"Futures bot paused: {reason}")
 
     async def _trip(self, acct: TradingAccount, prof: RiskProfile, type_: str, message: str, **detail: Any) -> None:
         cancelled = await self.cancel_open(acct.id, f"risk: {message}", buys_only=True)

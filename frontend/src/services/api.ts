@@ -573,7 +573,15 @@ export interface FuturesPreview { symbol: string; side: FuturesSide; leverage: n
 export interface FuturesPosition { id: string; account_id: string; symbol: string; side: FuturesSide; quantity: Num; entry_price: Num; leverage: number; margin: Num;
   liquidation_price: Num; fees: Num; funding: Num; slippage_bps: number; book_source: string; status: "OPEN" | "CLOSED" | "LIQUIDATED"; exit_price: Num | null;
   realised_pnl: Num | null; source: string; opened_at: string; closed_at: string | null; price_decimals: number; mark_price: Num | null;
-  unrealised_pnl?: Num; roe_pct?: number; distance_to_liquidation_pct?: number; checks?: RiskCheck[] }
+  unrealised_pnl?: Num; roe_pct?: number; distance_to_liquidation_pct?: number; checks?: RiskCheck[];
+  stop_price?: Num | null; exit_due_at?: string | null; exit_reason?: string | null; signal?: Record<string, unknown> | null }
 export interface FuturesSignal { symbol: string; trade: boolean; direction: FuturesSide | null; p_up: number | null; confidence: number | null; trades: number;
   hit_rate: number | null; mean_return: number | null; return_lower: number | null; folds: number; folds_profitable: number; cost_per_trade: number;
   suggested_leverage: number | null; stop_distance_pct: number | null; horizon_hours: number; reason: string; bars: number; timeframe: string; data_mode?: string }
+export interface FuturesBotResult { symbol: string; outcome: "opened" | "no_trade" | "holding" | "risk_rejected" | "error"; detail: string; side?: FuturesSide;
+  leverage?: number; margin?: string; stop_price?: string }
+export interface FuturesBot { account_id: string; status: "STOPPED" | "RUNNING" | "PAUSED"; symbols: string[]; margin_pct: number; max_leverage: number;
+  started_at: string | null; last_cycle_at: string | null; paused_reason: string | null; interval_seconds: number; horizon_hours: number;
+  stats: { trades: number; open: number; closed: number; wins: number; losses: number; liquidated: number; stopped: number; timed_out: number;
+    net_pnl: Num; fees: Num; avg_return_on_margin: number | null; return_upper: number | null };
+  recent: { at: string; type: string; message: string; results: FuturesBotResult[] }[] }

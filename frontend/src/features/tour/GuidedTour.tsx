@@ -36,6 +36,7 @@ const TOURS: Record<TourName, Step[]> = {
     { title: "Next: futures", body: "Go long or short with leverage, see the real order book and ask the AI futures model.", next: { label: "Show me Futures", tour: "futures", path: "/futures" } },
   ],
   futures: [
+    { target: "futures-bot", title: "The AI futures bot", body: "Press Start and it trades by itself: every 15 minutes it asks the AI model, and opens a position only when the model has a tested edge after fees. Every trade gets a stop-loss and closes after 4 hours. It pauses itself if it starts losing money." },
     { target: "futures-ticket", title: "Long, short and leverage", body: "Long gains when the price rises, short gains when it falls. Leverage multiplies both: at 5x a 1% move is 5% of your margin. Isolated margin means the most you can lose on a position is the margin you put in." },
     { target: "futures-preview", title: "Liquidation price", body: "If the price reaches this level your margin is used up and the position is closed automatically (liquidated). Higher leverage moves it closer to the current price." },
     { target: "order-book", title: "Real liquidity", body: "This is the live order book. Your order is filled level by level, so a bigger order gets a slightly worse average price (slippage), and an order bigger than the book is refused." },
