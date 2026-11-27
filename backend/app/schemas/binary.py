@@ -95,6 +95,8 @@ class BotControl(BaseModel):
     min_confidence: float | None = Field(default=None, ge=0.5, lt=1)
     edge_margin: float | None = Field(default=None, ge=0, le=0.2)
     require_futures_agreement: bool | None = None
+    scan: bool | None = None
+    risk_mode: Literal["careful", "practice"] | None = None
 
 
 class BotStats(BaseModel):
@@ -120,6 +122,8 @@ class BotRead(BaseModel):
     edge_margin: float
     guard_min_contracts: int
     require_futures_agreement: bool = True
+    scan: bool = False
+    risk_mode: str = "careful"
     started_at: datetime | None
     last_cycle_at: datetime | None
     paused_reason: str | None

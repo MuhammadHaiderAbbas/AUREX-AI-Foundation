@@ -42,7 +42,7 @@ export const useFuturesBot = (accountId: string | undefined) =>
 export function useFuturesBotControl() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; margin_pct?: number; max_leverage?: number }) =>
+    mutationFn: (v: { account_id: string; action: "start" | "pause" | "stop"; symbols?: string[]; margin_pct?: number; max_leverage?: number; scan?: boolean; risk_mode?: "careful" | "practice" }) =>
       api<FuturesBot>("/futures/bot", { method: "POST", json: v }),
     // a status poll already in flight must not overwrite the new state with the old one
     onMutate: (v) => qc.cancelQueries({ queryKey: ["futures", v.account_id, "bot"] }),

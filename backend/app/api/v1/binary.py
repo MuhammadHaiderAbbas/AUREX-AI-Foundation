@@ -106,7 +106,8 @@ async def _bot_read(db: AsyncSession, account_id: uuid.UUID) -> BotRead:
     return BotRead(
         account_id=bot.account_id, status=bot.status, symbols=bot.symbols, expiry_seconds=bot.expiry_seconds,
         stake_pct=bot.stake_pct, min_confidence=bot.min_confidence, edge_margin=bot.edge_margin,
-        guard_min_contracts=bot.guard_min_contracts, require_futures_agreement=bot.require_futures_agreement, started_at=bot.started_at, last_cycle_at=bot.last_cycle_at,
+        guard_min_contracts=bot.guard_min_contracts, require_futures_agreement=bot.require_futures_agreement,
+        scan=bot.scan, risk_mode=bot.risk_mode, started_at=bot.started_at, last_cycle_at=bot.last_cycle_at,
         paused_reason=bot.paused_reason, interval_seconds=cycle_interval(bot),
         data_mode=get_settings().market_data_mode, break_even_win_rate=cfg["break_even_win_rate"],
         payout_rate=cfg["payout_rate"], stats=await bot_stats(db, bot), recent=await recent_cycles(db, account_id))
@@ -137,7 +138,7 @@ async def control_binary_bot(data: BotControl, user: User = Depends(current_trad
         if data.expiry_seconds not in EXPIRY_BARS or data.expiry_seconds not in config()["expiries"]:
             raise BusinessRuleViolation(f"expiry_seconds must be one of {sorted(EXPIRY_BARS)}")
         bot.expiry_seconds = data.expiry_seconds
-    for k in ("stake_pct", "min_confidence", "edge_margin", "require_futures_agreement"):
+    for k in ("stake_pct", "min_confidence", "edge_margin", "require_futures_agreement", "scan", "risk_mode"):
         if getattr(data, k) is not None:
             setattr(bot, k, getattr(data, k))
     old = bot.status
@@ -154,7 +155,8 @@ async def control_binary_bot(data: BotControl, user: User = Depends(current_trad
     await AuditService(db).record(ctx, f"binary.bot.{data.action}", resource_type="trading_account", resource_id=acct.id,
                                   details={"symbols": bot.symbols, "expiry_seconds": bot.expiry_seconds, "stake_pct": bot.stake_pct,
                                            "min_confidence": bot.min_confidence, "edge_margin": bot.edge_margin,
-                                           "require_futures_agreement": bot.require_futures_agreement})
+                                           "require_futures_agreement": bot.require_futures_agreement,
+                                           "scan": bot.scan, "risk_mode": bot.risk_mode})
     if data.action == "start":
         await run_bot_cycle(db, acct, bot)
     await db.flush()

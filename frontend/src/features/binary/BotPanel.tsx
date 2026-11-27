@@ -8,8 +8,9 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorBanner, Spinner } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
 import { useBinaryBot, useBotControl, useBotRun } from "@/features/binary/hooks";
+import { RiskModeField } from "@/features/binary/RiskModeField";
 import { cn, formatDateTime, formatMoney, relativeTime } from "@/lib/utils";
-import type { BotCycleResult } from "@/services/api";
+import type { BotCycleResult, RiskMode } from "@/services/api";
 
 const BOT_SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD", "EUR/USD", "GBP/USD", "USD/JPY"];
 const EXPIRIES: [number, string][] = [[60, "1 minute"], [300, "5 minutes"], [900, "15 minutes"], [3600, "1 hour"]];
@@ -41,21 +42,25 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
   const [stake, setStake] = useState("1");
   const [conf, setConf] = useState("0.6");
   const [agree, setAgree] = useState(true);
+  const [scan, setScan] = useState(false);
+  const [mode, setMode] = useState<RiskMode>("careful");
   useEffect(() => {
     if (!b) return;
-    setSymbols(b.symbols); setExpiry(b.expiry_seconds); setStake(String(b.stake_pct)); setConf(String(b.min_confidence)); setAgree(b.require_futures_agreement ?? true);
+    setSymbols(b.symbols); setExpiry(b.expiry_seconds); setStake(String(b.stake_pct)); setConf(String(b.min_confidence)); setAgree(b.require_futures_agreement ?? true); setScan(!!b.scan); setMode(b.risk_mode ?? "careful");
   }, [b?.account_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!b) return <Card><CardBody className="flex h-32 items-center justify-center"><Spinner /></CardBody></Card>;
   const running = b.status === "RUNNING";
-  const start = () => control.mutate({ account_id: accountId, action: "start", symbols, expiry_seconds: expiry, stake_pct: Number(stake), min_confidence: Number(conf), require_futures_agreement: agree });
+  const start = () => control.mutate({ account_id: accountId, action: "start", symbols, expiry_seconds: expiry, stake_pct: Number(stake), min_confidence: Number(conf), require_futures_agreement: agree, scan, risk_mode: mode });
   const s = b.stats;
   const beating = s.win_rate != null && s.win_rate >= b.break_even_win_rate;
   return (
     <Card data-testid="binary-bot">
       <CardHeader title={<span className="flex items-center gap-2"><Bot className="size-4 text-accent" />AI binary bot</span>}
         description={`One button. It trades only when its model beat the break-even rate on data it had not seen${b.require_futures_agreement ? " and the futures model agrees with the direction" : ""}, and pauses itself when it stops winning.`}
-        action={<Badge tone={running ? "positive" : b.status === "PAUSED" ? "warning" : "neutral"} data-testid="bot-status">{b.status}</Badge>} />
+        action={<span className="flex gap-1.5">{b.risk_mode === "practice" && <Badge tone="warning" data-testid="bot-practice">Practice · high risk</Badge>}
+          {b.scan && <Badge tone="info">Scanning all coins</Badge>}
+          <Badge tone={running ? "positive" : b.status === "PAUSED" ? "warning" : "neutral"} data-testid="bot-status">{b.status}</Badge></span>} />
       <CardBody className="space-y-4">
         <ErrorBanner error={control.error ?? run.error} />
         {b.data_mode !== "coinbase" && b.data_mode !== "live" && (
@@ -102,7 +107,12 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
           <details className="rounded-lg border border-border p-3 text-sm">
             <summary className="cursor-pointer text-xs font-medium text-muted">Bot settings</summary>
             <div className="mt-3 space-y-3">
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Bot instruments">
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={scan} onChange={(e) => setScan(e.target.checked)} />
+                <span><span className="font-medium text-fg">Scan every crypto coin and expiry</span>
+                  <span className="block text-muted">Checks all coins at 1, 5, 15 and 60 minutes (1 and 5 in the browser demo) and trades wherever the test passes. More chances, same rules.</span></span>
+              </label>
+              <div className={cn("flex flex-wrap gap-1.5", scan && "pointer-events-none opacity-40")} role="group" aria-label="Bot instruments">
                 {BOT_SYMBOLS.map((x) => {
                   const on = symbols.includes(x);
                   return <button key={x} type="button" aria-pressed={on} onClick={() => setSymbols(on ? symbols.filter((y) => y !== x) : [...symbols, x])}
@@ -115,6 +125,8 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
                 <Field label="Stake % of equity" htmlFor="bot-stake"><Input id="bot-stake" inputMode="decimal" className="num" value={stake} onChange={(e) => setStake(e.target.value)} /></Field>
                 <Field label="Min confidence" htmlFor="bot-conf"><Input id="bot-conf" inputMode="decimal" className="num" value={conf} onChange={(e) => setConf(e.target.value)} /></Field>
               </div>
+              <RiskModeField value={mode} onChange={setMode}
+                practiceNote="Trades the model's best guess whenever it is at least 55% sure, even without a proven edge. Stake capped at 1% of equity." />
               <label className="flex items-start gap-2 text-xs">
                 <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
                 <span><span className="font-medium text-fg">Only trade when the futures model agrees</span>

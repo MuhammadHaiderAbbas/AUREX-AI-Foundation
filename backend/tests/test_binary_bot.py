@@ -282,3 +282,47 @@ async def test_non_crypto_markets_cannot_be_confirmed(client, monkeypatch):
     r = await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "symbols": ["GBP/USD"], "expiry_seconds": 60})
     res = r.json()["recent"][0]["results"][0]
     assert res["outcome"] == "no_trade" and "crypto only" in res["detail"]
+
+
+def _by_expiry(passing: dict[int, str]):
+    """A fake model: trades only at the given expiries (direction per expiry), honest 'no edge' elsewhere."""
+    async def fake(db, symbol, expiry_seconds, bot=None):
+        d = passing.get(expiry_seconds)
+        return {"trade": d is not None, "direction": d or "HIGHER", "p_up": 0.7, "confidence": 0.7, "holdout_accuracy": 0.66 if d else 0.51,
+                "holdout_lower": 0.6 if d else 0.45, "holdout_n": 200, "folds": 5, "folds_beating": 5, "required_accuracy": 0.576,
+                "expected_return": 0.1, "break_even": 1 / 1.8, "timeframe": "1m", "data_mode": "synthetic", "symbol": symbol,
+                "reason": "edge validated (test)" if d else "no proven edge (test)"}
+    return fake
+
+
+async def test_scan_finds_the_expiry_with_an_edge(client, monkeypatch):
+    botmod._sig_cache.clear()
+    monkeypatch.setattr(botmod, "signal_for", _by_expiry({900: "HIGHER"}))
+    monkeypatch.setattr(botmod, "scan_symbols", lambda db: _aw(["BTC-USD"]))
+    h, aid = await small_account(client, email="scan1@example.com")
+    set_price("BTC-USD", "50000", spread="0")
+    b = (await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "scan": True})).json()
+    assert b["scan"] is True and b["stats"]["contracts"] == 1
+    r = b["recent"][0]["results"][0]
+    assert r["outcome"] == "opened" and r["expiry_seconds"] == 900 and r["detail"].startswith("15m expiry")
+
+
+async def _aw(v):
+    return v
+
+
+async def test_practice_mode_trades_a_guess_with_a_capped_stake(client, monkeypatch):
+    botmod._sig_cache.clear()
+    monkeypatch.setattr(botmod, "signal_for", _by_expiry({}))           # no edge anywhere
+    h, aid = await small_account(client, email="practice1@example.com", balance="1000")
+    set_price("BTC-USD", "50000", spread="0")
+    b = (await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "symbols": ["BTC-USD"],
+                                                                 "expiry_seconds": 60})).json()
+    assert b["stats"]["contracts"] == 0                                   # careful: no edge, no trade
+    await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "stop"})
+    b = (await client.post(f"{API}/binary/bot", headers=h, json={"account_id": aid, "action": "start", "risk_mode": "practice",
+                                                                 "stake_pct": 3})).json()
+    r = b["recent"][0]["results"][0]
+    assert b["risk_mode"] == "practice" and r["outcome"] == "opened" and "NO proven edge" in r["detail"]
+    assert float(r["stake"]) == 10.0                                      # capped at 1% of £1,000, not 3%
+    assert r["signal"]["mode"] == "practice"

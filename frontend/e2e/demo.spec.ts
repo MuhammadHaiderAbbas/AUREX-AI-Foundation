@@ -115,6 +115,15 @@ test("static demo: paper futures with an order book, liquidation price and the A
   await expect(page.getByTestId("futures-bot-log")).toContainText(/No trade|Opened|Risk rejected/);
   await bot.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByTestId("futures-bot-status")).toHaveText("Stopped");
+
+  // practice (high-risk) mode is opt-in and clearly labelled; it explains each guess
+  await bot.getByLabel("Practice: high risk").check();
+  await expect(bot.getByRole("note")).toContainText("Expect to lose paper money");
+  await bot.getByRole("button", { name: "Start bot" }).click();
+  await expect(page.getByTestId("futures-bot-practice")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("futures-bot-log")).toContainText(/practice mode|edge validated/, { timeout: 60_000 });
+  await bot.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByTestId("futures-bot-status")).toHaveText("Stopped");
 });
 
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {

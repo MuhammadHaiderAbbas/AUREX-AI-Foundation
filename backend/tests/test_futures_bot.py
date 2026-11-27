@@ -14,7 +14,7 @@ from tests.test_trading import fake_quotes, set_price  # noqa: F401  (autouse fi
 
 def _signal(trade=True, direction="LONG", lev=4, stop=2.0):
     async def fake(db, symbol):
-        return {"trade": trade, "direction": direction if trade else None, "p_up": 0.62, "confidence": 0.62, "trades": 80, "hit_rate": 0.56,
+        return {"trade": trade, "direction": direction, "p_up": 0.62, "confidence": 0.62, "trades": 80, "hit_rate": 0.56,
                 "mean_return": 0.004, "return_lower": 0.001, "folds": 5, "folds_profitable": 4, "suggested_leverage": lev,
                 "stop_distance_pct": stop, "reason": "edge validated (test)" if trade else "no proven edge after costs (test)"}
     return fake
@@ -123,3 +123,22 @@ async def test_controls_and_worker_cycle(client, monkeypatch):
     assert (await client.post(f"{API}/futures/bot", headers=h, json={"account_id": aid, "action": "stop"})).json()["status"] == "STOPPED"
     bad = await client.post(f"{API}/futures/bot", headers=h, json={"account_id": aid, "action": "start", "max_leverage": 11})
     assert bad.status_code == 422
+
+
+async def test_practice_mode_and_scan(client, monkeypatch):
+    monkeypatch.setattr(fbot, "signal_for", _signal(trade=False, direction="SHORT", lev=5))   # no proven edge, but a direction
+
+    async def two(db):
+        return ["BTC-USD", "ETH-USD"]
+    monkeypatch.setattr(fbot, "scan_symbols", two)
+    h, aid = await small_account(client, email="fbot6@example.com")
+    set_price("BTC-USD", "50000", spread="0")
+    set_price("ETH-USD", "2500", spread="0")
+    b = await _start(client, h, aid, scan=True)
+    assert b["scan"] is True and b["stats"]["trades"] == 0 and len(b["recent"][0]["results"]) == 2    # careful: no trades
+    await client.post(f"{API}/futures/bot", headers=h, json={"account_id": aid, "action": "stop"})
+    b = await _start(client, h, aid, risk_mode="practice", margin_pct=10, max_leverage=5)
+    rows = await _open_bot_rows(client, h, aid)
+    assert b["risk_mode"] == "practice" and len(rows) == 2
+    assert all(r["side"] == "SHORT" and r["leverage"] == 2 and D(r["margin"]) == D("2.00") for r in rows)   # capped: 2x, 2% margin
+    assert "NO proven edge" in b["recent"][0]["results"][0]["detail"]

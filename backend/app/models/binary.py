@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     text,
     true,
 )
@@ -105,6 +106,10 @@ class BinaryBot(Timestamps, Base):
     # trade only when the AI futures model (4-hour horizon) points the same way: a trend filter
     require_futures_agreement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
                                                             server_default=true())
+    # scan: every crypto market and expiry (1m-1h), trading wherever the edge test passes
+    scan: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    # careful: proven edge only; practice: the model's best guess with capped stakes (high risk, labelled)
+    risk_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="careful", server_default="careful")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_cycle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paused_reason: Mapped[str | None] = mapped_column(Text)

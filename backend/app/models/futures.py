@@ -2,7 +2,21 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+    false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, Timestamps, UUIDPk
@@ -76,6 +90,8 @@ class FuturesBot(Timestamps, Base):
     symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     margin_pct: Mapped[float] = mapped_column(Float, nullable=False, default=5.0)
     max_leverage: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    scan: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    risk_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="careful", server_default="careful")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_cycle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paused_reason: Mapped[str | None] = mapped_column(Text)

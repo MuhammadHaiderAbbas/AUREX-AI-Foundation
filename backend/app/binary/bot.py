@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.binary.service import BinaryRequest, BinaryService, config
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.market.service import MarketService
+from app.market.service import TIMEFRAMES, MarketService
 from app.ml.features import WARMUP, build_dataset, latest_features
 from app.models import BinaryBot, BinaryContract, BinaryStatus, RiskEvent, TradingAccount, User
 from app.risk.service import RiskService
@@ -142,6 +142,8 @@ def compute_signal(times: list[datetime], high: list[float], low: list[float], c
 
 def cycle_interval(bot: BinaryBot) -> float:
     """Short contracts need frequent cycles or the bot sits idle between them."""
+    if bot.scan:
+        return float(get_settings().binary_bot_interval_seconds)
     return min(get_settings().binary_bot_interval_seconds, max(10.0, bot.expiry_seconds / 3))
 
 
@@ -156,6 +158,70 @@ async def signal_for(db: AsyncSession, symbol: str, expiry_seconds: int, bot: Bi
                          min_confidence=bot.min_confidence if bot else 0.6, edge_margin=bot.edge_margin if bot else 0.02)
     return {**sig, "symbol": inst.symbol, "expiry_seconds": expiry_seconds, "timeframe": tf, "bars": len(bars),
             "data_mode": get_settings().market_data_mode}
+
+
+SCAN_EXPIRIES = [60, 300, 900, 3600]
+PRACTICE_MAX_STAKE_PCT = 1.0
+PRACTICE_CONFIDENCE = 0.55      # practice trades the model's lean from 55% (or the bot's own lower minimum)
+_sig_cache: dict[tuple, tuple[Any, dict[str, Any]]] = {}
+
+
+async def scan_symbols(db: AsyncSession) -> list[str]:
+    """Every live crypto market (PAX Gold excluded: it tracks gold, not crypto)."""
+    from app.models import Instrument
+    rows = await db.scalars(select(Instrument.symbol).where(Instrument.asset_class == "CRYPTO", Instrument.is_active.is_(True),
+                                                            Instrument.symbol != "PAXG-USD").order_by(Instrument.symbol))
+    return list(rows)
+
+
+async def cached_signal(db: AsyncSession, symbol: str, expiry_seconds: int, bot: BinaryBot) -> dict[str, Any]:
+    """signal_for, reused until a new bar arrives (scanning many markets and expiries every cycle)."""
+    tf, _ = EXPIRY_BARS[expiry_seconds]
+    key = (symbol, expiry_seconds, bot.min_confidence, bot.edge_margin)
+    now = datetime.now(UTC)
+    bucket = int(now.timestamp() // TIMEFRAMES[tf])
+    hit = _sig_cache.get(key)
+    if hit and hit[0] == bucket:
+        return hit[1]
+    sig = await signal_for(db, symbol, expiry_seconds, bot)
+    _sig_cache[key] = (bucket, sig)
+    return sig
+
+
+def practice_call(sig: dict[str, Any], bot: BinaryBot) -> dict[str, Any]:
+    """Practice (high risk): trade the model's best guess when it is confident enough, with no proven edge."""
+    if sig.get("p_up") is None or sig["trade"]:
+        return sig                                  # a validated edge is traded as usual
+    conf, acc, be = sig["confidence"], sig.get("holdout_accuracy"), sig["break_even"]
+    tested = f"tested hit rate {acc:.1%}" if acc is not None else "no tested hit rate yet"
+    bar = min(bot.min_confidence, PRACTICE_CONFIDENCE)
+    if conf < bar:
+        return {**sig, "trade": False, "reason": f"practice mode: model only {conf:.0%} sure (needs {bar:.0%})"}
+    return {**sig, "trade": True, "reason": f"practice mode, NO proven edge: model {conf:.0%} sure {sig['direction']}; {tested} vs {be:.1%} break-even"}
+
+
+async def best_signal(db: AsyncSession, symbol: str, expiries: list[int], bot: BinaryBot, practice: bool) -> tuple[dict | None, str]:
+    """The best tradable call across the expiries tried (strongest evidence first), or the most informative non-trade."""
+    found: list[dict[str, Any]] = []
+    err = ""
+    for e in expiries:
+        try:
+            sig = await (cached_signal(db, symbol, e, bot) if len(expiries) > 1 else signal_for(db, symbol, e, bot))
+        except AppError as ex:
+            err = ex.message
+            continue
+        sig = {**sig, "expiry_seconds": e}
+        found.append(practice_call(sig, bot) if practice else sig)
+    if not found:
+        return None, err or "no market data"
+    trades = [s for s in found if s["trade"]]
+    pool = trades or found
+    best = max(pool, key=lambda s: (s.get("holdout_lower") or 0, s.get("confidence") or 0))
+    if len(expiries) > 1 and not trades:
+        best = {**best, "reason": f"no expiry passed ({len(found)} tried); best: {best['expiry_seconds'] // 60}m, {best['reason']}"}
+    elif len(expiries) > 1:
+        best = {**best, "reason": f"{best['expiry_seconds'] // 60}m expiry: {best['reason']}"}
+    return best, ""
 
 
 FUTURES_SIDE = {"HIGHER": "LONG", "LOWER": "SHORT"}
@@ -254,20 +320,23 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: BinaryBot) 
 
     user = await db.get(User, acct.owner_id)
     svc = BinaryService(db)
-    for symbol in bot.symbols:
+    practice = bot.risk_mode == "practice"
+    symbols = await scan_symbols(db) if bot.scan else bot.symbols
+    expiries = SCAN_EXPIRIES if bot.scan else [bot.expiry_seconds]
+    for symbol in symbols:
         open_here = await db.scalar(select(func.count()).select_from(BinaryContract).where(
             BinaryContract.account_id == acct.id, BinaryContract.source == "bot", BinaryContract.symbol == symbol,
             BinaryContract.status == BinaryStatus.OPEN))
         if open_here:
             out["results"].append({"symbol": symbol, "outcome": "waiting", "detail": "a bot contract on this instrument is still open"})
             continue
-        try:
-            sig = await signal_for(db, symbol, bot.expiry_seconds, bot)
-        except AppError as e:
-            out["results"].append({"symbol": symbol, "outcome": "error", "detail": e.message})
+        sig, err = await best_signal(db, symbol, expiries, bot, practice)
+        if sig is None:
+            out["results"].append({"symbol": symbol, "outcome": "error", "detail": err})
             continue
         brief = {k: sig.get(k) for k in ("p_up", "confidence", "holdout_accuracy", "holdout_lower", "holdout_n", "folds", "folds_beating", "required_accuracy", "expected_return",
-                                     "timeframe", "data_mode")}
+                                     "timeframe", "data_mode", "expiry_seconds")}
+        brief["mode"] = bot.risk_mode
         if not sig["trade"]:
             out["results"].append({"symbol": symbol, "outcome": "no_trade", "detail": sig["reason"], "signal": brief})
             continue
@@ -279,15 +348,16 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: BinaryBot) 
                 continue
             sig = {**sig, "reason": f"{sig['reason']}; {why}"}
         summary = await svc.trading.summary(acct, take_snapshot=False)
-        stake = (summary["equity"] * Decimal(str(bot.stake_pct)) / 100).quantize(CENT, rounding=ROUND_DOWN)
+        stake_pct = min(bot.stake_pct, PRACTICE_MAX_STAKE_PCT) if practice else bot.stake_pct
+        stake = (summary["equity"] * Decimal(str(stake_pct)) / 100).quantize(CENT, rounding=ROUND_DOWN)
         stake = max(stake, Decimal(config()["minimum_stake"]))    # small accounts stake the minimum; the gate still caps it
         try:
             c, _ = await svc.open(user, BinaryRequest(
-                account_id=acct.id, symbol=symbol, direction=sig["direction"], stake=stake, expiry_seconds=bot.expiry_seconds,
+                account_id=acct.id, symbol=symbol, direction=sig["direction"], stake=stake, expiry_seconds=sig["expiry_seconds"],
                 client_id=f"bot-{uuid.uuid4().hex}",
                 source="bot", signal={**brief, "reason": sig["reason"]}))
             out["results"].append({"symbol": symbol, "outcome": "opened", "contract_id": str(c.id), "direction": c.direction,
-                                   "stake": str(c.stake), "detail": sig["reason"], "signal": brief})
+                                   "stake": str(c.stake), "expiry_seconds": c.expiry_seconds, "detail": sig["reason"], "signal": brief})
         except AppError as e:
             out["results"].append({"symbol": symbol, "outcome": "risk_rejected", "detail": e.message, "signal": brief})
     n = sum(r["outcome"] == "opened" for r in out["results"])

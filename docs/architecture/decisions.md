@@ -614,3 +614,19 @@ bars, with fake 30% jumps where the two series met, and the models had learned t
 real data the same models are at 48–54%, below the binary break-even (55.6%) and negative after costs
 for futures. A server that ever ran on simulated prices, or fell back to them, would have had the
 same problem.
+
+## ADR-054 Bots: scan all crypto markets, and an opt-in high-risk practice mode
+**Decision.** Both bots get two settings (migration 0022).
+- **Scan** (off by default). The bot checks every crypto market (PAX Gold excluded). The binary bot
+  also tries every expiry (1, 5, 15 and 60 minutes on the server; 1 and 5 minutes in the browser
+  demo, to limit Coinbase downloads) and trades the one with the strongest evidence. The rules are
+  unchanged. Binary signals are reused until a new bar arrives.
+- **Risk mode.** `careful` (the default) trades only a proven edge. `practice` (labelled "high
+  risk" in the UI) trades the model's direction from 55% confidence, or the bot's own lower
+  minimum, even without a proven edge. Its sizes are capped: binary stakes at 1% of equity, futures
+  margin at 2% and leverage at 2x. Every reason is marked "NO proven edge" with the tested hit rate
+  or return. The risk engine, the futures-agreement filter, stop-loss and time exits, and the edge
+  guards all still apply, so a losing practice bot pauses itself.
+**Why.** The product owner wanted the bots to trade more. On clean real data the models are at
+coin-flip level, so forcing trades cannot make money. Scanning finds every real chance that does
+exist. Practice mode lets people watch the bots trade, at small and clearly labelled risk.
