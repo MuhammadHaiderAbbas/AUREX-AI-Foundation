@@ -21,7 +21,7 @@ async def test_edit_name_and_export(client):
 async def test_close_account(client):
     h = await auth_headers(client, email="leaver@example.com")
     await client.post(f"{API}/accounts", headers=h, json={"name": "Mine"})
-    assert (await client.post(f"{API}/users/me/close", headers=h, json={"password": "wrong-password"})).status_code == 403
+    assert (await client.post(f"{API}/users/me/close", headers=h, json={"password": "wrong-password"})).status_code == 403  # pragma: allowlist secret
     assert (await client.post(f"{API}/users/me/close", headers=h, json={"password": PASSWORD})).status_code == 204
     assert (await client.get(f"{API}/accounts", headers=h)).status_code == 401          # sessions revoked
     assert (await login(client, email="leaver@example.com")).status_code == 401           # personal details removed
