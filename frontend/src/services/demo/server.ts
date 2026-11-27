@@ -15,6 +15,7 @@ import * as ml from "./ml";
 import * as bt from "./backtest";
 import * as risk from "./risk";
 import * as bbot from "./binarybot";
+import * as coachmod from "./coach";
 import * as live from "./live";
 import * as an from "./analytics";
 import * as totp from "./totp";
@@ -972,10 +973,10 @@ function getBot(s: State, accountId: string): DBot {
 async function botSignal(symbol: string, expiry: number, bot?: DBot) {
   const [tf, horizon] = bbot.EXPIRY_BARS[expiry]!;
   const inst = findInst(symbol);
-  await live.ensureCandles(inst.symbol, tf, 600);
-  const bars = mkt.candles(inst, tf, 600).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
+  await live.ensureCandles(inst.symbol, tf, 3000);
+  const bars = mkt.candles(inst, tf, 3000).map((b) => ({ t: b.open_time, h: +b.high, l: +b.low, c: +b.close }));
   const sig = bbot.computeSignal(bars, horizon, BINARY_PAYOUT, bot?.min_confidence ?? 0.6, bot?.edge_margin ?? 0.02);
-  return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: mkt.candleSource(inst, tf, 600) };
+  return { ...sig, symbol: inst.symbol, expiry_seconds: expiry, timeframe: tf, bars: bars.length, data_mode: mkt.candleSource(inst, tf, 3000) };
 }
 function botStats(s: State, bot: DBot) {
   const rows = (s.binaries ?? []).filter((c) => c.account_id === bot.account_id && c.source === "bot" && (!bot.started_at || c.opened_at >= bot.started_at));
@@ -993,6 +994,11 @@ async function botCycle(s: State, a: DAccount, bot: DBot) {
   const block = blockReason(s, p) ?? (p.binary_enabled === false ? "binary trading is switched off in the Risk Centre" : null);
   if (block) { pauseBot(s, a.id, block); out.skipped = block; return out; }
   const st = botStats(s, bot), be = 1 / (1 + BINARY_PAYOUT);
+  const decided = st.won + st.lost, upper = decided ? bbot.wilson(st.won, decided)[1] : 1;
+  if (decided >= bbot.EARLY_GUARD && upper < be) {
+    const reason = `edge guard: won ${st.won} of ${decided}; even the best case of that record (${(upper * 100).toFixed(1)}%) is below the ${(be * 100).toFixed(1)}% break-even`;
+    pauseBot(s, a.id, reason); out.skipped = reason; return out;
+  }
   if (st.won + st.lost >= bot.guard_min_contracts && st.win_rate! < be) {
     const reason = `edge guard: won ${st.won} of ${st.won + st.lost} (${(st.win_rate! * 100).toFixed(1)}%), below the ${(be * 100).toFixed(1)}% break-even rate`;
     pauseBot(s, a.id, reason); out.skipped = reason; return out;
@@ -1755,6 +1761,38 @@ const routes: [string, RegExp, Handler][] = [
     const { user } = authUser(c);
     for (const a of c.s.alerts ?? []) if (a.user_id === user.id && a.status === "TRIGGERED" && !a.seen_at) a.seen_at = now();
     return new Response(null, { status: 204 });
+  }],
+  // ---- "explain it to me" coach (builtin engine; Claude runs only on a self-hosted server) ----
+  ["POST", /^\/coach\/ask$/, (c) => {
+    const { user } = authUser(c);
+    const question = String(c.body.question ?? "").trim();
+    if (question.length < 2 || question.length > 500) throw new HttpError(422, "validation_error", "Ask a question of 2 to 500 characters");
+    const accts = c.s.accounts.filter((a) => a.owner_id === user.id && a.status === "ACTIVE");
+    const acct = accts.find((a) => a.id === c.body.account_id) ?? accts[0];
+    const ctx: coachmod.CoachCtx = { account: null, binary: null, last_ai_run: null, closed_trades: [] };
+    if (acct) {
+      const pf = portfolio(c.s, acct) as Record<string, unknown>;
+      const n = (k: string) => Number(pf[k] ?? 0);
+      ctx.account = { name: acct.name, currency: acct.base_currency, equity: n("equity"), cash: n("cash"), unrealised_pnl: n("unrealised_pnl"),
+        realised_pnl: n("realised_pnl"), fees: n("fees"), open_positions: n("open_positions") };
+      const mine = (c.s.binaries ?? []).filter((x) => x.account_id === acct.id).slice(-20);
+      if (mine.length) {
+        const settled = mine.filter((x) => x.status === "WON" || x.status === "LOST"), won = settled.filter((x) => x.status === "WON").length;
+        const bot = getBot(c.s, acct.id);
+        ctx.binary = { payout_rate: BINARY_PAYOUT, break_even: 1 / (1 + BINARY_PAYOUT), won, lost: settled.length - won,
+          net_pnl: settled.reduce((t, x) => t + Number(x.pnl ?? 0), 0), win_rate: settled.length ? won / settled.length : null,
+          win_rate_95: coachmod.winRate95(won, settled.length), bot_status: bot.status, bot_paused_reason: bot.paused_reason, bot_expiry_seconds: bot.expiry_seconds };
+      }
+      ctx.closed_trades = c.s.positions.filter((p) => p.account_id === acct.id && p.status === "CLOSED").slice(-5).reverse()
+        .map((p) => ({ symbol: p.symbol, realised_pnl: Number(p.realised_pnl), fees: Number(p.fees) }));
+    }
+    const run = [...c.s.aiRuns].reverse().find((x) => x.user_id === user.id);
+    if (run) {
+      const fs = [...(run.findings as { agent: string; status: string; direction: number; score: number; summary: string }[])].sort((x, y) => Math.abs(y.score) - Math.abs(x.score));
+      ctx.last_ai_run = { symbol: run.symbol, decision: run.decision, net_score: run.net_score, agreement: run.agreement, reasons: (run.reasons ?? []).slice(0, 5),
+        agents: fs.slice(0, 6).map((f) => ({ agent: f.agent, status: f.status, direction: f.direction, score: f.score, summary: String(f.summary ?? "").slice(0, 300) })) };
+    }
+    return json(200, coachmod.builtin(question, ctx));
   }],
   ["PATCH", /^\/users\/me$/, async (c) => {
     const { user } = authUser(c);

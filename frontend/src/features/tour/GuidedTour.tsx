@@ -23,6 +23,7 @@ const TOURS: Record<TourName, Step[]> = {
     { target: "new-account", title: "Paper accounts", body: "Start with £100, or open more accounts in other currencies or sizes to try different ideas side by side." },
     { target: "alerts-bell", title: "Price alerts", body: "Get told when a market rises above or falls below a price you choose. Alerts you set on the Trade screen show up here, and as a desktop notification if you allow it." },
     { target: "user-menu", title: "Profile, security and this tour", body: "Change your name, turn on two-factor sign-in, download your data, or take this tour again." },
+    { target: "coach", title: "Ask the coach", body: "Not sure why something happened? Ask the coach: “why is my bot losing?”, “why did the AI say no trade?”, or “what is leverage?”. It answers from your own account data." },
     { title: "Next: the Trade screen", body: "See the chart, place a paper trade and set your first price alert.", next: { label: "Show me the Trade screen", tour: "trade", path: "/trade?symbol=BTC-USD" } },
   ],
   trade: [

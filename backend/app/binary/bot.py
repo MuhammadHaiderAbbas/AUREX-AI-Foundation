@@ -18,6 +18,7 @@ will not pass step 3; on the synthetic demo feed (built from smooth cycles) they
 says nothing about real markets. The UI says so next to the start button.
 """
 
+import math
 import uuid
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
@@ -38,14 +39,36 @@ from app.risk.service import RiskService
 # expiry seconds -> (bar timeframe, bars ahead)
 EXPIRY_BARS = {60: ("1m", 1), 300: ("5m", 1), 900: ("15m", 1), 3600: ("1h", 1), 86400: ("1h", 24)}
 DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"]          # real Coinbase prices, 1-minute contracts by default
-HISTORY_BARS = 1000
-MIN_HOLDOUT = 30          # confident out-of-sample predictions needed before trusting the hit rate
+HISTORY_BARS = 3000       # about two days of 1-minute bars
+MIN_HOLDOUT = 60          # confident out-of-sample predictions needed before trusting the hit rate
+MIN_USABLE = 400
+FOLDS = 5
+EARLY_GUARD = 8           # settled contracts after which a clearly losing bot pauses (statistical guard)
 CENT = Decimal("0.01")
 
 
+def wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson interval for a hit rate: how sure we can be, given only n predictions."""
+    if n == 0:
+        return 0.0, 1.0
+    p = hits / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 def compute_signal(times: list[datetime], high: list[float], low: list[float], close: list[float], horizon: int, *,
-                   payout: float, min_confidence: float, edge_margin: float) -> dict[str, Any]:
-    """Pure: fit, validate out of sample, predict the next contract. No I/O."""
+                   payout: float, min_confidence: float, edge_margin: float, folds: int = FOLDS) -> dict[str, Any]:
+    """Pure: walk-forward validate, then predict the next contract. No I/O.
+
+    The bot trades only when ALL of these hold on predictions made out of sample (each fold trained
+    only on earlier bars, with a purge gap):
+      1. at least MIN_HOLDOUT confident predictions in total;
+      2. the 95% lower bound of their hit rate is above break-even (one lucky stretch is not enough);
+      3. the hit rate itself clears break-even plus the safety margin;
+      4. most folds (time periods) beat break-even on their own: the edge is consistent, not one regime;
+      5. today's prediction is at least as confident as the threshold.
+    """
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
@@ -55,44 +78,65 @@ def compute_signal(times: list[datetime], high: list[float], low: list[float], c
     required = break_even + edge_margin
     out: dict[str, Any] = {"break_even": break_even, "required_accuracy": required, "confidence_threshold": threshold,
                            "trade": False, "direction": None, "p_up": None, "confidence": None,
-                           "holdout_accuracy": None, "holdout_n": 0, "train_n": 0, "expected_return": None}
+                           "holdout_accuracy": None, "holdout_lower": None, "holdout_n": 0, "train_n": 0,
+                           "folds": 0, "folds_beating": 0, "expected_return": None}
     if len(close) <= WARMUP + horizon:
-        return {**out, "reason": f"not enough history: 0 usable bars (need 200; have {len(close)} bars)"}
+        return {**out, "reason": f"not enough history: 0 usable bars (need {MIN_USABLE}; have {len(close)} bars)"}
     ds = build_dataset(times, high, low, close, horizon)
     n = len(ds.y)
-    if n < 200:
-        return {**out, "reason": f"not enough history: {n} usable bars (need 200)"}
-    split = int(n * 0.7)
-    tr_end = split - horizon                                    # purge: no training label overlaps the test window
-    if len(set(ds.y[:tr_end])) < 2:
-        return {**out, "reason": "price only moved one way in the training window"}
-    model = make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=500))
-    model.fit(ds.X[:tr_end], ds.y[:tr_end])
-    p_test = model.predict_proba(ds.X[split:])[:, 1]
-    conf_test = np.maximum(p_test, 1 - p_test)
-    sel = conf_test >= threshold
-    hits = ((p_test >= 0.5).astype(int) == ds.y[split:])[sel]
-    acc = float(hits.mean()) if len(hits) else None
-    out.update(holdout_n=int(sel.sum()), holdout_accuracy=acc, train_n=int(tr_end))
+    if n < MIN_USABLE:
+        return {**out, "reason": f"not enough history: {n} usable bars (need {MIN_USABLE})"}
 
-    model.fit(ds.X, ds.y)                                       # refit on everything for today's call
+    def model():
+        return make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=500))
+
+    start = int(n * 0.5)
+    size = (n - start) // folds
+    hits_total, picks_total, fold_rates = 0, 0, []
+    for k in range(folds):
+        s0 = start + k * size
+        e0 = n if k == folds - 1 else s0 + size
+        tr_end = s0 - horizon                                   # purge: no training label overlaps the test block
+        if len(set(ds.y[:tr_end])) < 2:
+            continue
+        m = model().fit(ds.X[:tr_end], ds.y[:tr_end])
+        p = m.predict_proba(ds.X[s0:e0])[:, 1]
+        sel = np.maximum(p, 1 - p) >= threshold
+        hits = ((p >= 0.5).astype(int) == ds.y[s0:e0])[sel]
+        hits_total += int(hits.sum())
+        picks_total += int(sel.sum())
+        if sel.sum() >= 5:
+            fold_rates.append(float(hits.mean()))
+    acc = hits_total / picks_total if picks_total else None
+    lower, _ = wilson_bounds(hits_total, picks_total)
+    beating = sum(r > break_even for r in fold_rates)
+    out.update(holdout_n=picks_total, holdout_accuracy=acc, holdout_lower=lower if picks_total else None,
+               train_n=start - horizon, folds=len(fold_rates), folds_beating=beating)
+
+    final = model().fit(ds.X, ds.y)                             # refit on everything for today's call
     row = latest_features(times, high, low, close)
     if row is None:
         return {**out, "reason": "latest bar has incomplete features"}
-    p = float(model.predict_proba(row.reshape(1, -1))[0, 1])
+    p = float(final.predict_proba(row.reshape(1, -1))[0, 1])
     conf = max(p, 1 - p)
     out.update(p_up=p, confidence=conf, direction="HIGHER" if p >= 0.5 else "LOWER",
                expected_return=(acc * payout - (1 - acc)) if acc is not None else None)
-    if out["holdout_n"] < MIN_HOLDOUT:
-        out["reason"] = f"too few confident out-of-sample predictions to judge ({out['holdout_n']} < {MIN_HOLDOUT})"
+    need_folds = max(3, math.ceil(0.75 * len(fold_rates)))
+    if picks_total < MIN_HOLDOUT:
+        out["reason"] = f"too few confident out-of-sample predictions to judge ({picks_total} < {MIN_HOLDOUT})"
+    elif lower < break_even:
+        out["reason"] = (f"no proven edge: hit rate {acc:.1%} on {picks_total} out-of-sample calls, but the 95% range "
+                         f"starts at {lower:.1%}, below the {break_even:.1%} break-even")
     elif acc < required:
         out["reason"] = f"no validated edge: out-of-sample hit rate {acc:.1%} < {required:.1%} needed"
+    elif beating < need_folds:
+        out["reason"] = f"edge not consistent: only {beating} of {len(fold_rates)} time periods beat break-even (need {need_folds})"
     elif conf < threshold:
         out["reason"] = f"not confident enough now: {conf:.1%} < {threshold:.1%}"
     else:
         out["trade"] = True
-        out["reason"] = (f"edge validated: {acc:.1%} out-of-sample hit rate on {out['holdout_n']} confident calls; "
-                         f"now {conf:.1%} {out['direction']}")
+        out["reason"] = (f"edge validated: {acc:.1%} hit rate (95% range from {lower:.1%}) on {picks_total} out-of-sample calls, "
+                         f"{beating}/{len(fold_rates)} periods above break-even; now {conf:.1%} {out['direction']}")
     return out
 
 
@@ -165,6 +209,15 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: BinaryBot) 
         return out
     stats = await bot_stats(db, bot)
     be = config()["break_even_win_rate"]
+    decided = stats["won"] + stats["lost"]
+    upper = wilson_bounds(stats["won"], decided)[1] if decided else 1.0
+    if decided >= EARLY_GUARD and upper < be:
+        reason = (f"edge guard: won {stats['won']} of {decided}; even the best case of that record "
+                  f"({upper:.1%}) is below the {be:.1%} break-even")
+        pause(risk, bot, reason)
+        out["skipped"] = reason
+        await db.flush()
+        return out
     if stats["won"] + stats["lost"] >= bot.guard_min_contracts and stats["win_rate"] < be:
         reason = (f"edge guard: won {stats['won']} of {stats['won'] + stats['lost']} ({stats['win_rate']:.1%}), "
                   f"below the {be:.1%} break-even rate")
@@ -187,7 +240,7 @@ async def run_bot_cycle(db: AsyncSession, acct: TradingAccount, bot: BinaryBot) 
         except AppError as e:
             out["results"].append({"symbol": symbol, "outcome": "error", "detail": e.message})
             continue
-        brief = {k: sig[k] for k in ("p_up", "confidence", "holdout_accuracy", "holdout_n", "required_accuracy", "expected_return",
+        brief = {k: sig.get(k) for k in ("p_up", "confidence", "holdout_accuracy", "holdout_lower", "holdout_n", "folds", "folds_beating", "required_accuracy", "expected_return",
                                      "timeframe", "data_mode")}
         if not sig["trade"]:
             out["results"].append({"symbol": symbol, "outcome": "no_trade", "detail": sig["reason"], "signal": brief})

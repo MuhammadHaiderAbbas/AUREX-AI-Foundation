@@ -468,3 +468,29 @@ data export and account closure.
   with their own credentials.
 **Why.** The product owner asked for alerts and a beginner tour, and for the admin login to be
 reachable only by link.
+
+## ADR-049 Binary bot trained and gated properly; the "explain it to me" coach
+**Decision.**
+- **Binary bot.** The single 70/30 split is replaced by five-fold purged walk-forward validation on
+  about two days of 1-minute bars (3,000, up from 1,000). It now trades only when:
+  - it has at least 60 confident out-of-sample calls;
+  - the **95% Wilson lower bound** of their hit rate is above break-even;
+  - the hit rate clears break-even plus the safety margin;
+  - at least three quarters of the time periods beat break-even on their own;
+  - today's call is confident enough.
+
+  A statistical early guard pauses a live bot after 8 settled contracts once even the best case of
+  its record (Wilson upper bound) is below break-even. The 20-contract guard still applies. The
+  backend and the demo port are kept in sync.
+- **Coach.** `POST /coach/ask` (trader-only, 60 questions an hour) answers in plain English from
+  the trader's own data: account, recent binary contracts and the bot's state, the last AI desk run
+  with its agents, closed trades and alerts.
+  - Engines: `builtin` (default; deterministic templates and a glossary, also in the demo) or
+    `claude` (`AUREX_COACH_ENGINE=claude`, the server's Anthropic key, Claude Opus 5.5 at low effort
+    with server-side fallbacks, a system prompt limiting it to the supplied facts). Claude falls
+    back to builtin on any API error, refusal or empty answer.
+  - UI: an "Ask the coach" chat with suggested questions, also added to the guided tour.
+**Why.** The bot traded after passing a single lucky test (1 win in 5 contracts on the live
+demo). A confidence bound and consistency across time periods stop that. The coach turns the
+platform's numbers into explanations a beginner can follow, and the Claude key never reaches the
+public demo.
