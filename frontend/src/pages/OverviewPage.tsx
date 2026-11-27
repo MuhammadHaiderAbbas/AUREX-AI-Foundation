@@ -12,6 +12,7 @@ import { CreateAccountDialog } from "@/features/accounts/CreateAccountDialog";
 import { useAccounts, useMyActivity } from "@/features/accounts/hooks";
 import { useLiveQuotes, useWatchlist } from "@/features/markets/hooks";
 import { PortfolioChart } from "@/charts/PortfolioChart";
+import { useAutoTour } from "@/features/tour/GuidedTour";
 import { useLiveEquity } from "@/features/live/stream";
 import { usePortfolio, usePortfolioHistory } from "@/features/trading/hooks";
 import { useRiskOverview } from "@/features/risk/hooks";
@@ -57,6 +58,7 @@ function totalsByCurrency(accounts: TradingAccount[]) {
 }
 
 export function OverviewPage() {
+  useAutoTour("dashboard");
   const { user } = useAuth();
   const accounts = useAccounts();
   const activity = useMyActivity();
@@ -78,12 +80,12 @@ export function OverviewPage() {
           <p className="text-xs uppercase tracking-wider text-subtle">Welcome back</p>
           <h2 className="text-2xl font-semibold tracking-tight">{user?.full_name}</h2>
         </div>
-        <Button onClick={() => setCreating(true)}><Plus />New paper account</Button>
+        <Button data-tour="new-account" onClick={() => setCreating(true)}><Plus />New paper account</Button>
       </div>
 
       <ErrorBanner error={accounts.error} />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-tour="stats">
         <Stat label="Total equity" icon={<Landmark />} className="col-span-2 md:col-span-1"
           value={primary ? formatMoney(primary.equity, primary.ccy) : "—"}
           sub={totals.length > 1 ? totals.slice(1).map((t) => formatMoney(t.equity, t.ccy)).join(" · ") : `${list.length} paper account${list.length === 1 ? "" : "s"}`} />
@@ -101,7 +103,7 @@ export function OverviewPage() {
       </div>
 
       {pf && (history.data?.length ?? 0) + liveEquity.length >= 2 && (
-        <Card>
+        <Card data-tour="equity">
           <CardHeader title={`Live equity · ${pf.account_name}`}
             description={pf.open_positions === 0 && !Number(pf.binary_at_risk ?? 0)
               ? `${formatMoney(pf.equity, pf.currency)} in cash. With no open positions equity cannot move: buy on Trade or open a binary contract to see it tick.`

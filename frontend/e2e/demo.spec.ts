@@ -30,6 +30,44 @@ test("static demo: close my account", async ({ page }) => {
   await expect(page.getByText("Invalid email or password")).toBeVisible();
 });
 
+test("static demo: guided tour and price alerts", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto("login");
+  await page.getByRole("button", { name: "Launch demo", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/?$/);
+  // the tour starts by itself for real visitors; automated browsers start it from the account menu
+  await page.getByTestId("user-menu").click();
+  await page.getByRole("menuitem", { name: "Take the tour" }).click();
+  const tour = page.getByTestId("tour");
+  await expect(tour).toContainText("Welcome to AUREX");
+  for (const title of ["The main menu", "Live prices", "Your account at a glance", "Live equity chart", "Paper accounts", "Price alerts", "Profile, security and this tour", "Next: the Trade screen"]) {
+    await tour.getByRole("button", { name: "Next" }).click();
+    await expect(tour).toContainText(title);
+  }
+  await tour.getByRole("button", { name: "Show me the Trade screen" }).click();
+  await expect(page).toHaveURL(/\/app\/trade/);
+  await expect(page.getByTestId("tour")).toContainText("Pick a market", { timeout: 10_000 });
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("tour")).toHaveCount(0);
+
+  // an alert that triggers at once (BTC is below 10,000,000) and one that waits
+  const panel = page.getByTestId("alert-panel");
+  await panel.getByLabel("Alert when price").selectOption("BELOW");
+  await panel.getByLabel("Alert price").fill("10000000");
+  await panel.getByLabel("Alert note (optional)").fill("e2e trigger");
+  await panel.getByRole("button", { name: "Set alert" }).click();
+  await expect(panel.getByRole("status")).toContainText("Alert set");
+  await panel.getByLabel("Alert when price").selectOption("ABOVE");
+  await panel.getByLabel("Alert price").fill("10000000");
+  await panel.getByRole("button", { name: "Set alert" }).click();
+  await expect(panel.getByTestId("symbol-alerts")).toContainText("Above");
+  await expect(page.getByRole("button", { name: /Price alerts, 1 new/ })).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId("alert-bell").click();
+  await expect(page.getByTestId("alert-triggered").first()).toContainText("BTC-USD fell below 10000000");
+  await page.getByRole("button", { name: /Cancel alert BTC-USD 10000000/ }).click();
+  await expect(page.getByRole("dialog", { name: "Price alerts" })).toContainText("Active (0)");
+});
+
 test("public website: home, markets, product and legal pages, then sign up", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -160,7 +198,9 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("login");
-  await page.getByRole("button", { name: "Explore the admin console" }).click();
+  await expect(page.getByRole("button", { name: /admin/i })).toHaveCount(0);          // no admin entrance on the trader login page
+  await page.goto("admin/login");                                                   // administrators use their own link
+  await page.getByRole("button", { name: "Open the demo admin console" }).click();
   await expect(page).toHaveURL(/\/admin\/?$/);
   await page.goto("app");                                       // administrators do not trade
   await expect(page).toHaveURL(/\/admin\/?$/);
@@ -221,7 +261,7 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   await page.getByRole("button", { name: "Put the site on hold" }).click();
   await expect(page.getByText(/The site is on hold/)).toBeVisible();
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page).toHaveURL(/\/login\/?$/);                     // wait until the session is really gone
+  await expect(page).toHaveURL(/\/admin\/login\/?$/);               // wait until the session is really gone
   await page.goto("./");
   await expect(page.getByRole("status")).toContainText("Upgrading the AI desk");
   await page.goto("login");
@@ -229,7 +269,8 @@ test("static demo: admin console is separate and can put the site on hold", asyn
   // traders are locked out: sign-in is refused with the maintenance message (banner + error) and they stay on the login page
   await expect(page.getByText("Upgrading the AI desk")).toHaveCount(2, { timeout: 30_000 });
   await expect(page).toHaveURL(/\/login\/?$/);
-  await page.getByRole("button", { name: "Explore the admin console" }).click();
+  await page.goto("admin/login");
+  await page.getByRole("button", { name: "Open the demo admin console" }).click();
   await expect(page).toHaveURL(/\/admin\/?$/);
   await page.goto("admin/controls");
   await page.getByRole("button", { name: "Bring the site back online" }).click();

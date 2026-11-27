@@ -1,5 +1,6 @@
 from app.models.accounts import AccountMode, AccountStatus, TradingAccount
 from app.models.ai import AIAgent, AIFinding, AIRun, TradeProposal
+from app.models.alerts import AlertStatus, PriceAlert
 from app.models.audit import AuditLog
 from app.models.backtest import Backtest, StrategyDef
 from app.models.binary import BinaryBot, BinaryContract, BinaryStatus
@@ -13,6 +14,7 @@ from app.models.risk import AutopilotStatus, RiskDecision, RiskEvent, RiskProfil
 from app.models.trading import Execution, Order, OrderEvent, OrderStatus, PortfolioSnapshot, Position
 
 __all__ = [
+    "AlertStatus", "PriceAlert",
     "BinaryBot",
     "BinaryContract",
     "BinaryStatus",
