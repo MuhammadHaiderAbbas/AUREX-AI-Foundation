@@ -11,7 +11,7 @@ import { cn, formatDateTime, formatMoney, relativeTime } from "@/lib/utils";
 import type { BotCycleResult } from "@/services/api";
 
 const BOT_SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD", "EUR/USD", "GBP/USD", "USD/JPY"];
-const EXPIRIES: [number, string][] = [[30, "30 seconds"], [60, "1 minute"], [300, "5 minutes"], [900, "15 minutes"], [3600, "1 hour"]];
+const EXPIRIES: [number, string][] = [[60, "1 minute"], [300, "5 minutes"], [900, "15 minutes"], [3600, "1 hour"]];
 const pct = (v: number | null | undefined, dp = 1) => (v == null ? "—" : `${(v * 100).toFixed(dp)}%`);
 const OUTCOME = {
   opened: ["positive", "Opened"], no_trade: ["neutral", "Skipped"], waiting: ["info", "Waiting"], risk_rejected: ["negative", "Risk rejected"], error: ["warning", "Error"],
@@ -113,12 +113,6 @@ export function BotPanel({ accountId, currency }: { accountId: string; currency:
                 <Field label="Stake % of equity" htmlFor="bot-stake"><Input id="bot-stake" inputMode="decimal" className="num" value={stake} onChange={(e) => setStake(e.target.value)} /></Field>
                 <Field label="Min confidence" htmlFor="bot-conf"><Input id="bot-conf" inputMode="decimal" className="num" value={conf} onChange={(e) => setConf(e.target.value)} /></Field>
               </div>
-              {expiry <= 60 && (
-                <p className="text-[11px] text-subtle" data-testid="short-expiry-note">
-                  Short expiries trade more often, but 30–60 second moves are mostly noise, so the out-of-sample hit rate usually falls.
-                  The bot still trades only while it beats break-even. Live crypto 30-second bars are recorded as they happen:
-                  the first trades need about 2 hours 20 minutes of history.
-                </p>)}
             </div>
           </details>
         )}

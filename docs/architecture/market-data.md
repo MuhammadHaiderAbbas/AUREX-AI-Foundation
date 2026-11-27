@@ -10,7 +10,7 @@ WS   /markets/stream ─►│ staleness · tradability · gap-fill     │
    SyntheticProvider   CoinbaseProvider       LiveFxProvider          AlpacaProvider
    (default, offline)  crypto: WS ticker      FX: Coinbase rates +    US stocks/ETFs
                        quotes, REST candles,  ECB daily (Frankfurter) (free key, IEX)
-                       30s bars recorded      simulated intraday
+                       live ticker quotes     simulated intraday
 ```
 
 ## Instruments
@@ -30,7 +30,7 @@ Early closes are not yet modelled.
 | Mode | Crypto | FX | Stocks / ETFs |
 |---|---|---|---|
 | `synthetic` (default) | synthetic | synthetic | synthetic |
-| `live` | Coinbase Exchange (quotes from the WebSocket feed, REST fallback; 30s bars recorded by the worker leader) | Coinbase exchange rates (tradable, ~1/min upstream), ECB daily history, simulated intraday candles scaled to the live rate (`source: synthetic`) | Alpaca IEX with a key, otherwise synthetic; UK listings synthetic |
+| `live` | Coinbase Exchange (quotes from the WebSocket feed kept open by the worker leader, REST fallback) | Coinbase exchange rates (tradable, ~1/min upstream), ECB daily history, simulated intraday candles scaled to the live rate (`source: synthetic`) | Alpaca IEX with a key, otherwise synthetic; UK listings synthetic |
 
 Set `AUREX_FX_LIVE_RATES=false` to fall back to ECB reference rates only (never tradable).
 

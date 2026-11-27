@@ -183,8 +183,6 @@ class MarketService:
         return timedelta(seconds=tf * limit * factor + tf)
 
     async def fill(self, inst: Instrument, timeframe: str, limit: int) -> int:
-        if timeframe == "30s" and provider_for(inst).name == "coinbase":
-            return 0                    # recorded from the live trade stream (app.market.tickbars), not fetched
         now = datetime.now(UTC)
         tf = TIMEFRAMES[timeframe]
         last = await self.db.scalar(select(func.max(MarketCandle.open_time)).where(

@@ -75,57 +75,13 @@ export const isLiveSymbol = (s: string) => s in LIVE_PRODUCTS;
 export const liveStatus = () => status;
 export function onTick(cb: (symbol: string) => void) { listeners.add(cb); return () => listeners.delete(cb); }
 
-// --- 30-second bars (binary 30s expiry). Coinbase REST candles start at 1 minute and its trade
-// history is far too dense to backfill (BTC prints ~1,000 trades every 20 s), so bars are built
-// here from the live trade stream, kept for the last 600 bars and saved in this browser so a
-// reload keeps them. The first bucket after connecting is partial and dropped; a gap (page
-// closed) breaks the series and the bot only uses the newest unbroken run (see bars30).
-const BAR_S = 30, BAR_KEEP = 600, BAR_STORE = "aurex-demo-bars30";
-type Bar30 = [number, number, number, number, number];           // start (s), open, high, low, close
-const bars30: Record<string, Bar30[]> = (() => {
-  try { return JSON.parse(globalThis.localStorage?.getItem(BAR_STORE) ?? "{}") as Record<string, Bar30[]>; } catch { return {}; }
-})();
-const building: Record<string, Bar30 & { partial?: boolean }> = {};
-let savedAt = 0;
-function save30() {
-  if (Date.now() - savedAt < 15_000) return;
-  savedAt = Date.now();
-  try { globalThis.localStorage?.setItem(BAR_STORE, JSON.stringify(bars30)); } catch { /* storage full or blocked: keep in memory */ }
-}
-function close30(symbol: string, upTo: number) {
-  const cur = building[symbol];
-  if (!cur || cur[0] + BAR_S > upTo) return;
-  const out = (bars30[symbol] ??= []);
-  if (!cur.partial && (!out.length || out[out.length - 1]![0] < cur[0])) out.push([cur[0], cur[1], cur[2], cur[3], cur[4]]);
-  for (let s = cur[0] + BAR_S; s + BAR_S <= upTo; s += BAR_S) out.push([s, cur[4], cur[4], cur[4], cur[4]]);   // quiet buckets
-  const next = Math.floor(upTo / BAR_S) * BAR_S;
-  building[symbol] = [next, cur[4], cur[4], cur[4], cur[4]];
-  if (out.length > BAR_KEEP) out.splice(0, out.length - BAR_KEEP);
-  save30();
-}
-function add30(symbol: string, tMs: number, price: number) {
-  const start = Math.floor(tMs / 1000 / BAR_S) * BAR_S;
-  close30(symbol, start);
-  const cur = building[symbol];
-  if (!cur || cur[0] !== start) {
-    if (cur && start < cur[0]) return;
-    building[symbol] = Object.assign([start, price, price, price, price] as Bar30, { partial: !cur });
-  } else { cur[2] = Math.max(cur[2], price); cur[3] = Math.min(cur[3], price); cur[4] = price; }
-}
-/** Completed 30-second bars, newest unbroken run only (a gap means the page was closed or the feed dropped). */
-export function bars30Sync(symbol: string, limit: number): LiveCandle[] {
-  if (status === "live") close30(symbol, Math.floor(Date.now() / 1000));
-  const all = bars30[symbol] ?? [];
-  let i = all.length - 1;
-  while (i > 0 && all[i]![0] - all[i - 1]![0] <= BAR_S * 1.5) i--;
-  return all.slice(Math.max(i, all.length - limit)).map(([t, o, h, l, c]) => ({ open_time: new Date(t * 1000).toISOString(), open: o, high: h, low: l, close: c, volume: 0 }));
-}
+// Old builds kept 30-second bars here for a 30-second binary expiry (removed): free that storage.
+try { globalThis.localStorage?.removeItem("aurex-demo-bars30"); } catch { /* storage unavailable */ }
 
-function push(symbol: string, tick: LiveTick, fromStream = false) {
+function push(symbol: string, tick: LiveTick) {
   const arr = (ticks[symbol] ??= []);
   const last = arr[arr.length - 1];
   if (last && tick.t < last.t) return;
-  if (fromStream && symbol in LIVE_PRODUCTS) add30(symbol, tick.t, tick.price);
   arr.push(tick);
   const cut = tick.t - TICK_WINDOW_MS;
   let i = 0;
@@ -175,10 +131,9 @@ function connect() {
     if (!symbol) return;
     status = "live";
     push(symbol, { t: m.time ? Date.parse(m.time) : Date.now(), price: +m.price, bid: +(m.best_bid ?? m.price), ask: +(m.best_ask ?? m.price),
-      open24h: m.open_24h ? +m.open_24h : null }, true);
+      open24h: m.open_24h ? +m.open_24h : null });
   };
-  ws.onclose = () => { ws = null; for (const k of Object.keys(building)) delete building[k];   // half-built bars would span the outage
-    setTimeout(connect, Math.min(30_000, 1000 * 2 ** retry++)); };
+  ws.onclose = () => { ws = null; setTimeout(connect, Math.min(30_000, 1000 * 2 ** retry++)); };
   ws.onerror = () => ws?.close();
 }
 
